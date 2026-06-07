@@ -1,0 +1,374 @@
+"""AI 客户端 - 自定义 OpenAI 兼容接口"""
+import json
+import time
+import asyncio
+from typing import AsyncGenerator, Optional
+from openai import AsyncOpenAI
+from app.core.config import settings
+
+
+# 支持的 Provider 类型
+SUPPORTED_PROVIDERS = ["openai", "anthropic", "gemini"]
+
+
+class AIClient:
+    """统一的 AI 调用客户端，支持自定义 OpenAI 兼容接口。
+
+    通过 provider 字段区分厂商：
+    - openai（默认）：走 AsyncOpenAI，兼容 deepseek/moonshot/智谱等所有 OpenAI 兼容接口
+    - anthropic：Claude 系列（通过 openai 兼容代理或直接 anthropic SDK）
+    - gemini：Google Gemini
+    """
+
+    def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
+                 provider: str = "openai", embedding_model: str = None):
+        self.base_url = base_url or settings.AI_BASE_URL
+        self.api_key = api_key or settings.AI_API_KEY
+        self.model = model or settings.AI_MODEL
+        self.provider = (provider or "openai").lower()
+        self.embedding_model = embedding_model or ""
+        self._client = None
+
+    @classmethod
+    async def from_user_config(cls, db, user_id: int) -> "AIClient":
+        """从用户配置创建客户端（查找用户默认 AI 模型）"""
+        try:
+            from app.models.ai_model import AIModelConfig
+            from sqlalchemy import select
+            result = await db.execute(
+                select(AIModelConfig).where(
+                    AIModelConfig.user_id == user_id,
+                    AIModelConfig.is_default == True,
+                )
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                return cls(
+                    base_url=cfg.base_url,
+                    api_key=cfg.api_key,
+                    model=cfg.model,
+                    provider=cfg.provider or cfg.backend_type or "openai",
+                    embedding_model=cfg.embedding_model or "",
+                )
+        except Exception:
+            pass
+        return cls()
+
+    @property
+    def client(self) -> AsyncOpenAI:
+        if self._client is None:
+            import httpx
+            self._client = AsyncOpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key or "dummy-key",
+                timeout=httpx.Timeout(300.0, connect=30.0),  # 读写300秒，连接30秒
+                max_retries=3,  # SDK 层自动重试连接错误
+            )
+        return self._client
+
+    async def chat(
+        self,
+        messages: list[dict],
+        model: str = None,
+        temperature: float = None,
+        top_p: float = None,
+        max_tokens: int = None,
+        response_format: dict = None,
+        tools: list = None,
+        tool_choice: str = None,
+    ) -> dict:
+        """非流式调用（支持 MCP 工具）"""
+        start = time.time()
+        kwargs = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature or settings.AI_TEMPERATURE,
+            "top_p": top_p or settings.AI_TOP_P,
+            "max_tokens": max_tokens or 16384,
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
+        try:
+            resp = await self.client.chat.completions.create(**kwargs)
+            message = resp.choices[0].message
+            content = message.content or ""
+            tool_calls = [tc.model_dump() if hasattr(tc, "model_dump") else tc for tc in (message.tool_calls or [])]
+            usage = resp.usage
+            return {
+                "content": content,
+                "model": resp.model,
+                "input_tokens": usage.prompt_tokens if usage else 0,
+                "output_tokens": usage.completion_tokens if usage else 0,
+                "duration_ms": int((time.time() - start) * 1000),
+                "tool_calls": tool_calls,
+            }
+        except Exception as e:
+            return {
+                "content": "",
+                "error": str(e),
+                "duration_ms": int((time.time() - start) * 1000),
+            }
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        model: str = None,
+        temperature: float = None,
+        top_p: float = None,
+        max_tokens: int = None,
+    ) -> AsyncGenerator[str, None]:
+        """流式调用，yield 每个 token"""
+        kwargs = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature or settings.AI_TEMPERATURE,
+            "top_p": top_p or settings.AI_TOP_P,
+            "max_tokens": max_tokens or 16384,
+            "stream": True,
+        }
+        stream = await self.client.chat.completions.create(**kwargs)
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+    async def chat_json(
+        self,
+        messages: list[dict],
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
+    ) -> dict:
+        """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
+        result = await self.chat(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if result.get("error"):
+            return result
+        content = result["content"].strip()
+
+        # 用原项目的强清洗逻辑：中文标点、未转义引号、markdown、json5 兜底
+        from app.services.json_helper import clean_json_response, parse_json
+        try:
+            cleaned = clean_json_response(content)
+            parsed = parse_json(cleaned)
+            if parsed is not None:
+                result["json"] = parsed
+                return result
+        except Exception as e:
+            parse_error = str(e)
+        else:
+            parse_error = "无法解析 AI 返回的 JSON"
+
+        # 解析失败：统一写入 error，让上层 if result.get("error") 能兜底
+        result["json"] = None
+        result["parse_error"] = parse_error
+        result["error"] = f"AI 返回内容无法解析为 JSON：{parse_error}"
+        return result
+
+    async def chat_json_retry(
+        self,
+        messages: list[dict],
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        max_retries: int = 3,
+    ) -> dict:
+        """带重试的 JSON 调用：解析失败时最多重试 max_retries 次。
+
+        重试策略（移植自 MuMuAINovel call_with_json_retry）：
+        - 仅对「JSON 解析失败」重试；AI 调用本身报错（如 401/网络）不重试。
+        - 每次重试在 messages 末尾追加格式强化提示，并把上次失败内容反馈给 AI。
+        """
+        hint_messages = list(messages)
+        last_result = None
+        for attempt in range(1, max_retries + 1):
+            last_result = await self.chat_json(
+                messages=hint_messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            # 成功（有 json 数据，且无 error）→ 直接返回
+            if last_result.get("json") is not None and not last_result.get("error"):
+                if attempt > 1:
+                    last_result["retries"] = attempt - 1
+                return last_result
+
+            # AI 调用本身的错误
+            # 连接错误（Connection error）也重试，其他错误（401/权限）不重试
+            err_msg = last_result.get("error") or ""
+            is_conn_error = "Connection" in err_msg or "connection" in err_msg or "Timeout" in err_msg
+            if last_result.get("error") and last_result.get("json") is None and not last_result.get("parse_error") and not is_conn_error:
+                return last_result
+            if is_conn_error and attempt < max_retries:
+                await asyncio.sleep(2 * attempt)  # 连接错误退避重试
+                continue
+
+            # JSON 解析失败 → 准备重试（最后一次也跳出）
+            if attempt < max_retries:
+                bad_content = (last_result.get("content") or "")[:500]
+                hint_messages = list(messages) + [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"⚠️ 上次返回的内容无法解析为合法 JSON，请严格只返回纯 JSON（不要 markdown 代码块、"
+                            f"不要解释文字、所有 key 和字符串必须用英文双引号）。\n"
+                            f"上次失败内容预览：\n{bad_content}"
+                        ),
+                    }
+                ]
+        return last_result
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        tool_executor,
+        model: str = None,
+        temperature: float = 0.85,
+        max_tokens: int = 16384,
+        max_rounds: int = 3,
+    ) -> dict:
+        """带工具调用的聊天循环（对标 MuMu _handle_tool_calls）。
+
+        流程：
+        1. 调 chat(messages, tools=tools, tool_choice="auto")
+        2. 如果有 tool_calls → 执行每个工具 → 追加 tool 消息 → 续调
+        3. 最多 max_rounds 轮，最后一轮强制 tool_choice="none"
+        4. 返回最终正文
+
+        Args:
+            messages: 初始消息列表（system + user）
+            tools: OpenAI function calling 格式的工具定义
+            tool_executor: async def(tool_name, arguments_dict) -> str
+            max_rounds: 最大工具调用轮数（默认3）
+        """
+        import json
+        import logging
+        logger = logging.getLogger(__name__)
+
+        current_messages = list(messages)
+
+        for round_num in range(max_rounds):
+            is_last_round = (round_num == max_rounds - 1)
+            tool_choice = "none" if is_last_round else "auto"
+            actual_tools = None if is_last_round else tools
+
+            result = await self.chat(
+                messages=current_messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=actual_tools,
+                tool_choice=tool_choice,
+            )
+
+            if result.get("error"):
+                return result
+
+            tool_calls = result.get("tool_calls") or []
+            content = result.get("content") or ""
+
+            # 没有工具调用 → 返回正文
+            if not tool_calls:
+                return result
+
+            # 有工具调用 → 执行并追加消息
+            logger.info(f"[tools] 第{round_num+1}轮: AI 调用了 {len(tool_calls)} 个工具: {[tc.get('function',{}).get('name','?') for tc in tool_calls]}")
+
+            # 追加 assistant 的 tool_calls 消息
+            current_messages.append({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            })
+
+            # 执行每个工具，追加 tool 结果消息
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                tool_name = func.get("name", "")
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                except Exception:
+                    args = {}
+
+                tool_result = await tool_executor(tool_name, args)
+                current_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": tool_result,
+                })
+
+            # 最后一轮强制输出（tool_choice=none 已设，下一轮循环不会进来了）
+            if is_last_round:
+                # 再调一次拿正文（不带 tools）
+                final = await self.chat(
+                    messages=current_messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return final
+
+        # 兜底
+        return {"content": "", "error": "工具调用超过最大轮数"}
+
+    async def embed(self, texts, model: str = None) -> dict:
+        """调用 embedding API 生成向量（用于记忆向量检索）。
+
+        Args:
+            texts: 单个字符串或字符串列表
+            model: embedding 模型名（默认用 self.embedding_model 或 text-embedding-3-small）
+
+        Returns:
+            {"vectors": [[...], ...], "model": ..., "error": None/str}
+            单条输入时 vectors 仍是 list[list[float]]，调用方取 [0]
+        """
+        import httpx
+        start = time.time()
+        if isinstance(texts, str):
+            inputs = [texts]
+        else:
+            inputs = list(texts)
+        # 批量上限：OpenAI embedding 接口建议单次 ≤ 2048，这里保守 100
+        MAX_BATCH = 100
+        all_vectors = []
+        emb_model = model or self.embedding_model or "text-embedding-3-small"
+        try:
+            for i in range(0, len(inputs), MAX_BATCH):
+                batch = inputs[i:i + MAX_BATCH]
+                resp = await self.client.embeddings.create(
+                    model=emb_model,
+                    input=batch,
+                )
+                all_vectors.extend([d.embedding for d in resp.data])
+            return {
+                "vectors": all_vectors,
+                "model": emb_model,
+                "count": len(all_vectors),
+                "duration_ms": int((time.time() - start) * 1000),
+            }
+        except Exception as e:
+            return {
+                "vectors": [],
+                "model": emb_model,
+                "error": str(e),
+                "duration_ms": int((time.time() - start) * 1000),
+            }
+
+    async def embed_one(self, text: str, model: str = None) -> list[float]:
+        """便捷方法：单条文本转向量，失败返回空列表。"""
+        r = await self.embed(text, model=model)
+        if r.get("error") or not r.get("vectors"):
+            return []
+        return r["vectors"][0]
+
+
+# 全局默认客户端
+default_client = AIClient()

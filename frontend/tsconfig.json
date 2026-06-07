@@ -1,0 +1,4 @@
+{
+  // Nuxt 会在 .nuxt 目录生成自动类型（运行 nuxt prepare / npm install 后产生）
+  "extends": "./.nuxt/tsconfig.json"
+}

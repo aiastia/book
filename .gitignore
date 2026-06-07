@@ -1,0 +1,65 @@
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ===== Python（后端）=====
+backend/venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ===== 数据库（按需保留模板，忽略实际数据）=====
+backend/data/*.db
+backend/data/*.db-journal
+backend/data/*.sqlite
+backend/data/*.sqlite3
+backend/data/chroma_db/
+data/
+
+# ===== Node/Nuxt（前端）=====
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+frontend/.nitro/
+frontend/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== 环境变量 / 密钥 =====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ===== 本地开发日志（dev.sh 产生）=====
+.dev-logs/
+
+# ===== Docker =====
+docker-compose.override.yml
+
+# ===== 构建产物 / 临时 =====
+*.log
+tmp/
+node_modules

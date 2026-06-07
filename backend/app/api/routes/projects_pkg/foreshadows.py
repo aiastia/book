@@ -1,0 +1,306 @@
+"""伏笔 + 剧情分析"""
+import json
+from app.api.routes.projects_pkg.base import *
+
+
+router = make_router()
+
+
+# ============ 伏笔 ============
+@router.get("/{project_id}/foreshadows")
+async def list_foreshadows(project_id: int, status: str = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await get_user_project(db, project_id, user)  # 权限校验
+    service = ForeshadowService(db, project_id)
+    fs_list = await service.list_all(status)
+    return [{
+        "id": f.id, "title": f.title, "content": f.content, "foreshadow_type": f.foreshadow_type,
+        "status": f.status, "source_type": f.source_type,
+        "plant_chapter_number": f.plant_chapter_number, "actual_plant_chapter": f.actual_plant_chapter,
+        "target_resolve_chapter_number": f.target_resolve_chapter_number, "actual_resolve_chapter": f.actual_resolve_chapter,
+        "priority": f.priority,
+    } for f in fs_list]
+
+
+@router.post("/{project_id}/foreshadows")
+async def create_foreshadow(project_id: int, req: ForeshadowCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await get_user_project(db, project_id, user)  # 权限校验
+    service = ForeshadowService(db, project_id)
+    fs = await service.create(req.model_dump())
+    return {"id": fs.id}
+
+
+@router.put("/{project_id}/foreshadows/{foreshadow_id}")
+async def update_foreshadow(project_id: int, foreshadow_id: int, req: ForeshadowCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await get_user_project(db, project_id, user)  # 权限校验
+    service = ForeshadowService(db, project_id)
+    fs = await service.update(foreshadow_id, req.model_dump())
+    if not fs:
+        raise HTTPException(404, "伏笔不存在")
+    return {"ok": True}
+
+
+@router.delete("/{project_id}/foreshadows/{foreshadow_id}")
+async def delete_foreshadow(project_id: int, foreshadow_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await get_user_project(db, project_id, user)  # 权限校验
+    service = ForeshadowService(db, project_id)
+    if not await service.delete(foreshadow_id):
+        raise HTTPException(404, "伏笔不存在")
+    return {"ok": True}
+
+
+@router.post("/{project_id}/foreshadows/plan")
+async def plan_foreshadows(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """AI 自动规划伏笔"""
+    await get_user_project(db, project_id, user)  # 权限校验
+    outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
+    if not outlines:
+        raise HTTPException(400, "请先生成大纲")
+    outlines_data = json.dumps([{
+        "chapter_number": o.chapter_number, "title": o.title, "summary": o.summary,
+        "key_points": o.key_points, "characters": o.characters,
+    } for o in outlines], ensure_ascii=False)
+    chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
+    chars_info = "\n".join([f"- {c.name}({c.role}): {c.personality[:100]}" for c in chars]) or "暂无"
+
+    service = ForeshadowService(db, project_id)
+    ai_client = await AIClient.from_user_config(db, user.id)
+    created = await service.plan_foreshadows_from_outlines(ai_client, outlines_data, chars_info, user_id=user.id)
+    return {"foreshadows": created, "count": len(created)}
+
+
+# ===== #15 伏笔闭环操作 =====
+class PlantReq(BaseModel):
+    chapter_number: int
+    hint_text: str = ""
+
+
+@router.post("/{project_id}/foreshadows/{foreshadow_id}/plant")
+async def plant_foreshadow(
+    project_id: int, foreshadow_id: int, req: PlantReq,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """标记伏笔为已埋入。"""
+    service = ForeshadowService(db, project_id)
+    fs = await service.mark_as_planted(foreshadow_id, req.chapter_number, req.hint_text)
+    if not fs:
+        raise HTTPException(404, "伏笔不存在")
+    return {"ok": True, "status": fs.status}
+
+
+class ResolveReq(BaseModel):
+    chapter_number: int
+    resolution_text: str = ""
+    is_partial: bool = False
+
+
+@router.post("/{project_id}/foreshadows/{foreshadow_id}/resolve")
+async def resolve_foreshadow(
+    project_id: int, foreshadow_id: int, req: ResolveReq,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """标记伏笔为已回收。"""
+    service = ForeshadowService(db, project_id)
+    fs = await service.mark_as_resolved(foreshadow_id, req.chapter_number, req.resolution_text, req.is_partial)
+    if not fs:
+        raise HTTPException(404, "伏笔不存在")
+    return {"ok": True, "status": fs.status}
+
+
+class AbandonReq(BaseModel):
+    reason: str = ""
+
+
+@router.post("/{project_id}/foreshadows/{foreshadow_id}/abandon")
+async def abandon_foreshadow(
+    project_id: int, foreshadow_id: int, req: AbandonReq,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """放弃伏笔。"""
+    service = ForeshadowService(db, project_id)
+    fs = await service.mark_as_abandoned(foreshadow_id, req.reason)
+    if not fs:
+        raise HTTPException(404, "伏笔不存在")
+    return {"ok": True, "status": fs.status}
+
+
+@router.get("/{project_id}/foreshadows/pending-resolve")
+async def pending_resolve(
+    project_id: int, current_chapter: int = 1, lookahead: int = 5,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """获取待回收伏笔（含紧急度）。"""
+    service = ForeshadowService(db, project_id)
+    must = await service.get_must_resolve_foreshadows(current_chapter)
+    upcoming = await service.get_pending_resolve_foreshadows(current_chapter, lookahead)
+    overdue = await service.get_overdue_foreshadows(current_chapter)
+    return {
+        "must_resolve": [_fs_dict(f, current_chapter, service) for f in must],
+        "upcoming": [_fs_dict(f, current_chapter, service) for f in upcoming],
+        "overdue": [_fs_dict(f, current_chapter, service) for f in overdue],
+    }
+
+
+@router.get("/{project_id}/foreshadows/overdue")
+async def overdue_foreshadows(
+    project_id: int, current_chapter: int = 1,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """获取超期伏笔。"""
+    service = ForeshadowService(db, project_id)
+    overdue = await service.get_overdue_foreshadows(current_chapter)
+    return [_fs_dict(f, current_chapter, service) for f in overdue]
+
+
+class SyncReq(BaseModel):
+    chapter_ids: Optional[list[int]] = None
+
+
+@router.post("/{project_id}/foreshadows/sync-from-analysis")
+async def sync_from_analysis(
+    project_id: int, req: SyncReq,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """从剧情分析批量同步伏笔状态。"""
+    service = ForeshadowService(db, project_id)
+    result = await service.sync_from_analysis(project_id, req.chapter_ids, db)
+    return result
+
+
+def _fs_dict(f, current_chapter, service):
+    """伏笔字典（含紧急度）。"""
+    return {
+        "id": f.id, "title": f.title, "content": f.content,
+        "foreshadow_type": f.foreshadow_type, "status": f.status,
+        "plant_chapter_number": f.plant_chapter_number,
+        "actual_plant_chapter": f.actual_plant_chapter,
+        "target_resolve_chapter_number": f.target_resolve_chapter_number,
+        "actual_resolve_chapter": f.actual_resolve_chapter,
+        "priority": f.priority,
+        "urgency_level": service.get_urgency_level(f, current_chapter),
+    }
+
+
+# ============ 剧情分析 ============
+@router.get("/{project_id}/analyses")
+async def list_analyses(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await get_user_project(db, project_id, user)  # 权限校验
+    result = await db.execute(select(PlotAnalysis).where(PlotAnalysis.project_id == project_id).order_by(PlotAnalysis.chapter_number))
+    return [{
+        "id": a.id, "chapter_number": a.chapter_number, "plot_stage": a.plot_stage or "",
+        "hooks": a.hooks, "foreshadows": a.foreshadows, "conflicts": a.conflicts,
+        "conflict_types": a.conflict_types or [],
+        "emotional_curve": a.emotional_curve or {},
+        "quality_scores": a.quality_scores, "suggestions": a.suggestions,
+        "dialogue_ratio": a.dialogue_ratio or 0, "description_ratio": a.description_ratio or 0,
+        "pacing": a.pacing or "",
+    } for a in result.scalars().all()]
+
+
+@router.get("/{project_id}/analyses/{chapter_number}")
+async def get_analysis(project_id: int, chapter_number: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    await get_user_project(db, project_id, user)  # 权限校验
+    a = (await db.execute(select(PlotAnalysis).where(PlotAnalysis.project_id == project_id, PlotAnalysis.chapter_number == chapter_number).order_by(PlotAnalysis.id.desc()))).scalars().first()
+    if not a:
+        raise HTTPException(404, "分析不存在")
+    return {
+        "id": a.id, "chapter_number": a.chapter_number, "plot_stage": a.plot_stage or "",
+        "hooks": a.hooks, "foreshadows": a.foreshadows, "conflicts": a.conflicts,
+        "conflict_types": a.conflict_types or [],
+        "emotion_curve": a.emotion_curve, "emotional_curve": a.emotional_curve or {},
+        "character_states": a.character_states, "organization_states": a.organization_states or [],
+        "key_plot_points": a.key_plot_points, "scenes": a.scenes,
+        "pacing": a.pacing or "",
+        "dialogue_ratio": a.dialogue_ratio or 0, "description_ratio": a.description_ratio or 0,
+        "quality_scores": a.quality_scores, "suggestions": a.suggestions,
+    }
+
+
+# ===== #8 章节阅读器标注 =====
+@router.get("/{project_id}/chapters/{chapter_id}/annotations")
+async def get_annotations(
+    project_id: int, chapter_id: int,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """获取章节标注（用于阅读器高亮，来自剧情分析）。
+
+    返回 {annotations, summary}。标注类型：hook/foreshadow/plot_point/character_event。
+    每个标注含 position（字符偏移）、length、title、content、metadata。
+    """
+    chapter = (await db.execute(
+        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+    )).scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(404, "章节不存在")
+    content = chapter.content or ""
+    analysis = (await db.execute(
+        select(PlotAnalysis).where(
+            PlotAnalysis.chapter_id == chapter_id,
+            PlotAnalysis.project_id == project_id,
+        ).order_by(PlotAnalysis.id.desc())
+    )).scalars().first()
+
+    annotations = []
+    if analysis:
+        # 1. 钩子
+        hooks = analysis.hooks or {}
+        if isinstance(hooks, dict):
+            for htype, htext in hooks.items():
+                if not htext or not isinstance(htext, str):
+                    continue
+                pos = content.find(htext[:20]) if len(htext) > 10 else -1
+                annotations.append({
+                    "type": "hook", "subtype": htype,
+                    "title": f"钩子·{htype}", "content": htext,
+                    "position": max(0, pos), "length": len(htext[:50]) if pos >= 0 else 0,
+                })
+        # 2. 伏笔
+        for fs in (analysis.foreshadows or []):
+            if not isinstance(fs, dict):
+                continue
+            title = fs.get("title", "")
+            detail = fs.get("detail", "")
+            search_text = title or detail
+            pos = content.find(search_text[:15]) if search_text and len(search_text) > 5 else -1
+            annotations.append({
+                "type": "foreshadow",
+                "subtype": fs.get("type", ""),
+                "title": title or "伏笔", "content": detail or title,
+                "position": max(0, pos), "length": len(search_text[:40]) if pos >= 0 else 0,
+                "metadata": {"foreshadow_action": fs.get("type")},
+            })
+        # 3. 关键情节点
+        for pp in (analysis.key_plot_points or []):
+            text = pp if isinstance(pp, str) else (pp.get("event") or pp.get("description") or str(pp))
+            pos = content.find(text[:15]) if text and len(text) > 5 else -1
+            annotations.append({
+                "type": "plot_point", "title": "关键情节", "content": text,
+                "position": max(0, pos), "length": len(text[:40]) if pos >= 0 else 0,
+            })
+        # 4. 角色事件
+        for cs in (analysis.character_states or []):
+            if not isinstance(cs, dict):
+                continue
+            name = cs.get("character_name") or cs.get("character") or ""
+            change = cs.get("mental_change") or cs.get("ability_change") or ""
+            if not name:
+                continue
+            pos = content.find(name)
+            annotations.append({
+                "type": "character_event",
+                "title": f"{name} 状态变化", "content": change or cs.get("status", ""),
+                "position": max(0, pos), "length": len(name) if pos >= 0 else 0,
+                "metadata": {"character": name, "mental_change": change},
+            })
+
+    # 过滤无效位置
+    valid = [a for a in annotations if a["position"] < len(content)]
+
+    summary = {
+        "total": len(valid),
+        "hooks": len([a for a in valid if a["type"] == "hook"]),
+        "foreshadows": len([a for a in valid if a["type"] == "foreshadow"]),
+        "plot_points": len([a for a in valid if a["type"] == "plot_point"]),
+        "character_events": len([a for a in valid if a["type"] == "character_event"]),
+        "has_analysis": analysis is not None,
+    }
+    return {"annotations": valid, "summary": summary}

@@ -1,0 +1,103 @@
+/* ============================================
+   墨语 — Design Tokens
+   配色对标 MuMuAINovel：青蓝主色 + 暖米黄背景
+   ============================================ */
+
+:root {
+  /* — 主色（青蓝 #4D8088，对标 MuMuAINovel） — */
+  --color-primary: #4D8088;
+  --color-primary-light: #6B9CA4;
+  --color-primary-dark: #3A6268;
+  --color-primary-hover: #5A9098;
+
+  /* — 强调色 — */
+  --color-accent: #884d5c;
+  --color-accent-light: #A66B7A;
+  --color-accent-bg: #F5EDEF;
+
+  /* — 信息色 — */
+  --color-info: #4D8088;
+  --color-info-bg: #EAF0F1;
+  --color-info-border: #B8CDD1;
+
+  /* — 状态色 — */
+  --color-success: #52A569;
+  --color-success-bg: #ECF5EF;
+  --color-warning: #D49A4E;
+  --color-warning-bg: #FBF3E8;
+  --color-danger: #C75B5B;
+  --color-danger-bg: #FAEEEE;
+
+  /* — 中性色（暖米黄背景 #F8F6F1） — */
+  --color-bg: #FFFFFF;
+  --color-bg-page: #F8F6F1;
+  --color-bg-sidebar: #FFFFFF;
+  --color-surface: #FFFFFF;
+  --color-fg: #2B2B2B;
+  --color-fg-secondary: #595959;
+  --color-fg-muted: #8C8C8C;
+  --color-border: #E8E4DC;
+  --color-border-light: #F0EDE6;
+  --color-divider: #EEEEEE;
+
+  /* — 排版 — */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 20px;
+  --text-3xl: 24px;
+  --text-4xl: 28px;
+  --text-5xl: 36px;
+  --text-hero: 48px;
+
+  --line-height-tight: 1.3;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.7;
+
+  /* — 间距 — */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* — 圆角 — */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* — 阴影 — */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.16);
+
+  /* — 布局 — */
+  --sidebar-width: 200px;
+  --header-height: 50px;
+  --content-max-width: 1200px;
+
+  /* — Element Plus 主题覆盖 — */
+  --el-color-primary: #4D8088;
+  --el-color-primary-light-3: #6B9CA4;
+  --el-color-primary-light-5: #81C784;
+  --el-color-primary-light-7: #C8E6C9;
+  --el-color-primary-light-9: #EAF0F1;
+  --el-color-primary-dark-2: #3A6268;
+  --el-border-radius-base: 6px;
+  --el-font-size-base: 14px;
+  --el-font-family: var(--font-family);
+}

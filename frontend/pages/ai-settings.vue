@@ -1,0 +1,479 @@
+<script setup lang="ts">
+import { useProjectApi } from '~/composables/useProjectApi'
+import { CheckOutlined } from '@ant-design/icons-vue'
+useHead({ title: 'AI 设置 — 墨语' })
+const msg = useMessage()
+const api = useProjectApi()
+const { data: models, refresh } = await api.listAiModels()
+const showAdd = ref(false)
+const editing = ref<any>(null)
+const form = reactive({
+  id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
+  temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+  backend_type: 'openai' as string,
+  provider: 'openai' as 'openai' | 'anthropic' | 'gemini',
+  embedding_model: '' as string,
+})
+const testing = ref<number | null>(null)
+const testResult = ref<Record<number, string>>({})
+const fetchingModels = ref(false)
+const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
+const activeModelId = ref<number | null>(null)
+const saving = ref(false)
+
+// 状态统计
+const stats = computed(() => {
+  const list = models.value || []
+  const total = list.length
+  const connected = list.filter((_: any) => testResult.value[_.id]?.startsWith('✅')).length
+  return { total, connected }
+})
+
+// 判断 provider
+function getProvider(m: any) {
+  const url = (m.base_url || '').toLowerCase()
+  if (url.includes('openai')) return { name: 'OpenAI', color: '#10a37f', icon: 'O' }
+  if (url.includes('anthropic') || url.includes('claude')) return { name: 'Claude', color: '#d97706', icon: 'C' }
+  if (url.includes('gemini') || url.includes('google')) return { name: 'Gemini', color: '#4285f4', icon: 'G' }
+  if (url.includes('deepseek')) return { name: 'DeepSeek', color: '#4f46e5', icon: 'D' }
+  if (url.includes('moonshot') || url.includes('kimi')) return { name: 'Moonshot', color: '#6366f1', icon: 'M' }
+  return { name: '自定义', color: '#6b7280', icon: '?' }
+}
+
+function openAdd() {
+  editing.value = null
+  Object.assign(form, {
+    id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
+    temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+    backend_type: 'openai', provider: 'openai', embedding_model: '',
+  })
+  remoteModels.value = []
+  showAdd.value = true
+}
+function openEdit(m: any) {
+  editing.value = m
+  Object.assign(form, {
+    ...m, api_key: '',
+    backend_type: m.backend_type || 'openai',
+    provider: m.provider || m.backend_type || 'openai',
+    embedding_model: m.embedding_model || '',
+  })
+  remoteModels.value = []
+  showAdd.value = true
+}
+async function onSave() {
+  saving.value = true
+  try {
+    if (editing.value) {
+      await api.updateAiModel(form.id, { ...form })
+    } else {
+      const { id } = await api.createAiModel({ ...form })
+      if (form.is_default) await api.updateAiModel(id, { is_default: true })
+    }
+    showAdd.value = false
+    await refresh()
+  } catch (e: any) {
+    msg.error('保存失败：' + formatError(e))
+  } finally {
+    saving.value = false
+  }
+}
+async function onDelete(id: number) {
+  if (!await msg.confirm('确认删除此模型配置？')) return
+  try { await api.deleteAiModel(id); await refresh() } catch (e: any) { msg.error('删除失败') }
+}
+async function onTest(id: number) {
+  testing.value = id
+  testResult.value[id] = '测试中…'
+  try {
+    const r = await api.testAiModel(id)
+    testResult.value[id] = `✅ ${r.reply}`
+  } catch (e: any) {
+    testResult.value[id] = `❌ ${formatError(e, '失败')}`
+  } finally { testing.value = null }
+}
+async function onSetDefault(id: number) {
+  try { await api.updateAiModel(id, { is_default: true }); await refresh() } catch (e: any) { msg.error('设置失败') }
+}
+
+/** 从远程 API 获取模型列表 */
+async function fetchModels() {
+  if (!form.base_url || !form.api_key) {
+    msg.warning('请先填写 Base URL 和 API Key')
+    return
+  }
+  fetchingModels.value = true
+  remoteModels.value = []
+  try {
+    const r = await api.fetchRemoteModels(form.base_url, form.api_key, form.provider)
+    remoteModels.value = r.models || []
+    if (remoteModels.value.length === 0) {
+      msg.warning('未获取到可用模型')
+    }
+  } catch (e: any) {
+    msg.error('获取失败：' + formatError(e))
+  } finally {
+    fetchingModels.value = false
+  }
+}
+
+function selectRemoteModel(id: string) {
+  form.model = id
+}
+
+// Provider 元信息
+const providerMeta: Record<string, { label: string; icon: string; defaultUrl: string; defaultModel: string }> = {
+  openai: { label: 'OpenAI 兼容', icon: '🤖', defaultUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
+  anthropic: { label: 'Anthropic Claude', icon: '🧠', defaultUrl: 'https://api.anthropic.com/v1', defaultModel: 'claude-sonnet-4-5' },
+  gemini: { label: 'Google Gemini', icon: '✨', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-2.0-flash' },
+}
+function onProviderChange(p: string) {
+  form.provider = p
+  form.backend_type = p === 'openai' ? 'openai' : p
+  // 自动填充默认 URL 和模型（仅新增时）
+  if (!editing.value) {
+    const meta = providerMeta[p]
+    if (meta) {
+      form.base_url = meta.defaultUrl
+      form.model = meta.defaultModel
+    }
+  }
+  remoteModels.value = []
+}
+
+// Embedding 测试
+const testingEmbed = ref(false)
+const embedResult = ref('')
+async function onTestEmbedding() {
+  if (!form.base_url || !form.api_key) {
+    msg.warning('请先填写 Base URL 和 API Key')
+    return
+  }
+  testingEmbed.value = true
+  embedResult.value = '测试中…'
+  try {
+    const r = await api.testEmbedding(form.base_url, form.api_key, form.embedding_model || 'text-embedding-3-small')
+    embedResult.value = `✅ 向量维度 ${r.dim}，模型 ${r.model}`
+    msg.success('Embedding 接口可用')
+  } catch (e: any) {
+    embedResult.value = `❌ ${formatError(e)}`
+  } finally {
+    testingEmbed.value = false
+  }
+}
+
+// 温度/TopP 转换 (存储0-100整数, 显示0-1浮点)
+const tempDisplay = computed({
+  get: () => (form.temperature / 100).toFixed(2),
+  set: (v: string) => { form.temperature = Math.round(parseFloat(v) * 100) }
+})
+const topPDisplay = computed({
+  get: () => (form.top_p / 100).toFixed(2),
+  set: (v: string) => { form.top_p = Math.round(parseFloat(v) * 100) }
+})
+
+// 默认模型的参数
+const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_default))
+</script>
+
+<template>
+  <PageHeader title="AI 模型设置" />
+  <div class="page-content">
+    <!-- 顶部状态卡片 -->
+    <div class="stats-bar">
+      <a-card hoverable class="stat-card-el">
+        <a-statistic title="已配置模型" :value="stats.total" />
+      </a-card>
+      <a-card hoverable class="stat-card-el">
+        <a-statistic title="连接正常" :value="stats.connected">
+          <template #suffix>
+            <span style="font-size:12px;color:#4D8088;"></span>
+          </template>
+        </a-statistic>
+      </a-card>
+    </div>
+
+    <!-- API 密钥管理 -->
+    <a-card class="section-card">
+      <template #title>
+        <div class="section-header">
+          <h2>API 密钥管理</h2>
+          <a-button type="primary" @click="openAdd">+ 添加模型</a-button>
+        </div>
+      </template>
+      <p class="section-desc">配置各 AI 模型对应的 API 密钥。点击卡片可切换默认模型。</p>
+
+      <div v-if="models && models.length" class="model-cards">
+        <a-card
+          v-for="m in models" :key="m.id"
+          hoverable
+          class="provider-card"
+          :class="{ active: m.is_default }"
+          @click="activeModelId = activeModelId === m.id ? null : m.id"
+        >
+          <div class="provider-left">
+            <div class="provider-icon" :style="{ background: getProvider(m).color }">
+              {{ getProvider(m).icon }}
+            </div>
+            <a-tag
+              :color="testResult[m.id]?.startsWith('✅') ? 'success' : (testResult[m.id]?.startsWith('❌') ? 'error' : 'default')"
+            >
+              {{ testResult[m.id]?.startsWith('✅') ? '已连接' : (testResult[m.id]?.startsWith('❌') ? '异常' : '待测试') }}
+            </a-tag>
+          </div>
+          <div class="provider-info">
+            <div class="provider-name">
+              {{ m.name }}
+              <a-tag v-if="m.is_default" color="success">默认</a-tag>
+            </div>
+            <div class="provider-model">{{ m.model }}</div>
+            <div class="provider-url">{{ m.base_url }}</div>
+          </div>
+          <div class="provider-check" v-if="m.is_default">✓</div>
+          <!-- 操作按钮 -->
+          <div class="provider-actions" v-if="activeModelId === m.id" @click.stop>
+            <a-button v-if="!m.is_default" type="primary" size="small" @click="onSetDefault(m.id)">设为默认</a-button>
+            <a-button size="small" :loading="testing===m.id" @click="onTest(m.id)">
+              {{ testing === m.id ? '测试中...' : '⚡ 测试连接' }}
+            </a-button>
+            <a-button size="small" @click="openEdit(m)">编辑</a-button>
+            <a-button size="small" danger @click="onDelete(m.id)">删除</a-button>
+          </div>
+          <div v-if="testResult[m.id]" class="test-result" :class="{ ok: testResult[m.id].startsWith('✅'), err: testResult[m.id].startsWith('❌') }">
+            {{ testResult[m.id] }}
+          </div>
+        </a-card>
+      </div>
+      <a-empty v-else description="暂无模型配置，点击「添加模型」开始" />
+    </a-card>
+
+    <!-- 默认模型与参数 -->
+    <a-card v-if="models && models.length" class="section-card">
+      <template #title>
+        <h2>默认模型与参数</h2>
+      </template>
+      <p class="section-desc">选择各模型的默认参数，请谨慎设置参数。</p>
+
+      <div class="params-grid">
+        <div class="param-card">
+          <label>默认模型</label>
+          <a-select
+            :value="defaultModel?.id"
+            @change="onSetDefault"
+            style="width:100%;"
+          >
+            <a-select-option v-for="m in models" :key="m.id" :label="m.model + (m.is_default ? ' (默认)' : '')" :value="m.id" />
+          </a-select>
+        </div>
+      </div>
+
+      <!-- 全局参数滑块 -->
+      <div class="global-params">
+        <h3>全局模型参数</h3>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>Temperature（随机性）</label>
+            <span class="slider-value">{{ (defaultModel?.temperature ?? 70) / 100 }}</span>
+          </div>
+          <a-slider :value="(defaultModel?.temperature ?? 70) / 100" :min="0" :max="1" :step="0.01" disabled />
+          <div class="slider-range"><span>0 (精确)</span><span>1 (创造)</span></div>
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>Top P（核采样）</label>
+            <span class="slider-value">{{ (defaultModel?.top_p ?? 90) / 100 }}</span>
+          </div>
+          <a-slider :value="(defaultModel?.top_p ?? 90) / 100" :min="0" :max="1" :step="0.01" disabled />
+          <div class="slider-range"><span>0</span><span>1</span></div>
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>Max Tokens（最大长度）</label>
+            <span class="slider-value">{{ defaultModel?.max_tokens ?? 4096 }}</span>
+          </div>
+          <a-slider :value="defaultModel?.max_tokens ?? 4096" :min="256" :max="16384" :step="256" disabled />
+          <div class="slider-range"><span>512</span><span>128000</span></div>
+        </div>
+      </div>
+    </a-card>
+  </div>
+
+  <!-- 添加/编辑模型弹窗 -->
+  <a-modal
+    v-model:open="showAdd"
+    :title="editing ? '编辑模型' : '添加模型'"
+    width="640px"
+    :maskClosable="false"
+  >
+    <!-- 后端类型选择 -->
+    <a-form layout="vertical">
+      <a-form-item label="AI 厂商（Provider）">
+        <a-radio-group v-model:value="form.provider" button-style="solid" @change="(e:any) => onProviderChange(e.target.value)">
+          <a-radio-button v-for="(meta, key) in providerMeta" :key="key" :value="key">
+            {{ meta.icon }} {{ meta.label }}
+          </a-radio-button>
+        </a-radio-group>
+        <div class="field-hint">
+          <span v-if="form.provider === 'openai'">兼容所有 OpenAI 格式接口（DeepSeek / Moonshot / 智谱 / 自建中转等）。<b>推荐</b></span>
+          <span v-else-if="form.provider === 'anthropic'">Claude 系列（需通过 OpenAI 兼容代理或原生 SDK）。</span>
+          <span v-else-if="form.provider === 'gemini'">Google Gemini 系列。</span>
+        </div>
+      </a-form-item>
+
+      <div class="form-row-2">
+        <a-form-item label="名称 *">
+          <a-input v-model:value="form.name" placeholder="例如：OpenAI / Claude / DeepSeek" />
+        </a-form-item>
+        <a-form-item label="组织 ID">
+          <a-input placeholder="可选" disabled />
+        </a-form-item>
+      </div>
+
+        <div class="form-row-2">
+          <a-form-item label="Base URL *">
+            <a-input v-model:value="form.base_url" :placeholder="providerMeta[form.provider]?.defaultUrl || 'https://api.openai.com/v1'" />
+          </a-form-item>
+          <a-form-item label="API Key">
+            <a-input-password v-model:value="form.api_key" :placeholder="editing ? '已保存（留空不修改）' : 'sk-...'" />
+            <div class="field-hint">{{ editing ? '留空表示不修改原密钥' : '在对应平台获取的 API Key' }}</div>
+          </a-form-item>
+        </div>
+
+        <!-- 获取模型按钮 -->
+        <div class="fetch-models-bar">
+          <a-button :loading="fetchingModels" :disabled="editing && !form.api_key" @click="fetchModels">
+            {{ fetchingModels ? '获取中...' : '🔍 获取可用模型' }}
+          </a-button>
+          <span v-if="editing && !form.api_key" style="font-size:12px;color:#999;">编辑时需重新填写 Key 才能获取</span>
+          <a-tag v-if="remoteModels.length" color="success">找到 {{ remoteModels.length }} 个模型</a-tag>
+        </div>
+
+        <!-- 远程模型列表 -->
+        <div v-if="remoteModels.length" class="remote-models">
+          <div
+            v-for="rm in remoteModels" :key="rm.id"
+            class="remote-model-item"
+            :class="{ selected: form.model === rm.id }"
+            @click="selectRemoteModel(rm.id)"
+          >
+            <span class="rm-id">{{ rm.id }}</span>
+            <CheckOutlined v-if="form.model === rm.id" :style="{ color: '#4D8088' }" />
+          </div>
+        </div>
+
+        <a-form-item label="模型 ID *">
+          <a-input v-model:value="form.model" placeholder="gpt-4o 或从上方列表选择" />
+        </a-form-item>
+
+      <!-- Embedding 模型配置（用于记忆向量检索） -->
+      <a-divider orientation="left">向量检索配置（可选）</a-divider>
+      <a-alert
+        message="用于故事记忆的语义检索。填写后，章节分析提取的记忆将自动向量化，生成新章节时召回相关前情。"
+        type="info" show-icon :closable="false" style="margin-bottom:12px;"
+      />
+      <div class="form-row-2">
+        <a-form-item label="Embedding 模型">
+          <a-input v-model:value="form.embedding_model" placeholder="text-embedding-3-small（留空则不启用向量检索）" />
+        </a-form-item>
+        <a-form-item label=" ">
+          <a-button :loading="testingEmbed" :disabled="!form.base_url || (!form.api_key && !editing)" @click="onTestEmbedding">
+            {{ testingEmbed ? '测试中...' : '🧪 测试 Embedding' }}
+          </a-button>
+        </a-form-item>
+      </div>
+      <div v-if="embedResult" class="test-result" :class="{ ok: embedResult.startsWith('✅'), err: embedResult.startsWith('❌') }">
+        {{ embedResult }}
+      </div>
+
+      <!-- 参数设置 -->
+      <a-divider orientation="left">模型参数</a-divider>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Temperature（随机性）</label>
+          <a-tag color="default">{{ tempDisplay }}</a-tag>
+        </div>
+        <a-slider v-model:value="form.temperature" :min="0" :max="100" :step="1" />
+        <div class="slider-range"><span>0 (精确)</span><span>1 (创造)</span></div>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Top P（核采样）</label>
+          <a-tag color="default">{{ topPDisplay }}</a-tag>
+        </div>
+        <a-slider v-model:value="form.top_p" :min="0" :max="100" :step="1" />
+        <div class="slider-range"><span>0</span><span>1</span></div>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Max Tokens（最大长度）</label>
+          <a-tag color="default">{{ form.max_tokens }}</a-tag>
+        </div>
+        <a-slider v-model:value="form.max_tokens" :min="512" :max="128000" :step="512" />
+        <div class="slider-range"><span>512</span><span>128000</span></div>
+      </div>
+
+      <a-form-item>
+        <a-switch v-model:checked="form.is_default" />
+        <span style="margin-left: 8px;">设为默认模型</span>
+      </a-form-item>
+    </a-form>
+
+    <template #footer>
+      <a-button @click="showAdd = false">取消</a-button>
+      <a-button type="primary" :loading="saving" @click="onSave">保存</a-button>
+    </template>
+  </a-modal>
+</template>
+
+<style scoped>
+.stats-bar{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;}
+.stat-card-el{border-radius:10px;}
+
+.section-card{border-radius:12px;margin-bottom:20px;}
+.section-header{display:flex;justify-content:space-between;align-items:center;width:100%;}
+.section-header h2{font-size:16px;font-weight:600;margin:0;}
+.section-desc{font-size:13px;color:#888;margin-bottom:16px;}
+
+/* 模型卡片 */
+.model-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.provider-card{border:2px solid #e5e7eb;border-radius:10px;cursor:pointer;transition:all .2s;position:relative;}
+.provider-card:hover{border-color:#a5d6a7;box-shadow:0 2px 8px rgba(46,125,50,.1);}
+.provider-card.active{border-color:#4D8088;background:#f1f8e9;}
+.provider-left{display:flex;flex-direction:column;align-items:center;gap:4px;margin-bottom:8px;}
+.provider-icon{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;}
+.provider-info{flex:1;}
+.provider-name{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;}
+.provider-model{font-size:13px;color:#666;margin-top:2px;}
+.provider-url{font-size:12px;color:#999;margin-top:2px;word-break:break-all;}
+.provider-check{position:absolute;right:16px;top:16px;color:#4D8088;font-size:18px;font-weight:700;}
+.provider-actions{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap;padding-top:12px;border-top:1px solid #f0f0f0;}
+.test-result{margin-top:8px;padding:6px 10px;border-radius:6px;font-size:12px;}
+.test-result.ok{background:#EAF0F1;color:#4D8088;}
+.test-result.err{background:#fbe9e7;color:#c62828;}
+
+/* 参数 */
+.params-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;}
+.param-card{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px;}
+.param-card label{display:block;font-size:12px;color:#888;margin-bottom:6px;}
+
+.global-params{margin-top:16px;padding-top:16px;border-top:1px solid #f0f0f0;}
+.global-params h3{font-size:14px;font-weight:600;margin-bottom:16px;}
+.slider-group{margin-bottom:20px;}
+.slider-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+.slider-header label{font-size:13px;color:#555;}
+.slider-value{font-size:13px;font-weight:600;}
+.slider-range{display:flex;justify-content:space-between;font-size:11px;color:#aaa;margin-top:4px;}
+
+/* 弹窗内 */
+.form-row-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.field-hint{font-size:11px;color:#999;margin-top:4px;}
+
+/* 获取模型 */
+.fetch-models-bar{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.remote-models{max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:6px;margin-bottom:12px;}
+.remote-model-item{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f5f5f5;transition:background .15s;}
+.remote-model-item:last-child{border-bottom:none;}
+.remote-model-item:hover{background:#f5f5f5;}
+.remote-model-item.selected{background:#EAF0F1;color:#4D8088;font-weight:500;}
+</style>

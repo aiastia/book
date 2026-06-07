@@ -1,0 +1,135 @@
+/* ============================================
+   墨语 — Shared Components (精简版)
+   按钮/表单/badge/table/pagination 由 Element Plus 提供
+   仅保留布局特有样式
+   ============================================ */
+
+/* — Feature card grid — */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-5);
+}
+
+/* — Upload area — */
+.upload-zone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10);
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--color-border-light);
+}
+
+.upload-zone:hover {
+  border-color: var(--color-primary);
+  background: var(--color-accent-bg);
+}
+
+/* — Toolbar — */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* — Empty state — */
+.empty-state {
+  text-align: center;
+  padding: var(--space-16) var(--space-8);
+}
+
+.empty-state-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--space-4);
+  color: var(--color-fg-muted);
+}
+
+.empty-state-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.empty-state-desc {
+  font-size: var(--text-base);
+  color: var(--color-fg-secondary);
+}
+
+/* — List items — */
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  transition: box-shadow 0.2s;
+}
+
+.list-item:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.list-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.list-item-title {
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--color-fg);
+  margin-bottom: var(--space-1);
+}
+
+.list-item-desc {
+  font-size: var(--text-sm);
+  color: var(--color-fg-secondary);
+}
+
+.list-item-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-4);
+  flex-shrink: 0;
+}
+
+/* — Responsive — */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none;
+  }
+
+  .main-content {
+    margin-left: 0;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar-actions {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
