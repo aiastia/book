@@ -13,8 +13,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 预下载 embedding 模型（构建时下载，运行时无需联网）
-# 模型: BAAI/bge-small-zh-v1.5 (~100MB)，缓存在镜像层
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-zh-v1.5')" || echo "⚠️ 模型预下载失败，运行时会在首次使用时下载"
+# 默认: jina-embeddings-v2-base-zh（768维，~300MB）
+# 备用: bge-small-zh-v1.5（512维，~100MB）
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='jinaai/jina-embeddings-v2-base-zh')" || echo "⚠️ jina 模型预下载失败"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-zh-v1.5')" || echo "⚠️ bge 模型预下载失败"
 
 # 复制代码
 COPY . .

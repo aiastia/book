@@ -13,8 +13,11 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-# 模型配置
-DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"  # 512维，中文专用，ONNX 格式
+# 模型配置（通过环境变量切换）
+# 可选模型：
+#   jinaai/jina-embeddings-v2-base-zh     - 768维，中文专用，~300MB（默认，质量更高）
+#   BAAI/bge-small-zh-v1.5                - 512维，中文专用，~100MB（更轻量更快）
+DEFAULT_MODEL = os.getenv("EMBEDDING_MODEL", "jinaai/jina-embeddings-v2-base-zh")
 
 # 缓存目录（Docker 中通过 volume 持久化，或 Dockerfile 预下载）
 EMBEDDING_CACHE_DIR = os.getenv("EMBEDDING_CACHE_DIR", os.path.expanduser("~/.cache/fastembed"))
@@ -85,8 +88,13 @@ def is_local_available() -> bool:
 
 def get_status() -> dict:
     """获取 embedding 引擎状态（供前端展示）。"""
+    dim_map = {
+        "jinaai/jina-embeddings-v2-base-zh": 768,
+        "BAAI/bge-small-zh-v1.5": 512,
+    }
+    dim = dim_map.get(DEFAULT_MODEL, 768)
     if _model is not None:
-        return {"mode": "local", "model": DEFAULT_MODEL, "dim": 512, "available": True}
+        return {"mode": "local", "model": DEFAULT_MODEL, "dim": dim, "available": True}
     if _init_error is not None:
         return {"mode": "api", "model": "API embedding", "error": _init_error, "available": False}
     return {"mode": "uninitialized", "model": DEFAULT_MODEL, "available": None}

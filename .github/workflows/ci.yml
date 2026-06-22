@@ -1,6 +1,11 @@
 # 墨语 CI/CD - 构建 Docker 镜像并推送到 GHCR
 # 触发条件：push 到 main 分支 或 打 tag
-# 使用：推送代码后自动构建，镜像发布到 ghcr.io/<用户名>/moyu-*
+# 镜像地址：
+#   ghcr.io/aiastia/book/backend:main
+#   ghcr.io/aiastia/book/frontend:main
+# 拉取：
+#   docker pull ghcr.io/aiastia/book/backend:main
+#   docker pull ghcr.io/aiastia/book/frontend:main
 
 name: Build & Push Docker Images
 
@@ -8,10 +13,12 @@ on:
   push:
     branches: [main, master]
     tags: ['v*']
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
+  OWNER: aiastia
+  REPO: book
 
 jobs:
   build-backend:
@@ -32,23 +39,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/backend
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha,prefix=commit-
-
       - name: Build & Push Backend
         uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/backend:main
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -70,23 +68,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/frontend
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=sha,prefix=commit-
-
       - name: Build & Push Frontend
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/frontend:main
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/frontend:latest
           build-args: |
             NUXT_PUBLIC_API_BASE=http://localhost:8000
           cache-from: type=gha
