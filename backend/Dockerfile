@@ -12,17 +12,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 预下载 embedding 模型（构建时下载，运行时无需联网）
-# 默认: jina-embeddings-v2-base-zh（768维，~300MB）
-# 备用: bge-small-zh-v1.5（512维，~100MB）
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='jinaai/jina-embeddings-v2-base-zh')" || echo "⚠️ jina 模型预下载失败"
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-zh-v1.5')" || echo "⚠️ bge 模型预下载失败"
-
 # 复制代码
 COPY . .
 
 # 数据目录
 RUN mkdir -p /app/data/chroma_db
+
+# Embedding 模型说明（不预下载，运行时首次使用自动下载）
+# 模型缓存通过 docker-compose 的 volume 持久化
+# 模型: jina-embeddings-v2-base-zh(~300MB) 或 bge-small-zh-v1.5(~100MB)
+# 如需预下载（离线环境），取消下面注释：
+# RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='jinaai/jina-embeddings-v2-base-zh')"
 
 EXPOSE 8000
 

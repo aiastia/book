@@ -285,6 +285,12 @@ class ChapterService:
         except Exception as e:
             print(f"[chapter_service] 自动剧情分析失败（不影响章节）: {e}", flush=True)
 
+        # 3.5 章节正文按自然段切分入库向量（精细检索）
+        try:
+            await self._index_chapter_chunks(chapter)
+        except Exception as e:
+            print(f"[chapter_service] 正文向量切分失败: {e}", flush=True)
+
     async def _generate_summary(self, chapter: Chapter):
         """自动生成章节摘要"""
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
@@ -468,6 +474,73 @@ class ChapterService:
             self.db.add(analysis)
             await self.db.commit()
             raise RuntimeError("剧情分析数据解析失败：AI 返回的不是合法 JSON 格式")
+
+    async def _index_chapter_chunks(self, chapter: Chapter):
+        """将章节正文按自然段切分为 chunk（400-800字+重叠120字），每个 chunk 存入向量库。
+
+        这样向量检索可以精确定位到"第N章某段"而非整章摘要。
+        每个 chunk 作为一条 StoryMemory（memory_type='chapter_chunk'）入库。
+        """
+        content = chapter.content or ""
+        if len(content.strip()) < 100:
+            return
+
+        from app.services.text_splitter import split_text_to_chunks
+        from app.services.memory_vector_service import MemoryVectorService
+
+        chunks = split_text_to_chunks(content, min_chunk_size=250, max_chunk_size=400, overlap_size=80)
+        if not chunks:
+            return
+
+        # 先删除该章节旧的 chunk 记忆（避免重复）
+        existing = (await self.db.execute(
+            select(StoryMemory).where(
+                StoryMemory.project_id == self.project_id,
+                StoryMemory.chapter_id == chapter.id,
+                StoryMemory.memory_type == "chapter_chunk",
+            )
+        )).scalars().all()
+        for old in existing:
+            await self.db.delete(old)
+        await self.db.commit()
+
+        # 每个 chunk 创建一条记忆 + 向量
+        chunk_memories = []
+        for i, chunk_text in enumerate(chunks):
+            m = StoryMemory(
+                user_id=self.user_id,
+                project_id=self.project_id,
+                chapter_id=chapter.id,
+                chapter_number=chapter.chapter_number,
+                memory_type="chapter_chunk",
+                title=f"第{chapter.chapter_number}章 片段{i+1}/{len(chunks)}",
+                content=chunk_text[:500],
+                importance=0.6,
+                tags=[f"chunk_{i+1}", f"第{chapter.chapter_number}章"],
+            )
+            self.db.add(m)
+            chunk_memories.append(m)
+        await self.db.commit()
+
+        # 批量写入向量
+        if chunk_memories and self.user_id:
+            try:
+                ai_client = await AIClient.from_user_config(self.db, self.user_id)
+                vs = MemoryVectorService(ai_client)
+                for m in chunk_memories:
+                    vid = await vs.add_memory(
+                        user_id=self.user_id, project_id=self.project_id, memory_id=m.id,
+                        content=m.content, memory_type="chapter_chunk",
+                        title=m.title, importance=m.importance,
+                        chapter_number=chapter.chapter_number,
+                    )
+                    if vid:
+                        m.vector_id = vid
+                await self.db.commit()
+                print(f"[chapter_service] 第{chapter.chapter_number}章切分为 {len(chunks)} 个 chunk 并已向量化", flush=True)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[chapter_service] chunk 向量化失败（不影响主流程）: {e}")
 
     async def _update_character_states(self, analysis_data: dict):
         """根据剧情分析结果，自动更新角色的 mental_state（当前心理）。

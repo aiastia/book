@@ -236,10 +236,11 @@ MOYU_DEFAULT_PASSWORD=your-secure-password
 - **向量库**：ChromaDB（本地持久化）
 - **零 API 成本**：完全本地运行，不调外部 API
 - **可切换模型**（通过 `.env` 的 `EMBEDDING_MODEL`）：
-  - `jinaai/jina-embeddings-v2-base-zh`（默认，768维，~300MB，质量更高）
+  - `jinaai/jina-embeddings-v2-base-zh`（默认，768维，~300MB，对长文本理解更好）
   - `BAAI/bge-small-zh-v1.5`（备选，512维，~100MB，更轻量更快）
+- **首次启动自动下载**，Docker 中通过 volume 持久化（重建容器不重复下载）
 - **5 路融合检索**：最近章节 / 语义相关 / 角色相关 / 重要情节 / 未完结伏笔
-- Docker 中两个模型都预下载 + volume 持久化缓存
+- 模型不频繁更新（固定版本），如需离线部署可在 Dockerfile 中取消预下载注释
 
 ### 后台任务
 
