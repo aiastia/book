@@ -2,12 +2,12 @@
 
 使用 BAAI/bge-small-zh-v1.5（512维，中文专用，ONNX 格式）。
 - 首次加载下载模型（~100MB），之后常驻内存
-- 生成速度极快（~8ms/条），完全本地，不调任何 API
-- 支持批量生成
+- Docker 中通过 Dockerfile 预下载，运行时无需联网
+- 缓存路径可通过环境变量 EMBEDDING_CACHE_DIR 配置
 
 设计：单例懒加载（首次使用时初始化），提供 sync 的 embed 方法。
-与 MemoryVectorService 配合：优先本地，本地不可用时回退 API。
 """
+import os
 import logging
 import threading
 
@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 # 模型配置
 DEFAULT_MODEL = "BAAI/bge-small-zh-v1.5"  # 512维，中文专用，ONNX 格式
+
+# 缓存目录（Docker 中通过 volume 持久化，或 Dockerfile 预下载）
+EMBEDDING_CACHE_DIR = os.getenv("EMBEDDING_CACHE_DIR", os.path.expanduser("~/.cache/fastembed"))
 # 备选模型（更大的中文模型，768维，质量更高但更慢）
 # "jinaai/jina-embeddings-v2-base-zh"  # 768维，中英混合
 # "intfloat/multilingual-e5-large"     # 1024维，多语言

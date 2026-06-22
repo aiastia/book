@@ -16,16 +16,21 @@ services:
       - "8000:8000"
     volumes:
       - ./backend/data:/app/data          # SQLite + ChromaDB 数据持久化
+      - embedding-cache:/root/.cache/fastembed  # Embedding 模型缓存持久化
     env_file: .env
     environment:
       - MOYU_DATABASE_URL=sqlite+aiosqlite:///app/data/moyu.db
       - MOYU_DATA_DIR=/app/data
+      - EMBEDDING_CACHE_DIR=/root/.cache/fastembed
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  embedding-cache:  # Embedding 模型缓存（bge-small-zh-v1.5 ~100MB）
 
   frontend:
     build:
