@@ -141,11 +141,14 @@ class CharacterStateUpdateService:
                     rel = rel_map.get((target.id, char.id))
                 if rel and delta:
                     rel.intimacy = max(-100, min(100, (rel.intimacy or 0) + delta))
-                    if chapter_number:
-                        rel.strength = chapter_number
+                    # strength 是 0-1 的关系强度，按亲密度方向微调（不应写成章节号）
+                    if delta > 0:
+                        rel.strength = max(rel.strength or 0.5, 0.6)
+                    elif delta < 0:
+                        rel.strength = min(rel.strength or 0.5, 0.4)
                     updated += 1
                 elif not rel and delta:
-                    # 新建关系
+                    # 新建关系（strength 按 delta 方向设初值，保持 0-1 语义）
                     new_rel = CharacterRelation(
                         project_id=self.project_id,
                         from_character_id=char.id,
@@ -153,7 +156,7 @@ class CharacterStateUpdateService:
                         relation_type=rtype or "关系变化",
                         intimacy=max(-100, min(100, delta)),
                         category="social",
-                        strength=chapter_number,
+                        strength=0.6 if delta > 0 else 0.4,
                     )
                     self.db.add(new_rel)
                     rel_map[key] = new_rel

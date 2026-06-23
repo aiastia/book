@@ -36,6 +36,7 @@ INIT_STEPS = [
     ("career", "职业体系", 16, "career_done"),
     ("org", "组织势力", 26, "org_done"),
     ("characters", "角色", 36, "characters_done"),
+    ("assign_careers", "职业分配", 42, "assign_careers_done"),
     ("relations", "角色关系", 46, "relations_done"),
     ("locations", "地点地图", 58, "locations_done"),
     ("items", "物品道具", 68, "items_done"),
@@ -84,6 +85,26 @@ def _map_role(raw_role: str, default="配角") -> str:
         return default
     key = str(raw_role).strip().lower()
     return ROLE_MAP.get(key, ROLE_MAP.get(str(raw_role).strip(), default))
+
+
+def _join_sub_occupations(item: dict) -> str:
+    """从 AI 返回中提取副职业列表，拼成分号分隔字符串。"""
+    raw = item.get("sub_occupations") or item.get("secondary_occupations") or item.get("sub_careers") or []
+    if isinstance(raw, str):
+        # 已是字符串，按分号/逗号归一
+        parts = [p.strip() for p in raw.replace("，", ";").replace(",", ";").split(";") if p.strip()]
+        return ";".join(parts)[:500]
+    if isinstance(raw, list):
+        parts = []
+        for o in raw:
+            if isinstance(o, str):
+                parts.append(o.strip())
+            elif isinstance(o, dict):
+                n = o.get("name") or o.get("occupation") or ""
+                if n:
+                    parts.append(str(n).strip())
+        return ";".join(p for p in parts if p)[:500]
+    return ""
 
 
 async def _step_world(db, task, pid, proj, engine, ai_client):
@@ -249,7 +270,8 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
             motivation=str(item.get("motivation", item.get("internal_motivation", item.get("driving_force", item.get("inner_drive", "")))))[:2000],
             weakness=str(item.get("weakness", item.get("pressure_point", item.get("vulnerability", ""))))[:2000],
             identity=str(item.get("identity", item.get("social_role", item.get("identity_role", ""))))[:200],
-            occupation=str(item.get("occupation", item.get("profession", item.get("career", ""))))[:200],
+            occupation=str(item.get("occupation", item.get("profession", item.get("main_career", ""))))[:200],
+            sub_occupations=_join_sub_occupations(item)[:500],
             speech_style=str(item.get("speech_style", item.get("dialogue_style", item.get("speech_pattern", ""))))[:200],
             arc_type=str(item.get("arc_type", item.get("character_arc", "")))[:200],
             character_change=str(item.get("character_change", item.get("transformation", "")))[:2000],
@@ -314,6 +336,102 @@ async def _link_org_memberships(db, pid, raw_chars):
                         status="active",
                     ))
                 break  # 一个角色只关联第一个匹配的组织
+
+
+async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
+    """步骤：为角色自动分配主职业（初始化时自动执行）。"""
+    from app.models.character import Character
+    from app.models.career import Career
+    from app.models.character_career import CharacterCareer
+
+    task.status_message = "分配角色职业..."
+    await db.commit()
+
+    careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
+    if not careers:
+        # 没有职业体系，跳过
+        task.assign_careers_done = 1
+        return None
+
+    career_list = "\n".join(f"- ID:{c.id} {c.name}（{c.career_type or 'main'}，{c.category or '通用'}）" for c in careers)
+
+    # 已有主职业的角色 ID
+    assigned_ids = [cc.character_id for cc in (await db.execute(
+        select(CharacterCareer).where(CharacterCareer.project_id == pid, CharacterCareer.career_type == "main")
+    )).scalars().all()]
+
+    chars = (await db.execute(
+        select(Character).where(
+            Character.project_id == pid,
+            ~Character.id.in_(assigned_ids) if assigned_ids else True,
+        ).limit(20)
+    )).scalars().all()
+
+    if not chars:
+        task.assign_careers_done = 1
+        return None
+
+    char_list = "\n".join(
+        f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.occupation or '无职业'}，性格：{(c.personality or '未知')[:80]}）"
+        for c in chars
+    )
+
+    prompt = f"""为以下角色从职业体系中选择最匹配的主职业。
+
+题材：{proj.genre or '网文'}
+职业体系：
+{career_list}
+
+待分配角色：
+{char_list}
+
+要求：
+1. 每个角色分配1个最匹配的主职业(career_type="main")
+2. 返回：character_id(角色ID)、career_id(职业ID)、current_stage(初始阶段1-3)、started_at(开始时间描述)
+3. 职业要与角色性格、背景、能力匹配
+
+返回纯JSON数组：[{{"character_id":0,"career_id":0,"current_stage":1,"started_at":""}}]"""
+
+    result = await ai_client.chat_json_retry(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=4096,
+    )
+    if result.get("error"):
+        # 分配失败不阻断初始化流程
+        task.assign_careers_done = 1
+        return None
+
+    data = result.get("json") or []
+    if isinstance(data, dict):
+        data = data.get("assignments") or data.get("data") or []
+
+    char_id_set = {c.id for c in chars}
+    career_id_set = {c.id for c in careers}
+    created = 0
+    for a in data:
+        if not isinstance(a, dict):
+            continue
+        if a.get("character_id") not in char_id_set or a.get("career_id") not in career_id_set:
+            continue
+        try:
+            db.add(CharacterCareer(
+                project_id=pid,
+                character_id=int(a["character_id"]),
+                career_id=int(a["career_id"]),
+                career_type="main",
+                current_stage=max(1, int(a.get("current_stage", 1))),
+                started_at=str(a.get("started_at", ""))[:100],
+                source="ai",
+            ))
+            created += 1
+        except Exception:
+            continue
+
+    await db.commit()
+    task.assign_careers_done = 1
+    task.status_message = f"已为 {created} 个角色分配职业"
+    return None
 
 
 def _extract_rel_endpoint(rel, is_from):
@@ -641,6 +759,7 @@ STEP_EXECUTORS = {
     "world": _step_world,
     "career": _step_career,
     "characters": _step_characters,
+    "assign_careers": _step_assign_careers,
     "relations": _step_relations,
     "org": _step_org,
     "locations": _step_locations,

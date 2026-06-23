@@ -57,6 +57,7 @@ const filterType = ref('')
 const filterKeyword = ref('')
 
 async function onPlan() {
+  if (!await msg.confirm('AI 将根据已有大纲自动规划伏笔（主线/支线/彩蛋/反转），已有伏笔不受影响。确认开始？')) return
   generating.value = true
   try {
     const r = await api.planForeshadows()

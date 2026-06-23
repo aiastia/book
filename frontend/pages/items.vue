@@ -12,6 +12,10 @@ const { data: characters } = await api.getCharacters()
 
 const generating = ref(false)
 const showAdd = ref(false)
+const showGen = ref(false)
+const genCount = ref(6)
+const genCategory = ref('')
+const genReq = ref('')
 const editing = ref<any>(null)
 const form = reactive({
   id: 0, name: '', category: '装备', rarity: 'common', item_type: '',
@@ -45,10 +49,15 @@ const statusMeta: Record<string, { label: string; color: string }> = {
 }
 
 async function onGenerate() {
+  genCategory.value = filterCategory.value
+  showGen.value = true
+}
+async function doGenerate() {
   generating.value = true
   try {
-    const r = await api.generateItems({ count: 6, category: filterCategory.value })
+    const r = await api.generateItems({ count: genCount.value, category: genCategory.value, user_prompt: genReq.value })
     await refresh()
+    showGen.value = false
     msg.success(`生成 ${r.count} 个物品`)
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { generating.value = false }
@@ -84,7 +93,7 @@ async function onDelete(id: number) {
   <PageHeader title="物品道具">
     <template #actions>
       <a-button @click="openAdd">+ 添加物品</a-button>
-      <a-button type="primary" :loading="generating" @click="onGenerate">{{ generating ? '生成中…' : 'AI 生成物品' }}</a-button>
+      <a-button type="primary" :loading="generating" @click="onGenerate">{{ generating ? '生成中…' : ((items||[]).length ? '➕ 追加生成' : 'AI 生成物品') }}</a-button>
     </template>
   </PageHeader>
 
@@ -165,6 +174,33 @@ async function onDelete(id: number) {
       <template #footer>
         <a-button @click="showAdd = false">取消</a-button>
         <a-button type="primary" @click="onSave">保存</a-button>
+      </template>
+    </a-modal>
+
+    <!-- AI 生成物品弹窗 -->
+    <a-modal v-model:open="showGen" :title="(items||[]).length ? '追加生成物品' : 'AI 生成物品'" width="460px">
+      <a-alert
+        v-if="(items||[]).length"
+        message="已有物品将保留，本次为追加生成（不覆盖）。AI 会避开已有的物品。"
+        type="info" show-icon :closable="false" style="margin-bottom:12px"
+      />
+      <a-form layout="vertical">
+        <a-form-item label="生成数量">
+          <a-input-number v-model:value="genCount" :min="1" :max="10" style="width:100%" />
+        </a-form-item>
+        <a-form-item label="物品分类">
+          <a-select v-model:value="genCategory" allow-clear placeholder="全部分类">
+            <a-select-option value="">全部分类</a-select-option>
+            <a-select-option v-for="c in categoryList" :key="c" :value="c">{{ c }}</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="额外需求（可选）">
+          <a-textarea v-model:value="genReq" :rows="2" placeholder="如：需要几件修仙法宝、需要一些消耗品..." />
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="showGen = false">取消</a-button>
+        <a-button type="primary" :loading="generating" @click="doGenerate">{{ generating ? '生成中…' : '开始生成' }}</a-button>
       </template>
     </a-modal>
   </div>

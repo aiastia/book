@@ -28,10 +28,15 @@ export default defineNuxtConfig({
     '@/assets/css/base.css',
     '@/assets/css/layout.css',
     '@/assets/css/components.css',
+    // Vue Flow 样式（全局引入，避免 scoped 作用域导致图谱节点/边不可见）
+    '@vue-flow/core/dist/style.css',
+    '@vue-flow/core/dist/theme-default.css',
+    '@vue-flow/controls/dist/style.css',
+    '@vue-flow/minimap/dist/style.css',
   ],
 
   build: {
-    transpile: ['ant-design-vue', '@ant-design/icons-vue'],
+    transpile: ['ant-design-vue', '@ant-design/icons-vue', '@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
   },
 
   vite: {

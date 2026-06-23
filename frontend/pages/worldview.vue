@@ -38,12 +38,14 @@ const detailForm = reactive({ name: '', category: '其他', content: '' })
 const categories = ['地理', '历史', '种族', '势力', '修炼体系', '科技', '文化', '其他']
 
 async function onGenCore() {
+  if (!await msg.confirm('AI 将重新生成核心世界观（时间/地点/氛围/规则），已有内容将被覆盖。确认开始？')) return
   genAll.value = true
   try { await api.generateWorldCore(); await refreshCore(); msg.success('核心世界观已生成') }
   catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { genAll.value = false }
 }
 async function onGenDetail() {
+  if (!await msg.confirm('AI 将生成详细世界观设定（地理/历史/种族等），已有条目不受影响。确认开始？')) return
   genAll.value = true
   try {
     await api.generateWorld({ genre: currentProjectInfo.value?.genre || '', idea: (worldCore.value?.world_rules || '') + ' ' + (worldCore.value?.world_location || '') })

@@ -176,6 +176,7 @@ const categoryColor: Record<string, string> = {
 // AI 自动分配角色职业（#19）
 const autoAssigning = ref(false)
 async function onAutoAssign() {
+  if (!await msg.confirm('AI 将根据角色性格背景和职业体系，为未分配职业的角色推荐主职业。确认开始？')) return
   autoAssigning.value = true
   try {
     const r = await api.autoAssignCareers({ user_prompt: '' })

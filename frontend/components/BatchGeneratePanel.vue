@@ -22,7 +22,7 @@ const submitting = ref(false)
 // 表单
 const startChapterNumber = ref<number>(1)
 const count = ref(5)
-const countOptions = [5, 10, 20, 40]
+const countOptions = [1, 2, 3, 5, 10, 20, 40]
 const targetWords = ref(3000)
 const styleId = ref<number | null>(null)
 const narrativePerspective = ref<string>('')  // 空 = 按小说设定
@@ -52,6 +52,26 @@ const defaultStartChapter = computed(() => {
   return list.length ? list[list.length - 1].chapter_number + 1 : 1
 })
 
+// 从起始章开始，可用的空章节数量
+const availableCount = computed(() => {
+  const start = startChapterNumber.value || 1
+  return emptyChapters.value.filter((c: any) => c.chapter_number >= start).length
+})
+// 可选数量列表：不超过可用空章节数
+const filteredCountOptions = computed(() => {
+  const max = availableCount.value
+  if (max <= 0) return [1]
+  return countOptions.filter(n => n <= max)
+})
+
+// 起始章变化时，自动修正 count
+watch(startChapterNumber, () => {
+  const max = availableCount.value
+  if (max > 0 && count.value > max) {
+    count.value = filteredCountOptions.value[filteredCountOptions.value.length - 1] || max
+  }
+})
+
 // 项目默认叙事视角（用于 placeholder / 「按小说设定」展示）
 const projectDefaultPov = ref('第三人称')
 
@@ -61,7 +81,7 @@ let pollTimer: any = null
 
 function openPanel() {
   startChapterNumber.value = defaultStartChapter.value
-  count.value = 5
+  count.value = Math.min(5, availableCount.value || 1)
   aiModel.value = ''
   narrativePerspective.value = ''
   loadWritingStyles()
@@ -248,9 +268,9 @@ const statusMeta = (s: string) => {
           <div class="form-col">
             <label class="form-label">生成数量</label>
             <a-radio-group v-model:value="count" button-style="solid" style="width:100%">
-              <a-radio-button v-for="n in countOptions" :key="n" :value="n" style="width:25%">{{ n }} 章</a-radio-button>
+              <a-radio-button v-for="n in filteredCountOptions" :key="n" :value="n" :style="{ width: (100 / filteredCountOptions.length) + '%' }">{{ n }} 章</a-radio-button>
             </a-radio-group>
-            <div class="field-hint">将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + count - 1 }} 章</div>
+            <div class="field-hint">可用空章节 {{ availableCount }} 章，将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + count - 1 }} 章</div>
           </div>
         </div>
 

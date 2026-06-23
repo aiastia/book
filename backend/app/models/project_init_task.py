@@ -24,6 +24,7 @@ class ProjectInitTask(Base):
     world_done = Column(Integer, default=0)
     career_done = Column(Integer, default=0)
     characters_done = Column(Integer, default=0)
+    assign_careers_done = Column(Integer, default=0)
     relations_done = Column(Integer, default=0)
     org_done = Column(Integer, default=0)
     locations_done = Column(Integer, default=0)
@@ -47,6 +48,7 @@ class ProjectInitTask(Base):
             "world_done": self.world_done,
             "career_done": self.career_done,
             "characters_done": self.characters_done,
+            "assign_careers_done": self.assign_careers_done,
             "relations_done": self.relations_done,
             "org_done": self.org_done,
             "locations_done": self.locations_done,

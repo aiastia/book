@@ -11,6 +11,12 @@ const { data: tree, refresh } = await api.getLocationTree()
 
 const generating = ref(false)
 const showAdd = ref(false)
+const showGen = ref(false)
+const genCount = ref(5)
+const genType = ref('')
+const genReq = ref('')
+const genParentId = ref<number | null>(null)
+const genParentName = ref('')
 const editing = ref<any>(null)
 const form = reactive({
   id: 0, name: '', location_type: '城市', parent_location_id: null as number | null,
@@ -52,11 +58,30 @@ function flattenTree(nodes: any[], level = 0): any[] {
 const flatList = computed(() => flattenTree(tree.value || []))
 
 async function onGenerate() {
+  genParentId.value = null
+  genParentName.value = ''
+  genCount.value = 5
+  genType.value = ''
+  genReq.value = ''
+  showGen.value = true
+}
+function openGenSub(parent: any) {
+  genParentId.value = parent.id
+  genParentName.value = parent.name
+  genCount.value = 3
+  genType.value = ''
+  genReq.value = ''
+  showGen.value = true
+}
+async function doGenerate() {
   generating.value = true
   try {
-    const r = await api.generateLocations({ count: 5 })
+    const params: any = { count: genCount.value, location_type: genType.value, user_prompt: genReq.value }
+    if (genParentId.value) params.parent_location_id = genParentId.value
+    const r = await api.generateLocations(params)
     await refresh()
-    msg.success(`生成 ${r.count} 个地点`)
+    showGen.value = false
+    msg.success(`生成 ${r.count} 个${genParentId.value ? '子' : ''}地点`)
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { generating.value = false }
 }
@@ -91,7 +116,7 @@ async function onDelete(id: number) {
   <PageHeader title="地点地图">
     <template #actions>
       <a-button @click="openAdd()">+ 添加地点</a-button>
-      <a-button type="primary" :loading="generating" @click="onGenerate">{{ generating ? '生成中…' : 'AI 生成地点' }}</a-button>
+      <a-button type="primary" :loading="generating" @click="onGenerate">{{ generating ? '生成中…' : ((tree||[]).length ? '➕ 追加生成' : 'AI 生成地点') }}</a-button>
     </template>
   </PageHeader>
 
@@ -115,6 +140,7 @@ async function onDelete(id: number) {
             </span>
             <div class="head-actions">
               <a-button type="link" size="small" @click="openAdd(l)">+ 子地点</a-button>
+              <a-button type="link" size="small" @click="openGenSub(l)">🤖 AI 生成</a-button>
               <a-button type="link" size="small" @click="openEdit(l)">编辑</a-button>
               <a-button type="link" danger size="small" @click="onDelete(l.id)">删除</a-button>
             </div>
@@ -162,6 +188,38 @@ async function onDelete(id: number) {
       <template #footer>
         <a-button @click="showAdd = false">取消</a-button>
         <a-button type="primary" @click="onSave">保存</a-button>
+      </template>
+    </a-modal>
+
+    <!-- AI 生成地点弹窗 -->
+    <a-modal v-model:open="showGen" :title="genParentId ? `AI 生成子地点（${genParentName}）` : ((tree||[]).length ? '追加生成地点' : 'AI 生成地点')" width="460px">
+      <a-alert
+        v-if="genParentId"
+        :message="`将为「${genParentName}」生成子地点，AI 会参考父级地点的描述和氛围。`"
+        type="info" show-icon :closable="false" style="margin-bottom:12px"
+      />
+      <a-alert
+        v-else-if="(tree||[]).length"
+        message="已有地点将保留，本次为追加生成（不覆盖）。AI 会避开已有的地点。"
+        type="info" show-icon :closable="false" style="margin-bottom:12px"
+      />
+      <a-form layout="vertical">
+        <a-form-item label="生成数量">
+          <a-input-number v-model:value="genCount" :min="1" :max="10" style="width:100%" />
+        </a-form-item>
+        <a-form-item label="地点类型">
+          <a-select v-model:value="genType" allow-clear placeholder="全部类型">
+            <a-select-option value="">全部类型</a-select-option>
+            <a-select-option v-for="t in typeList" :key="t" :value="t">{{ t }}</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="额外需求（可选）">
+          <a-textarea v-model:value="genReq" :rows="2" placeholder="如：需要一个修仙宗门所在地、需要几个危险的禁地..." />
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="showGen = false">取消</a-button>
+        <a-button type="primary" :loading="generating" @click="doGenerate">{{ generating ? '生成中…' : '开始生成' }}</a-button>
       </template>
     </a-modal>
   </div>

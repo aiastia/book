@@ -81,6 +81,7 @@ async function onRemoveMember(memberId: number) {
 }
 async function onGenMembers() {
   if (!selectedOrgId.value) return
+  if (!await msg.confirm('AI 将根据角色性格和组织特征，为该组织自动分配成员。确认开始？')) return
   genMembersLoading.value = true
   try {
     const r = await api.generateOrgMembers(selectedOrgId.value, { user_prompt: '' })

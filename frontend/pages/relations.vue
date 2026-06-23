@@ -1,6 +1,10 @@
 <script setup lang="ts">
 // 角色关系：Vue Flow 图谱视图 + 表格视图（#17）
 // Vue Flow 提供拖拽/缩放/自动布局，对标 MuMuAINovel ReactFlow
+import { VueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '角色关系 — 墨语' })
@@ -191,13 +195,10 @@ async function rebuild() {
 </template>
 
 <style scoped>
-@import '@vue-flow/core/dist/style.css';
-@import '@vue-flow/core/dist/theme-default.css';
-@import '@vue-flow/controls/dist/style.css';
-@import '@vue-flow/minimap/dist/style.css';
-
 .chart-wrap { display: flex; flex-direction: column; gap: 12px; }
 .flow-card { background: #fafafa; border: 1px solid #e8e8e8; border-radius: 8px; height: 540px; overflow: hidden; }
+/* Vue Flow 根元素需撑满容器高度才可见 */
+.flow-card :deep(.vue-flow) { width: 100%; height: 100%; }
 .legend { display: flex; gap: 14px; font-size: 12px; flex-wrap: wrap; align-items: center; }
 .legend-item { display: flex; align-items: center; gap: 4px; }
 .legend-hint { color: #B5C7CB; font-size: 11px; margin-left: auto; }

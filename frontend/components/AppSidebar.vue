@@ -20,7 +20,7 @@ function toggleCollapse() {
 // 管理员入口（全局菜单底部追加，仅管理员可见且非管理页时）
 const adminGroup = computed(() => {
   if (showAdminEntry.value && !currentPath.value.startsWith('/admin')) {
-    return { title: '管理', items: adminNav.value }
+    return { title: '管理', items: adminNav }
   }
   return null
 })

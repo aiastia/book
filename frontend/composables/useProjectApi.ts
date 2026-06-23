@@ -364,7 +364,7 @@ export function useProjectApi() {
 
   /** 用默认 AI 模型配置的凭据实时拉取远端模型列表（无需重复填 key） */
   function fetchDefaultRemoteModels() {
-    return apiGet<{ models: Array<{ id: string; owned_by: string }>; default_model: string; config_name: string }>('/api/ai-models/default/remote-models', {}, { timeout: 15000 })
+    return apiGet<{ models: Array<{ id: string; owned_by: string }>; default_model: string; config_name: string }>('/api/ai-models/default/remote-models', { timeout: 15000 })
   }
 
   /** 测试 embedding 接口连通性（用于记忆向量检索） */

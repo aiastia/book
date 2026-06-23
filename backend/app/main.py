@@ -134,6 +134,8 @@ async def _auto_migrate():
         ("batch_generation_tasks", "ADD COLUMN narrative_perspective VARCHAR(50) DEFAULT ''"),
         # 第9批：写作风格自定义提示词
         ("writing_styles", "ADD COLUMN custom_prompt TEXT DEFAULT ''"),
+        # 第10批：角色副职业
+        ("characters", "ADD COLUMN sub_occupations TEXT DEFAULT ''"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:
