@@ -33,6 +33,19 @@ const analysisMap = computed(() => {
   return m
 })
 
+// 评分维度中文映射
+const scoreLabels: Record<string, string> = {
+  pacing: '节奏',
+  engagement: '吸引力',
+  coherence: '连贯性',
+  writing_quality: '文笔',
+  character_depth: '角色',
+  dialogue_quality: '对话',
+  world_consistency: '设定',
+  plot_logic: '逻辑',
+  overall: '综合',
+}
+
 const scoreText = (qs: any) => {
   if (!qs || typeof qs !== 'object') return '-'
   return qs.overall || qs.pacing || '-'
@@ -106,9 +119,13 @@ const unanalyzedChapters = computed(() => {
         class="ch-sel-item" :class="{active: selectedChapter===c.chapter_number}"
         @click="viewDetail(c.chapter_number)">
         <span>第{{ c.chapter_number }}章</span>
-        <a-tag v-if="analysisMap[c.chapter_number]" color="success" size="small">已分析</a-tag>
-        <a-tag v-else-if="c.content && c.content.length > 50" color="warning" size="small">未分析</a-tag>
-        <a-tag v-else size="small">无内容</a-tag>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <a-tag v-if="c.quality_alert && c.quality_alert.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
+          <a-tag v-if="c.quality_alert && c.quality_alert.includes('low_score')" color="orange" size="small">低分</a-tag>
+          <a-tag v-if="analysisMap[c.chapter_number]" color="success" size="small">已分析</a-tag>
+          <a-tag v-else-if="c.content && c.content.length > 50" color="warning" size="small">未分析</a-tag>
+          <a-tag v-else size="small">无内容</a-tag>
+        </div>
       </div>
     </div>
 
@@ -144,10 +161,17 @@ const unanalyzedChapters = computed(() => {
       <!-- 评分 -->
       <a-card v-if="detail.quality_scores" size="small" title="质量评分" style="margin-bottom:12px">
         <div class="score-grid">
-          <div v-for="(v,k) in detail.quality_scores" :key="k" class="score-item">
-            <span class="score-label">{{ k }}</span>
+          <div v-for="(v,k) in detail.quality_scores" :key="k" class="score-item" :class="{ 'score-low': v < 5, 'score-warn': v >= 5 && v < 7 }">
+            <span class="score-label">{{ scoreLabels[k] || k }}</span>
             <span class="score-value">{{ v }}</span>
           </div>
+        </div>
+      </a-card>
+      <!-- 一致性问题 -->
+      <a-card v-if="detail.consistency_issues && detail.consistency_issues.length" size="small" title="⚠️ 一致性问题" style="margin-bottom:12px">
+        <div v-for="(issue,i) in detail.consistency_issues" :key="i" class="analysis-item consistency-issue">
+          <a-tag color="red" size="small">问题{{ i+1 }}</a-tag>
+          {{ typeof issue === 'string' ? issue : JSON.stringify(issue) }}
         </div>
       </a-card>
       <!-- 情感曲线（#14） -->
@@ -254,4 +278,7 @@ const unanalyzedChapters = computed(() => {
 .emotion-summary { font-size:13px; color:#595959; line-height:1.6; padding-top:8px; border-top:1px solid #F0EDE6; }
 .conflict-types { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
 .ct-title { font-size:13px; color:#595959; }
+.score-low .score-value { color:#E74C3C; }
+.score-warn .score-value { color:#D49A4E; }
+.consistency-issue { color:#E74C3C; background:#FFF5F5; padding:8px; border-radius:6px; margin-bottom:4px; }
 </style>

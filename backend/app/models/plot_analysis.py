@@ -27,7 +27,8 @@ class PlotAnalysis(Base):
     dialogue_ratio = Column(Float, default=0)  # 对话占比 0-1
     description_ratio = Column(Float, default=0)  # 描写占比 0-1
     pacing = Column(String(20), default="")  # 节奏 fast/medium/slow
-    quality_scores = Column(JSON, default=dict)  # {pacing, engagement, coherence, overall}
+    quality_scores = Column(JSON, default=dict)  # {pacing, engagement, coherence, writing_quality, character_depth, dialogue_quality, world_consistency, plot_logic, overall}
+    consistency_issues = Column(JSON, default=list)  # 一致性问题列表
     suggestions = Column(JSON, default=list)  # 改进建议
     raw_response = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)

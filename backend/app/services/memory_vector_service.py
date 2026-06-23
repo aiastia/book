@@ -231,7 +231,7 @@ class MemoryVectorService:
         character_names: str = "",
         top_k: int = 3,
     ) -> str:
-        """5 路融合检索，组装章节生成上下文。
+        """6 路融合检索，组装章节生成上下文。
 
         对标 MuMu memory_service.build_context_for_generation：
         1. 最近章节（按章节号连续性）
@@ -239,6 +239,7 @@ class MemoryVectorService:
         3. 未完结伏笔（memory_type=foreshadow）
         4. 角色相关（query=角色名+状态+关系）
         5. 重要情节点（min_importance=0.7）
+        6. 时间线回溯（方案 B：语义+时间范围，覆盖 10 章外的长期记忆）
         """
         seen_ids = set()
         snippets = []
@@ -297,6 +298,20 @@ class MemoryVectorService:
             limit=top_k, min_importance=0.7,
         )
         await _gather(results, "重要情节")
+
+        # 5. 时间线回溯（方案 B：覆盖 10 章外的长期记忆）
+        # 用大纲语义 query + 时间范围过滤，专门召回近期窗口外的历史记忆
+        if chapter_outline.strip() and current_chapter > 10:
+            lookback_start = max(1, current_chapter - 30)  # 回溯起点
+            lookback_end = current_chapter - 10            # 回溯终点（排除最近10章，已有摘要链覆盖）
+            if lookback_start < lookback_end:
+                results = await self.search(
+                    user_id, project_id, chapter_outline[:500],
+                    memory_types=["plot", "character", "foreshadow", "conflict"],
+                    limit=top_k, min_importance=0.4,
+                    chapter_range=(lookback_start, lookback_end),
+                )
+                await _gather(results, "时间线回溯")
 
         if not snippets:
             return ""

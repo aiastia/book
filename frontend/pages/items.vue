@@ -8,6 +8,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 const api = useProjectApi()
 const msg = useMessage()
 const { data: items, refresh } = await api.getItems()
+const { data: characters } = await api.getCharacters()
 
 const generating = ref(false)
 const showAdd = ref(false)
@@ -149,7 +150,12 @@ async function onDelete(id: number) {
         <a-form-item label="细分类型"><a-input v-model:value="form.item_type" placeholder="武器/防具/丹药/功法..." /></a-form-item>
         <a-form-item label="描述"><a-textarea v-model:value="form.description" :rows="3" /></a-form-item>
         <div class="form-row2">
-          <a-form-item label="持有者"><a-input v-model:value="form.owner_name" /></a-form-item>
+          <a-form-item label="持有者">
+            <a-select v-model:value="form.owner_name" show-search allow-clear placeholder="选择角色">
+              <a-select-option value="">无主</a-select-option>
+              <a-select-option v-for="c in (characters || [])" :key="c.name" :value="c.name">{{ c.name }}({{ c.role }})</a-select-option>
+            </a-select>
+          </a-form-item>
           <a-form-item label="获得章节"><a-input-number v-model:value="form.obtained_chapter" :min="1" style="width:100%" /></a-form-item>
         </div>
         <a-form-item>

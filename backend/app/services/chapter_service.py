@@ -291,6 +291,12 @@ class ChapterService:
         except Exception as e:
             print(f"[chapter_service] 正文向量切分失败: {e}", flush=True)
 
+        # 4. 卷摘要生成（方案 A：每 VOLUME_SIZE 章自动生成卷摘要）
+        try:
+            await self._maybe_generate_volume_summary(chapter)
+        except Exception as e:
+            print(f"[chapter_service] 卷摘要生成失败（不影响章节）: {e}", flush=True)
+
     async def _generate_summary(self, chapter: Chapter):
         """自动生成章节摘要"""
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
@@ -411,6 +417,7 @@ class ChapterService:
                 description_ratio=analysis_data.get("description_ratio", 0),
                 pacing=analysis_data.get("pacing", ""),
                 quality_scores=quality_scores_data,
+                consistency_issues=analysis_data.get("consistency_issues", []),
                 suggestions=analysis_data.get("suggestions", []),
                 raw_response=result.get("content", ""),
             )
@@ -419,6 +426,19 @@ class ChapterService:
             # 更新章节质量评分
             chapter.quality_score = quality_scores_data.get("overall")
             chapter.quality_detail = quality_scores_data
+
+            # 质量告警检测
+            alert_parts = []
+            overall = quality_scores_data.get("overall", 10)
+            coherence = quality_scores_data.get("coherence", 10)
+            consistency_issues = analysis_data.get("consistency_issues", [])
+            if overall < 5:
+                alert_parts.append("low_score")
+            if coherence < 4:
+                alert_parts.append("low_coherence")
+            if consistency_issues and isinstance(consistency_issues, list) and len(consistency_issues) > 0:
+                alert_parts.append("consistency_issue")
+            chapter.quality_alert = ",".join(alert_parts) if alert_parts else ""
 
             await self.db.commit()
 
@@ -541,6 +561,136 @@ class ChapterService:
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f"[chapter_service] chunk 向量化失败（不影响主流程）: {e}")
+
+    async def _maybe_generate_volume_summary(self, chapter: Chapter):
+        """卷摘要自动生成（方案 A：每 VOLUME_SIZE 章生成一个卷摘要）。
+
+        触发条件：当前章节号是 VOLUME_SIZE 的整数倍（如第10、20、30章）。
+        卷摘要存入 StoryMemory（memory_type='volume_summary'），供后续章节上下文注入。
+        """
+        vol_size = settings.VOLUME_SIZE
+        ch_num = chapter.chapter_number or 0
+        if ch_num < vol_size or ch_num % vol_size != 0:
+            return  # 不是卷末章，跳过
+
+        vol_index = ch_num // vol_size  # 第几卷（1-based）
+        vol_start = (vol_index - 1) * vol_size + 1
+        vol_end = ch_num
+
+        # 检查是否已有该卷摘要（避免重复生成）
+        existing = await self.db.scalar(
+            select(StoryMemory.id).where(
+                StoryMemory.project_id == self.project_id,
+                StoryMemory.memory_type == "volume_summary",
+                StoryMemory.chapter_number == vol_end,
+            )
+        )
+        if existing:
+            return
+
+        print(f"[chapter_service] 第{vol_end}章完成，开始生成第{vol_index}卷摘要（第{vol_start}-{vol_end}章）", flush=True)
+
+        # 收集本卷各章摘要和关键情节点
+        chapters = (await self.db.execute(
+            select(Chapter).where(
+                Chapter.project_id == self.project_id,
+                Chapter.chapter_number >= vol_start,
+                Chapter.chapter_number <= vol_end,
+                Chapter.status == "completed",
+            ).order_by(Chapter.chapter_number)
+        )).scalars().all()
+
+        if len(chapters) < vol_size // 2:
+            return  # 章节数太少，不生成
+
+        chapters_summary_parts = []
+        key_plot_parts = []
+        for ch in chapters:
+            summary = ch.summary or "(无摘要)"
+            chapters_summary_parts.append(f"第{ch.chapter_number}章 {ch.title or ''}：{summary}")
+            # 从 PlotAnalysis 提取关键情节点
+            analysis = (await self.db.execute(
+                select(PlotAnalysis).where(
+                    PlotAnalysis.project_id == self.project_id,
+                    PlotAnalysis.chapter_number == ch.chapter_number,
+                ).order_by(PlotAnalysis.id.desc())
+            )).scalars().first()
+            if analysis and analysis.key_plot_points:
+                kps = analysis.key_plot_points if isinstance(analysis.key_plot_points, list) else []
+                for kp in kps[:3]:
+                    text = kp if isinstance(kp, str) else kp.get("event", kp.get("description", str(kp)))
+                    key_plot_parts.append(f"第{ch.chapter_number}章：{text}")
+
+        chapters_summary = "\n".join(chapters_summary_parts)
+        key_plot_points = "\n".join(key_plot_parts) if key_plot_parts else "暂无"
+
+        # 调用 AI 生成卷摘要
+        try:
+            ai_client = await AIClient.from_user_config(self.db, self.user_id)
+            result = await self.skill_engine.execute_skill(
+                "volume_summary", ai_client,
+                {
+                    "chapters_summary": chapters_summary[:4000],
+                    "key_plot_points": key_plot_points[:2000],
+                    "user_prompt": f"请为第{vol_start}-{vol_end}章生成卷摘要。",
+                },
+            )
+            if result.get("json"):
+                data = result["json"]
+                vol_summary = data.get("volume_summary", "")
+                if vol_summary:
+                    # 存入 StoryMemory
+                    m = StoryMemory(
+                        user_id=self.user_id,
+                        project_id=self.project_id,
+                        chapter_id=chapter.id,
+                        chapter_number=vol_end,  # 标记到卷末章
+                        memory_type="volume_summary",
+                        title=f"第{vol_start}-{vol_end}章卷摘要",
+                        content=vol_summary[:1000],
+                        importance=0.9,  # 高重要度
+                        tags=[f"vol_{vol_index}", f"第{vol_start}-{vol_end}章"],
+                    )
+                    self.db.add(m)
+                    await self.db.commit()
+
+                    # 同步写入向量库
+                    if self.user_id:
+                        try:
+                            from app.services.memory_vector_service import MemoryVectorService
+                            vs = MemoryVectorService(ai_client)
+                            vid = await vs.add_memory(
+                                user_id=self.user_id, project_id=self.project_id, memory_id=m.id,
+                                content=m.content, memory_type="volume_summary",
+                                title=m.title, importance=m.importance,
+                                chapter_number=vol_end,
+                            )
+                            if vid:
+                                m.vector_id = vid
+                                await self.db.commit()
+                        except Exception:
+                            pass
+
+                    print(f"[chapter_service] 第{vol_index}卷摘要已生成（第{vol_start}-{vol_end}章）", flush=True)
+            elif result.get("content"):
+                # JSON 解析失败但有内容，直接用 raw content
+                vol_summary = result["content"][:1000]
+                m = StoryMemory(
+                    user_id=self.user_id,
+                    project_id=self.project_id,
+                    chapter_id=chapter.id,
+                    chapter_number=vol_end,
+                    memory_type="volume_summary",
+                    title=f"第{vol_start}-{vol_end}章卷摘要",
+                    content=vol_summary,
+                    importance=0.9,
+                    tags=[f"vol_{vol_index}"],
+                )
+                self.db.add(m)
+                await self.db.commit()
+                print(f"[chapter_service] 第{vol_index}卷摘要已生成（raw content）", flush=True)
+        except Exception as e:
+            print(f"[chapter_service] 卷摘要 AI 调用失败: {e}", flush=True)
 
     async def _update_character_states(self, analysis_data: dict):
         """根据剧情分析结果，自动更新角色的 mental_state（当前心理）。

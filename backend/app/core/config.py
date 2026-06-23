@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     CHAPTER_MAX_WORDS: int = 3500
     CHAPTER_CONTEXT_CHAPTERS: int = 10  # 上下文章节数
     CHAPTER_CONTEXT_WORDS: int = 500   # 衔接锚点字数
+    VOLUME_SIZE: int = 10              # 每卷章节数（每 N 章生成一个卷摘要）
+    OUTLINE_CONTEXT_CHAPTERS: int = 20 # 大纲续写时带入的最近章节数（超出部分精简）
     MEMORY_SIMILARITY_THRESHOLD: float = 0.6
     QUALITY_TREND_COUNT: int = 5  # 评分趋势章节数
     FORESHADOW_LOOKAHEAD: int = 3  # 伏笔前瞻章节数

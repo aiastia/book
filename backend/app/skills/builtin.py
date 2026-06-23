@@ -285,8 +285,21 @@ BUILTIN_SKILLS = [
 7. 组织状态变化（organization_states：势力兴衰/成员变动/覆灭）
 8. 关键情节点
 9. 场景与节奏（pacing：fast/medium/slow）+ 对话占比/描写占比（dialogue_ratio/description_ratio 0-1）
-10. 质量评分（pacing/engagement/coherence，各1-10分）
-11. 改进建议
+10. 质量评分（8维度，各1-10分）：
+    - pacing: 节奏把控（事件密度、推进速度是否合适）
+    - engagement: 吸引力（读者是否想继续读）
+    - coherence: 连贯性（与前文是否衔接、逻辑是否自洽）
+    - writing_quality: 文笔质量（语言表达、修辞手法、画面感）
+    - character_depth: 角色塑造（人物是否立体、动机是否合理、行为是否符合人设）
+    - dialogue_quality: 对话质量（对话是否自然、是否有信息量、是否体现角色个性）
+    - world_consistency: 世界观一致性（设定是否与前文矛盾、力量体系是否自洽）
+    - plot_logic: 剧情逻辑（事件因果链是否合理、转折是否有铺垫）
+11. 一致性检查（consistency_issues）：
+    - 检查本章是否与前文存在矛盾（角色生死、设定变化、时间线冲突等）
+    - 检查角色行为是否符合已建立的性格设定
+    - 检查力量体系/规则是否被打破
+    - 如有矛盾，列出具体问题
+12. 改进建议
 
 请以纯 JSON 格式返回（不要 markdown 代码块）：
 {{
@@ -304,7 +317,8 @@ BUILTIN_SKILLS = [
   "pacing": "medium",
   "dialogue_ratio": 0.35,
   "description_ratio": 0.4,
-  "quality_scores": {{"pacing": 7, "engagement": 8, "coherence": 9, "overall": 8}},
+  "quality_scores": {{"pacing": 7, "engagement": 8, "coherence": 9, "writing_quality": 7, "character_depth": 8, "dialogue_quality": 7, "world_consistency": 9, "plot_logic": 8, "overall": 8}},
+  "consistency_issues": ["如有矛盾列出具体问题，无则为空数组"],
   "suggestions": ["建议"]
 }}
 
@@ -450,6 +464,34 @@ intimacy 范围 -100 到 100。生成 5-8 条主要关系。""",
 只返回纯JSON数组：[{{"name":"物品名","category":"装备/消耗/关键道具/材料","rarity":"common/uncommon/rare/epic/legendary","item_type":"类型","description":"100-200字","is_key_item":0}}]
 生成 5-8 个物品，至少 1 个关键剧情道具(is_key_item=1)。""",
         "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "world_info": {"type": "string"}}},
+    },
+    # ===== 卷摘要生成（方案 A：分层摘要链）=====
+    {
+        "name": "volume_summary",
+        "display_name": "卷摘要生成",
+        "description": "每 N 章自动生成一个卷级摘要，保障长期连贯性",
+        "category": "analysis",
+        "skill_type": "builtin",
+        "system_prompt": """你是一位资深小说编辑。请根据以下连续章节的摘要和关键情节点，生成一段精炼的卷级摘要。
+
+要求：
+1. 摘要 200-400 字，概括本卷的核心剧情线
+2. 必须包含：主线冲突演进、关键转折点、角色成长/变化、未解悬念
+3. 用时间线叙事，不要逐章罗列，而是提炼出"这一卷讲了什么"
+4. 结尾点明当前故事状态（进展到什么阶段、留下什么悬念）
+
+【章节摘要】
+{chapters_summary}
+
+【关键情节点】
+{key_plot_points}
+
+请以纯 JSON 返回：
+{{"volume_summary": "200-400字卷级摘要", "main_arc": "本卷主线一句话概括", "turning_points": ["转折1", "转折2"], "current_state": "当前故事状态一句话"}}""",
+        "parameters": {"type": "object", "properties": {
+            "chapters_summary": {"type": "string", "description": "本卷各章摘要"},
+            "key_plot_points": {"type": "string", "description": "本卷关键情节点"},
+        }},
     },
 ]
 

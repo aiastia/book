@@ -11,6 +11,8 @@ const msg = useMessage()
 const { data: characters, refresh } = await api.getCharacters()
 // 加载职业体系，供「职业」字段下拉使用
 const { data: careers } = await api.getCareers()
+// 加载组织列表，供「所属组织」字段下拉使用
+const { data: organizations } = await api.getOrganizations()
 const occupationOptions = computed(() => {
   const list = (careers.value || []).map((c: any) => c.name).filter(Boolean)
   // 去重
@@ -20,6 +22,12 @@ const occupationOptions = computed(() => {
 const careerNameById = (id: number) => {
   const c = (careers.value || []).find((x: any) => x.id === id)
   return c?.name || `职业#${id}`
+}
+// 组织名映射
+const orgNameById = (id: number | null) => {
+  if (!id) return ''
+  const o = (organizations.value || []).find((x: any) => x.id === id)
+  return o?.name || ''
 }
 
 const showGen = ref(false)
@@ -36,7 +44,7 @@ const editForm = reactive({
   name:'', role:'配角', gender:'', age:'', identity:'', occupation:'',
   appearance:'', personality:'', background:'', growth_experience:'', ability:'',
   story_goal:'', motivation:'', weakness:'', arc_type:'', character_change:'', speech_style:'',
-  status:'alive', mental_state:'',
+  status:'alive', mental_state:'', organization_id: null as number | null,
 })
 const roleOptions = ['主角','配角','反派','路人']
 const arcOptions = ['成长','堕落','救赎','顿悟','平淡','']
@@ -127,6 +135,11 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
               </a-tag>
             </span>
           </div>
+          <!-- 所属组织 -->
+          <div v-if="c.organization_id && orgNameById(c.organization_id)" class="desc-row">
+            <span class="desc-label">组织</span>
+            <span class="desc-value"><a-tag color="blue" size="small">{{ orgNameById(c.organization_id) }}</a-tag></span>
+          </div>
           <div v-if="!displayFields.some(f=>c[f.key]) && !c.main_career_id" class="desc-empty">暂无详细信息，点击编辑补充</div>
         </div>
       </a-card>
@@ -159,8 +172,16 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
           <a-col :span="8"><a-form-item label="状态"><a-select v-model:value="editForm.status"><a-select-option label="存活" value="alive" /><a-select-option label="死亡" value="dead" /><a-select-option label="失踪" value="missing" /></a-select></a-form-item></a-col>
         </a-row>
         <a-row :gutter="12">
+          <a-col :span="8"><a-form-item label="所属组织">
+            <a-select v-model:value="editForm.organization_id" allow-clear placeholder="选择组织">
+              <a-select-option :value="null">无</a-select-option>
+              <a-select-option v-for="o in (organizations || [])" :key="o.id" :value="o.id">{{ o.name }}</a-select-option>
+            </a-select>
+          </a-form-item></a-col>
           <a-col :span="8"><a-form-item label="性别"><a-input v-model:value="editForm.gender" /></a-form-item></a-col>
           <a-col :span="8"><a-form-item label="年龄"><a-input v-model:value="editForm.age" /></a-form-item></a-col>
+        </a-row>
+        <a-row :gutter="12">
           <a-col :span="8"><a-form-item label="职业"><a-auto-complete v-model:value="editForm.occupation" :options="occupationOptions.map(o=>({value:o}))" :filter-option="(input:string, option:any)=>option.value.toLowerCase().includes(input.toLowerCase())" allow-clear :placeholder="occupationOptions.length?'选择或输入职业':'可直接输入'" /></a-form-item></a-col>
         </a-row>
         <a-form-item label="身份"><a-input v-model:value="editForm.identity" /></a-form-item>

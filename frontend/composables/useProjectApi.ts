@@ -251,7 +251,7 @@ export function useProjectApi() {
 
   // ---- 大纲续写/展开 ----
   function continueOutlines(body: { chapter_count: number }) {
-    return apiPost<{ outlines: any[]; count: number }>(`/api/projects/${pid()}/outlines/continue`, body, { timeout: 60000 })
+    return apiPost<{ outlines: any[]; count: number; new_characters?: string[] }>(`/api/projects/${pid()}/outlines/continue`, body, { timeout: 60000 })
   }
 
   function expandOutline(outlineId: number, body: { target_chapter_count: number }) {

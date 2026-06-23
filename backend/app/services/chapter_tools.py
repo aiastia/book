@@ -10,6 +10,8 @@
 4. query_item - 查物品详情和归属
 5. query_chapter_summary - 查前文章节剧情
 6. query_organization - 查组织详情
+7. query_plot_timeline - 查剧情演进时间线（跨章因果链追溯）
+8. query_outline - 查大纲规划（计划 vs 实际对比）
 """
 import json
 import logging
@@ -24,6 +26,7 @@ from app.models.location import Location
 from app.models.organization import Organization
 from app.models.organization_member import OrganizationMember
 from app.models.chapter import Chapter
+from app.models.outline import Outline
 from app.models.plot_analysis import PlotAnalysis
 from app.services.foreshadow_service import ForeshadowService
 
@@ -121,6 +124,51 @@ def get_chapter_tools() -> list[dict]:
                 }
             }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_plot_timeline",
+                "description": "查询某角色或某关键词在指定章节范围内的剧情演进时间线。用于追溯角色成长弧线、伏笔回收脉络、跨章节因果链。当涉及「回顾前期」「角色成长回顾」「伏笔回收」「跨阶段呼应」时务必调用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "character_name": {
+                            "type": "string",
+                            "description": "角色名（可选，按角色追踪演进）"
+                        },
+                        "keyword": {
+                            "type": "string",
+                            "description": "关键词（可选，按主题/事件追踪，如'师门''复仇'）"
+                        },
+                        "from_chapter": {
+                            "type": "integer",
+                            "description": "起始章节号（可选，默认从第1章开始）"
+                        },
+                        "to_chapter": {
+                            "type": "integer",
+                            "description": "结束章节号（可选，默认到当前章之前）"
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_outline",
+                "description": "查询指定章节的大纲规划（标题、摘要、关键情节点、涉及角色、写作目标）。用于对照原计划确认剧情是否偏离，或回顾某章的原始设计意图。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "chapter_number": {
+                            "type": "integer",
+                            "description": "要查询的章节号"
+                        }
+                    },
+                    "required": ["chapter_number"]
+                }
+            }
+        },
     ]
 
 
@@ -152,6 +200,17 @@ def make_tool_executor(db: AsyncSession, project_id: int, chapter_number: int = 
 
             elif tool_name == "query_organization":
                 return await _query_organization(db, project_id, arguments.get("name", ""))
+
+            elif tool_name == "query_plot_timeline":
+                return await _query_plot_timeline(db, project_id, chapter_number,
+                    character_name=arguments.get("character_name", ""),
+                    keyword=arguments.get("keyword", ""),
+                    from_chapter=arguments.get("from_chapter"),
+                    to_chapter=arguments.get("to_chapter"),
+                )
+
+            elif tool_name == "query_outline":
+                return await _query_outline(db, project_id, arguments.get("chapter_number", 1))
 
             else:
                 return json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
@@ -324,3 +383,182 @@ async def _query_organization(db: AsyncSession, project_id: int, name: str) -> s
             "motto": o.motto or "", "member_count": member_count or 0,
         })
     return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
+
+
+async def _query_plot_timeline(
+    db: AsyncSession, project_id: int, current_chapter: int,
+    character_name: str = "", keyword: str = "",
+    from_chapter: int = None, to_chapter: int = None,
+) -> str:
+    """查询剧情演进时间线（方案 C）。
+
+    按角色名或关键词，在指定章节范围内检索 PlotAnalysis，
+    提取关键情节点、角色状态变化、冲突进展，拼接为时间线文本。
+    用于追溯角色成长弧线、伏笔回收脉络、跨章节因果链。
+    """
+    if not character_name and not keyword:
+        return json.dumps({"error": "请提供角色名或关键词"}, ensure_ascii=False)
+
+    # 确定查询范围
+    fc = from_chapter or 1
+    tc = to_chapter or (current_chapter - 1)
+    if fc > tc:
+        return json.dumps({"error": f"起始章节({fc})不能大于结束章节({tc})"}, ensure_ascii=False)
+    # 限制范围防止返回过多数据
+    if tc - fc > 50:
+        fc = tc - 50
+
+    # 查询范围内的 PlotAnalysis
+    analyses = (await db.execute(
+        select(PlotAnalysis).where(
+            PlotAnalysis.project_id == project_id,
+            PlotAnalysis.chapter_number >= fc,
+            PlotAnalysis.chapter_number <= tc,
+        ).order_by(PlotAnalysis.chapter_number)
+    )).scalars().all()
+
+    if not analyses:
+        return json.dumps({"message": f"第{fc}-{tc}章暂无剧情分析数据"}, ensure_ascii=False)
+
+    # 构建时间线
+    timeline = []
+    for pa in analyses:
+        ch = pa.chapter_number
+        entry_parts = []
+
+        # 匹配条件：角色名 or 关键词
+        matched = False
+
+        # 检查关键情节点
+        kps = pa.key_plot_points or []
+        for kp in kps:
+            text = kp if isinstance(kp, str) else kp.get("event", kp.get("description", str(kp)))
+            if character_name and character_name in text:
+                matched = True
+            if keyword and keyword in text:
+                matched = True
+            entry_parts.append(f"  关键事件：{text[:80]}")
+
+        # 检查角色状态变化
+        for cs in (pa.character_states or []):
+            if not isinstance(cs, dict):
+                continue
+            name = cs.get("character") or cs.get("character_name") or ""
+            if character_name and (character_name in name or name in character_name):
+                matched = True
+                change = cs.get("state_after") or cs.get("mental_change") or cs.get("change", "")
+                if change:
+                    entry_parts.append(f"  {name}：{str(change)[:80]}")
+            elif keyword:
+                desc = str(cs)
+                if keyword in desc:
+                    matched = True
+                    entry_parts.append(f"  角色变化：{desc[:80]}")
+
+        # 检查冲突
+        for cf in (pa.conflicts or []):
+            if not isinstance(cf, dict):
+                continue
+            desc = cf.get("description", cf.get("type", str(cf)))
+            if character_name and character_name in desc:
+                matched = True
+            if keyword and keyword in desc:
+                matched = True
+            progress = cf.get("resolution_progress", cf.get("status", ""))
+            if progress:
+                entry_parts.append(f"  冲突：{desc[:60]} → {progress}")
+
+        # 检查伏笔
+        for fs in (pa.foreshadows or []):
+            if not isinstance(fs, dict):
+                continue
+            title = fs.get("title", fs.get("description", str(fs)))
+            if character_name and character_name in title:
+                matched = True
+            if keyword and keyword in title:
+                matched = True
+
+        # 如果没有明确匹配条件（只有 keyword），检查整个分析
+        if not matched and keyword:
+            raw = pa.raw_response or ""
+            if keyword in raw:
+                matched = True
+
+        # 如果有角色名但没匹配到具体条目，检查角色名是否在任何字段中出现
+        if not matched and character_name:
+            all_text = str(pa.key_plot_points) + str(pa.character_states) + str(pa.conflicts) + str(pa.foreshadows)
+            if character_name in all_text:
+                matched = True
+
+        if matched and entry_parts:
+            # 情感曲线
+            ec = pa.emotional_curve if isinstance(pa.emotional_curve, dict) else {}
+            emotion_tag = f"（情感：{ec.get('end', '')}）" if ec.get('end') else ""
+            # 剧情阶段
+            stage_tag = f"[{pa.plot_stage}]" if pa.plot_stage else ""
+            timeline.append(f"第{ch}章{stage_tag}{emotion_tag}：" + "\n".join(entry_parts))
+
+    if not timeline:
+        search_desc = f"角色「{character_name}」" if character_name else f"关键词「{keyword}」"
+        return json.dumps({"message": f"第{fc}-{tc}章未找到与{search_desc}相关的剧情演进"}, ensure_ascii=False)
+
+    # 限制返回长度
+    result_text = "\n\n".join(timeline[:20])
+    if len(result_text) > 2000:
+        result_text = result_text[:2000] + "\n...(已截断)"
+
+    return json.dumps({
+        "range": f"第{fc}-{tc}章",
+        "search": character_name or keyword,
+        "entries": len(timeline),
+        "timeline": result_text,
+    }, ensure_ascii=False)
+
+
+async def _query_outline(db: AsyncSession, project_id: int, chapter_number: int) -> str:
+    """查询指定章节的大纲规划。"""
+    outline = (await db.execute(
+        select(Outline).where(
+            Outline.project_id == project_id,
+            Outline.chapter_number == chapter_number,
+        ).order_by(Outline.id.desc())
+    )).scalars().first()
+    if not outline:
+        return json.dumps({"error": f"未找到第{chapter_number}章的大纲"}, ensure_ascii=False)
+
+    result = {
+        "chapter_number": outline.chapter_number,
+        "title": outline.title or "",
+        "summary": (outline.summary or "")[:500],
+        "emotion": outline.emotion or "",
+        "goal": outline.goal or "",
+    }
+    # 关键情节点
+    if outline.key_points:
+        kps = outline.key_points if isinstance(outline.key_points, list) else []
+        result["key_points"] = [str(kp)[:100] for kp in kps[:5]]
+    # 涉及角色
+    if outline.characters:
+        chars = outline.characters if isinstance(outline.characters, list) else []
+        result["characters"] = [str(c) if isinstance(c, str) else c.get("name", str(c)) for c in chars[:8]]
+    # 场景
+    if outline.scenes:
+        scenes = outline.scenes if isinstance(outline.scenes, list) else []
+        result["scenes"] = [str(s)[:80] for s in scenes[:5]]
+
+    # 附带该章节的实际完成状态（如果有的话）
+    from app.models.chapter import Chapter
+    chapter = (await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number == chapter_number,
+        ).order_by(Chapter.id.desc())
+    )).scalars().first()
+    if chapter:
+        result["actual_status"] = chapter.status
+        result["actual_title"] = chapter.title or ""
+        if chapter.summary:
+            result["actual_summary"] = chapter.summary[:300]
+        result["word_count"] = chapter.word_count or 0
+
+    return json.dumps(result, ensure_ascii=False)

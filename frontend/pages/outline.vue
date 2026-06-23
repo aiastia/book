@@ -15,6 +15,11 @@ const showGen = ref(false)
 const editing = ref<any>(null)
 const editForm = reactive({ title: '', summary: '', emotion: '', goal: '', key_points_text: '', characters_text: '' })
 
+// 新角色检测（大纲续写后）
+const showNewChars = ref(false)
+const newCharNames = ref<string[]>([])
+const generatingChars = ref(false)
+
 const isOneToMany = computed(() => (project.value?.outline_mode || 'one_to_one') === 'one_to_many')
 const modeLabel = computed(() => isOneToMany.value ? '细化模式 (1→N)' : '传统模式 (1→1)')
 const unitLabel = computed(() => isOneToMany.value ? '卷' : '章')
@@ -68,9 +73,30 @@ async function onGenerate() {
 }
 async function onContinue() {
   generating.value = true
-  try { await api.continueOutlines({ chapter_count: genCount.value }); await refresh(); msg.success('续写完成') }
+  try {
+    const result = await api.continueOutlines({ chapter_count: genCount.value })
+    await refresh()
+    msg.success(`续写完成，新增 ${result.count} 章大纲`)
+    // 检测新角色
+    if (result.new_characters && result.new_characters.length > 0) {
+      newCharNames.value = result.new_characters
+      showNewChars.value = true
+    }
+  }
   catch (e: any) { msg.error('续写失败：' + formatError(e)) }
   finally { generating.value = false }
+}
+async function onGenerateNewChars() {
+  generatingChars.value = true
+  try {
+    for (const name of newCharNames.value) {
+      await api.autoGenerateCharacter({ specification: `请生成一个名为「${name}」的角色` })
+    }
+    msg.success(`已生成 ${newCharNames.value.length} 个新角色`)
+    showNewChars.value = false
+    newCharNames.value = []
+  } catch (e: any) { msg.error('角色生成失败：' + formatError(e)) }
+  finally { generatingChars.value = false }
 }
 function openEdit(o: any) {
   editing.value = o
@@ -263,6 +289,21 @@ async function deleteExpansion() {
           </div>
         </div>
       </div>
+    </a-modal>
+
+    <!-- 新角色检测弹窗 -->
+    <a-modal v-model:open="showNewChars" title="检测到新角色" width="420px">
+      <p>大纲中出现了以下新角色，是否立即生成角色档案？</p>
+      <div style="margin: 12px 0;">
+        <a-tag v-for="name in newCharNames" :key="name" color="purple" style="margin: 2px 4px;">{{ name }}</a-tag>
+      </div>
+      <p style="font-size:12px;color:#8C8C8C;">生成后可在角色页面查看和编辑详细信息。</p>
+      <template #footer>
+        <a-button @click="showNewChars = false">跳过</a-button>
+        <a-button type="primary" :loading="generatingChars" @click="onGenerateNewChars">
+          {{ generatingChars ? '生成中…' : '立即生成' }}
+        </a-button>
+      </template>
     </a-modal>
   </div>
 </template>

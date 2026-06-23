@@ -1,6 +1,9 @@
 """大纲：生成 / CRUD / 续写 / 展开"""
 import json
+import logging
 from app.api.routes.projects_pkg.base import *
+
+logger = logging.getLogger(__name__)
 
 
 router = make_router()
@@ -154,14 +157,57 @@ async def delete_outline(project_id: int, outline_id: int, db: AsyncSession = De
 
 @router.post("/{project_id}/outlines/continue")
 async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """大纲续写：在现有大纲基础上继续生成"""
+    """大纲续写：在现有大纲基础上继续生成。
+
+    上下文优化：
+    - 最近 N 章大纲传完整版（title + summary + key_points）
+    - 更早的大纲传精简版（chapter_number + title + summary）
+    - 超过 30 条时进一步压缩为每 5 章一条摘要
+    """
+    from app.core.config import settings
+
     proj = await get_user_project(db, project_id, user)
     outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
     chapters = (await db.execute(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number))).scalars().all()
     foreshadows_list = (await db.execute(select(Foreshadow).where(Foreshadow.project_id == project_id, Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
     ctx = await _project_context(db, project_id, proj)
 
-    existing_outlines = json.dumps([{"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points} for o in outlines], ensure_ascii=False) if outlines else "暂无"
+    # ===== 大纲上下文截断优化 =====
+    full_limit = settings.OUTLINE_CONTEXT_CHAPTERS  # 默认 20
+    if len(outlines) <= full_limit:
+        # 章节数不多，全部传完整版
+        recent_outlines_json = json.dumps([
+            {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
+            for o in outlines
+        ], ensure_ascii=False)
+    else:
+        # 最近 N 章：完整版
+        recent = outlines[-full_limit:]
+        older = outlines[:-full_limit]
+        # 更早的章节：精简版（去掉 key_points/scenes）
+        older_brief = [
+            {"chapter_number": o.chapter_number, "title": o.title, "summary": (o.summary or "")[:200]}
+            for o in older
+        ]
+        # 如果精简后仍然超过 30 条，进一步压缩为每 5 章一条
+        if len(older_brief) > 30:
+            compressed = []
+            for i in range(0, len(older_brief), 5):
+                chunk = older_brief[i:i+5]
+                first, last = chunk[0], chunk[-1]
+                summaries = "；".join(c["summary"][:30] for c in chunk if c["summary"])
+                compressed.append({
+                    "chapter_number": f"{first['chapter_number']}-{last['chapter_number']}",
+                    "title": f"第{first['chapter_number']}-{last['chapter_number']}章概要",
+                    "summary": summaries[:200],
+                })
+            older_brief = compressed
+        # 合并：精简版 + 完整版
+        recent_outlines_json = json.dumps(older_brief + [
+            {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
+            for o in recent
+        ], ensure_ascii=False)
+
     existing_chapters = json.dumps([{"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""} for c in chapters], ensure_ascii=False) if chapters else "暂无"
     foreshadow_context = "\n".join([f"- {f.title}({f.status}): {f.content[:100]}" for f in foreshadows_list]) or "暂无"
 
@@ -174,9 +220,11 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         "chapter_count": str(req.chapter_count), "current_chapter_count": str(current_count),
         "start_chapter": str(start_chapter), "end_chapter": str(end_chapter),
         "total_planned_chapters": str(current_count + req.chapter_count),
-        "existing_outlines": existing_outlines, "existing_chapters": existing_chapters,
+        "recent_outlines": recent_outlines_json, "existing_chapters": existing_chapters,
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
-        "foreshadow_context": foreshadow_context, "narrative_pov": proj.narrative_pov or "第三人称",
+        "foreshadow_context": foreshadow_context,
+        "foreshadow_reminders": foreshadow_context,  # 兼容模板中的变量名
+        "narrative_pov": proj.narrative_pov or "第三人称", "narrative_perspective": proj.narrative_pov or "第三人称",
         "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。",
     })
     check_skill_error(result)
@@ -188,7 +236,36 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         db.add(_build_outline(project_id, item))
         created.append(item)
     await db.commit()
-    return {"outlines": created, "count": len(created)}
+
+    # ===== 新角色检测 =====
+    # 从新生成的大纲中提取角色名，与已有角色对比，找出未注册的角色
+    existing_chars = {c.name for c in (await db.execute(
+        select(Character).where(Character.project_id == project_id)
+    )).scalars().all()}
+    new_characters = set()
+    for item in outlines_data:
+        chars = item.get("characters", [])
+        if not isinstance(chars, list):
+            continue
+        for ch in chars:
+            if isinstance(ch, dict):
+                name = ch.get("name", "")
+                ctype = ch.get("type", "character")
+            elif isinstance(ch, str):
+                name = ch
+                ctype = "character"
+            else:
+                continue
+            # 只关注角色，跳过组织
+            if ctype == "organization":
+                continue
+            if name and name not in existing_chars:
+                new_characters.add(name)
+
+    response = {"outlines": created, "count": len(created)}
+    if new_characters:
+        response["new_characters"] = list(new_characters)
+    return response
 
 
 @router.post("/{project_id}/outlines/{outline_id}/expand")

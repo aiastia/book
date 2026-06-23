@@ -210,6 +210,8 @@ const createdChapterNos = computed(() => new Set((chapters.value||[]).map(c=>c.c
             <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title||'无标题' }}</span>
             <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
             <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count||0).toLocaleString() }}字</a-tag>
+            <a-tag v-if="c.quality_alert && c.quality_alert.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
+            <a-tag v-if="c.quality_alert && c.quality_alert.includes('low_score')" color="orange" size="small">低分</a-tag>
             <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
           </div>
           <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0,80) }}</div>

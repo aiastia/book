@@ -43,6 +43,9 @@ class ChapterContextService:
         # 物品/地点上下文（#1 #2 增强）
         context.update(await self._get_item_location_context(chapter))
 
+        # 卷摘要上下文（方案 A：分层摘要链，保障长期连贯性）
+        context.update(await self._get_volume_summaries(chapter))
+
         # P3-评分反馈
         context.update(await self._get_quality_context(chapter))
 
@@ -181,6 +184,44 @@ class ChapterContextService:
             logging.getLogger(__name__).warning(f"[context] 向量记忆召回失败（不影响生成）: {e}")
         return {}
 
+    async def _get_volume_summaries(self, chapter: Chapter) -> dict:
+        """卷摘要注入（方案 A：分层摘要链）。
+
+        查询所有已完成的卷摘要（memory_type='volume_summary'），
+        按章节号正序注入上下文，让 AI 了解长期剧情脉络。
+        卷摘要覆盖 10 章之外的长期连贯性，弥补摘要链滑动窗口的不足。
+        """
+        try:
+            vol_summaries = (await self.db.execute(
+                select(StoryMemory).where(
+                    StoryMemory.project_id == self.project_id,
+                    StoryMemory.memory_type == "volume_summary",
+                    StoryMemory.chapter_number < chapter.chapter_number,
+                ).order_by(StoryMemory.chapter_number)
+            )).scalars().all()
+
+            if not vol_summaries:
+                return {}
+
+            parts = []
+            for vs in vol_summaries:
+                title = vs.title or f"第{vs.chapter_number}章前卷摘要"
+                parts.append(f"【{title}】{vs.content}")
+
+            # 全书主线脉络（如果有 3+ 卷，再加一层压缩）
+            if len(parts) >= 3:
+                # 将所有卷摘要压缩为"全书脉络"提示
+                all_arcs = " → ".join(
+                    vs.content[:50] + "…" for vs in vol_summaries[-5:]  # 最近 5 卷的浓缩
+                )
+                parts.append(f"【全书主线脉络（近5卷演进）】{all_arcs}")
+
+            return {"volume_summaries": "\n\n".join(parts)}
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[context] 卷摘要加载失败（不影响生成）: {e}")
+        return {}
+
     async def _get_world_context(self) -> dict:
         """世界设定上下文：核心世界观（时间/地点/氛围/规则）+ 详细设定条目。
 
@@ -281,6 +322,31 @@ class ChapterContextService:
         outlines_summary = "\n".join([
             f"第{o.chapter_number}章 {o.title}: {o.summary}" for o in reversed(recent_outlines)
         ])
+
+        # 卷摘要前置注入（方案 A：在大纲摘要前插入卷级摘要，保障长期连贯性）
+        try:
+            vol_summaries = (await self.db.execute(
+                select(StoryMemory).where(
+                    StoryMemory.project_id == self.project_id,
+                    StoryMemory.memory_type == "volume_summary",
+                    StoryMemory.chapter_number < chapter.chapter_number,
+                ).order_by(StoryMemory.chapter_number)
+            )).scalars().all()
+            if vol_summaries:
+                vol_parts = []
+                for vs in vol_summaries:
+                    title = vs.title or f"第{vs.chapter_number}章前卷摘要"
+                    vol_parts.append(f"【{title}】{vs.content}")
+                # 全书主线脉络压缩（3+ 卷时）
+                if len(vol_parts) >= 3:
+                    recent_arcs = " → ".join(
+                        vs.content[:50] + "…" for vs in vol_summaries[-5:]
+                    )
+                    vol_parts.append(f"【全书主线脉络】{recent_arcs}")
+                outlines_summary = "\n\n".join(vol_parts) + "\n\n" + outlines_summary
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[context] 卷摘要注入失败（不影响生成）: {e}")
 
         # 上一章末尾
         result = await self.db.execute(
@@ -423,7 +489,7 @@ class ChapterContextService:
             if plan_parts:
                 recent_expansion_plans = "\n".join(plan_parts)
 
-            # 质量分项趋势（最近5章 pacing/engagement/coherence 三项）
+            # 质量分项趋势（最近5章 8维度评分）
             recent_analyses = (await self.db.execute(
                 select(PlotAnalysis).where(
                     PlotAnalysis.project_id == self.project_id,
@@ -438,13 +504,28 @@ class ChapterContextService:
                     pacing = qs.get("pacing", "-")
                     engagement = qs.get("engagement", "-")
                     coherence = qs.get("coherence", "-")
-                    trend_parts.append(f"第{ra.chapter_number}章：综合{overall} 节奏{pacing} 吸引力{engagement} 连贯性{coherence}")
+                    writing = qs.get("writing_quality", "-")
+                    char_depth = qs.get("character_depth", "-")
+                    dialogue = qs.get("dialogue_quality", "-")
+                    world = qs.get("world_consistency", "-")
+                    logic = qs.get("plot_logic", "-")
+                    trend_parts.append(
+                        f"第{ra.chapter_number}章：综合{overall} 节奏{pacing} 吸引力{engagement} "
+                        f"连贯性{coherence} 文笔{writing} 角色{char_depth} "
+                        f"对话{dialogue} 设定{world} 逻辑{logic}"
+                    )
                 quality_trends_detail = "\n".join(trend_parts)
                 # 追加最近一章的改进建议
                 latest_suggestions = recent_analyses[0].suggestions or []
                 if latest_suggestions:
                     sugs = [s if isinstance(s, str) else s.get("suggestion", "") for s in latest_suggestions[:2]]
                     quality_trends_detail += "\n最近改进建议：" + "；".join(sugs)
+                # 追加最近一章的一致性问题（如果有）
+                latest_analysis = recent_analyses[0]
+                if hasattr(latest_analysis, 'consistency_issues') and latest_analysis.consistency_issues:
+                    issues = latest_analysis.consistency_issues
+                    if isinstance(issues, list) and issues:
+                        quality_trends_detail += "\n⚠️ 上章一致性问题：" + "；".join(str(i) for i in issues[:3])
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"[context] 连贯性增强信息加载失败（不影响生成）: {e}")
