@@ -191,6 +191,16 @@ const filteredData = computed(() => {
   </PageHeader>
 
   <div class="page-content">
+    <!-- 自动回收说明 -->
+    <a-alert
+      message="伏笔状态说明"
+      description="伏笔状态会随章节剧情分析自动更新：分析检测到伏笔已埋入时自动标记「已埋设」，检测到伏笔已揭开时自动标记「已回收」。也可点击「从分析同步」手动触发。"
+      type="info"
+      show-icon
+      closable
+      style="margin-bottom:16px"
+    />
+
     <!-- 统计卡片 -->
     <div class="stats-row">
       <div class="stat-card">

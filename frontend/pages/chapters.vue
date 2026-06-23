@@ -1,16 +1,25 @@
 <script setup lang="ts">
-// 故事章节：对标参考站 — 列表项（状态/字数/评分/分析标签）+ 弹窗编辑器
+// 故事章节：对标 MuMuAINovel — 双模式列表 + 生成门槛 + 一键分析
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
+import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
+
 useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useProjectApi()
 const msg = useMessage()
+
+// ===== 项目信息（含 outline_mode） =====
+const { data: projectData } = await api.getProject()
+const outlineMode = computed(() => projectData.value?.outline_mode || 'one_to_one')
+
+// ===== 章节 + 大纲数据 =====
 const { data: chapters, refresh: refreshList } = await api.getChapters()
 const { data: outlines } = await api.getOutlines()
 
+// ===== 编辑器状态 =====
 const editorOpen = ref(false)
 const editing = ref<any>(null)
 const editingContent = ref('')
@@ -19,93 +28,460 @@ const generating = ref(false)
 const saving = ref(false)
 const targetWords = ref(3000)
 const narrativePov = ref('第三人称')
-if (import.meta.client) { const s = localStorage.getItem('moyu_chapter_words'); if (s) targetWords.value = Number(s) }
-
-// 章节分析缓存
-const analysisCache = ref<Record<number, any>>({})
-
-async function loadAnalysis(chapterNumber: number) {
-  if (analysisCache.value[chapterNumber]) return analysisCache.value[chapterNumber]
-  try {
-    const a = await apiGet<any>(`/api/projects/${currentProjectId.value}/analyses/${chapterNumber}`).catch(() => null)
-    if (a && !a.detail) analysisCache.value[chapterNumber] = a
-    return a
-  } catch { return null }
+if (import.meta.client) {
+  const s = localStorage.getItem('moyu_chapter_words')
+  if (s) targetWords.value = Number(s)
 }
 
-function openEditor(c: any) {
+// ===== 编辑器高级选项 =====
+const writingStyles = ref<any[]>([])
+const selectedStyleId = ref<number | undefined>()
+const availableSkills = ref<any[]>([])
+const selectedSkillKey = ref<string | undefined>()
+const availableModels = ref<Array<{ value: string; label: string }>>([])
+const selectedModel = ref<string | undefined>()
+const skillThinkingMode = ref<string | undefined>()
+
+// ===== 章节分析 =====
+const analysisPanelRef = ref<any>(null)
+const analysisPanelChapter = ref<any>(null)
+
+function openAnalysis(c: any) {
+  analysisPanelChapter.value = c
+  nextTick(() => {
+    analysisPanelRef.value?.open()
+  })
+}
+
+// ===== 修改弹窗 =====
+const modifyOpen = ref(false)
+const modifyChapter = ref<any>(null)
+const modifyTitle = ref('')
+const modifyStatus = ref('draft')
+
+// ===== 搜索与分页 =====
+const searchKeyword = ref('')
+const pageSize = ref(20)
+const currentPage = ref(1)
+const pageSizeOptions = ['20', '50', '100']
+
+// ===== 生成门槛逻辑 =====
+const chapterGenerateGateMap = computed(() => {
+  const list = chapters.value || []
+  const sorted = [...list].sort((a: any, b: any) => a.chapter_number - b.chapter_number)
+  const map: Record<number, { canGenerate: boolean; reason: string }> = {}
+
+  for (let i = 0; i < sorted.length; i++) {
+    const ch = sorted[i]
+    const missing: number[] = []
+
+    for (let j = 0; j < i; j++) {
+      const prev = sorted[j]
+      if (!prev.word_count || prev.word_count < 50) {
+        missing.push(prev.chapter_number)
+      }
+    }
+
+    if (missing.length > 0) {
+      map[ch.id] = { canGenerate: false, reason: `需要先完成前置章节：第 ${missing.join('、')} 章` }
+    } else {
+      map[ch.id] = { canGenerate: true, reason: '' }
+    }
+  }
+  return map
+})
+
+function canGenerateChapter(ch: any): boolean {
+  return chapterGenerateGateMap.value[ch.id]?.canGenerate ?? true
+}
+function getGenerateDisabledReason(ch: any): string {
+  return chapterGenerateGateMap.value[ch.id]?.reason || ''
+}
+
+// ===== 搜索过滤 + 排序 =====
+const filteredChapters = computed(() => {
+  const list = chapters.value || []
+  const kw = searchKeyword.value.trim().toLowerCase()
+  if (!kw) return list
+  return list.filter((c: any) => {
+    return (
+      String(c.chapter_number).includes(kw) ||
+      (c.title || '').toLowerCase().includes(kw) ||
+      getOutlineTitle(c.outline_id).toLowerCase().includes(kw)
+    )
+  })
+})
+
+const sortedChapters = computed(() => {
+  return [...filteredChapters.value].sort((a: any, b: any) => a.chapter_number - b.chapter_number)
+})
+
+// ===== 分页 =====
+const pagedChapters = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return sortedChapters.value.slice(start, start + pageSize.value)
+})
+
+watch([() => chapters.value?.length, pageSize, searchKeyword], () => {
+  const total = sortedChapters.value.length
+  const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
+})
+
+// ===== one-to-many 模式：按大纲分组 =====
+interface OutlineGroup {
+  outlineId: number | null
+  outlineTitle: string
+  outlineOrder: number
+  chapters: any[]
+}
+
+const groupedChapters = computed<OutlineGroup[]>(() => {
+  if (outlineMode.value !== 'one-to-many') return []
+  const groups: Record<string, any[]> = {}
+  for (const ch of sortedChapters.value) {
+    const key = ch.outline_id || 'uncategorized'
+    if (!groups[key]) groups[key] = []
+    groups[key].push(ch)
+  }
+  const outlineMap = new Map((outlines.value || []).map((o: any) => [o.id, o]))
+  return Object.entries(groups)
+    .map(([key, chs]) => {
+      const outline = key !== 'uncategorized' ? outlineMap.get(Number(key)) : null
+      return {
+        outlineId: outline?.id ?? null,
+        outlineTitle: outline?.title || '未分类',
+        outlineOrder: outline?.sort_order ?? 999,
+        chapters: chs,
+      }
+    })
+    .sort((a, b) => a.outlineOrder - b.outlineOrder)
+})
+
+const pagedGroupedChapters = computed(() => {
+  const groups = groupedChapters.value
+  const flat: Array<{ group: OutlineGroup; chapter: any }> = []
+  for (const g of groups) {
+    for (const ch of g.chapters) {
+      flat.push({ group: g, chapter: ch })
+    }
+  }
+  const start = (currentPage.value - 1) * pageSize.value
+  const sliced = flat.slice(start, start + pageSize.value)
+
+  const result: OutlineGroup[] = []
+  const groupMap = new Map<string, OutlineGroup>()
+  for (const { group, chapter } of sliced) {
+    const key = group.outlineId ?? 'uncategorized'
+    if (!groupMap.has(key)) {
+      const g = { ...group, chapters: [] }
+      groupMap.set(key, g)
+      result.push(g)
+    }
+    groupMap.get(key)!.chapters.push(chapter)
+  }
+  return result
+})
+
+// ===== 已创建章节的章节号集合 =====
+const createdChapterNos = computed(() => new Set((chapters.value || []).map((c: any) => c.chapter_number)))
+
+// ===== 大纲标题映射 =====
+function getOutlineTitle(outlineId: number | null): string {
+  if (!outlineId) return ''
+  const o = (outlines.value || []).find((o: any) => o.id === outlineId)
+  return o?.title || ''
+}
+
+// ===== 可分析章节数 =====
+const batchAnalyzableCount = computed(() => {
+  return (chapters.value || []).filter((c: any) => c.word_count >= 50 && !c.quality_score).length
+})
+
+// ===== 状态文本/颜色 =====
+const statusText = (s: string) => ({ draft: '草稿', generating: '创作中', completed: '已完成' }[s] || s)
+const statusColor = (s: string) => ({ draft: 'default', generating: 'processing', completed: 'success' }[s] || 'default')
+
+// ===== 一键分析 =====
+const batchAnalyzing = ref(false)
+async function onBatchAnalyze() {
+  batchAnalyzing.value = true
+  try {
+    const res = await api.analyzeAllUnanalyzed()
+    msg.success(`一键分析完成：已分析 ${res.analyzed} 章，共 ${res.total_chapters} 章`)
+    await refreshList()
+  } catch (e: any) {
+    msg.error('批量分析失败：' + formatError(e))
+  } finally {
+    batchAnalyzing.value = false
+  }
+}
+
+// ===== 导出 TXT =====
+async function onExportTxt() {
+  if (!chapters.value?.length) { msg.warning('暂无章节，无法导出'); return }
+  const title = projectData.value?.title || '项目'
+  if (!await msg.confirm(`确定要将《${title}》的所有章节导出为TXT文件吗？`)) return
+  try {
+    const token = localStorage.getItem('moyu_token')
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetch(`/api/projects/${currentProjectId.value}/export?format=txt`, { headers })
+    if (!res.ok) throw new Error(`导出失败：${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    msg.success('导出成功')
+  } catch (e: any) {
+    msg.error('导出失败：' + formatError(e))
+  }
+}
+
+// ===== 编辑器打开/关闭 =====
+async function openEditor(c: any) {
   editing.value = c
   editingTitle.value = c.title || `第${c.chapter_number}章`
   editingContent.value = ''
-  apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`).then(d => { if (d) editingContent.value = d.content || '' })
+  narrativePov.value = projectData.value?.narrative_pov || '第三人称'
+
+  // 加载章节内容
+  const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`).catch(() => null)
+  if (ch) editingContent.value = ch.content || ''
+
+  // 加载编辑器选项（并行）
+  await Promise.all([
+    loadWritingStylesIfEmpty(),
+    loadSkillsIfEmpty(),
+    loadModelsIfEmpty(),
+  ])
+
   editorOpen.value = true
 }
 
+async function loadWritingStylesIfEmpty() {
+  if (writingStyles.value.length > 0) return
+  try {
+    writingStyles.value = await fetchWritingStyles()
+    const def = writingStyles.value.find((s: any) => s.is_default)
+    if (def) selectedStyleId.value = def.id
+  } catch {}
+}
+
+async function loadSkillsIfEmpty() {
+  if (availableSkills.value.length > 0) return
+  try {
+    const all = await fetchSkills()
+    availableSkills.value = all.filter((s: any) => s.is_enabled !== false)
+  } catch {}
+}
+
+async function loadModelsIfEmpty() {
+  if (availableModels.value.length > 0) return
+  try {
+    availableModels.value = await fetchRemoteModels()
+  } catch {}
+}
+
+// ===== AI 创作（异步后台任务）=====
 async function onGenerate() {
   if (!editing.value) return
+  if (!canGenerateChapter(editing.value)) {
+    msg.warning(getGenerateDisabledReason(editing.value))
+    return
+  }
   generating.value = true
   try {
     const { task_id } = await api.generateChapterAsync(editing.value.id)
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'chapter_generate', `生成第${editing.value.chapter_number}章`)
+    trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })
     msg.success('章节生成任务已提交，可在右下角查看进度')
+    if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
     editorOpen.value = false
     setTimeout(() => refreshList(), 5000)
-  } catch (e:any) { msg.error('生成失败：'+formatError(e)) }
-  finally { generating.value = false }
+  } catch (e: any) {
+    msg.error('生成失败：' + formatError(e))
+  } finally {
+    generating.value = false
+  }
 }
+
+// ===== 保存 =====
 async function onSave() {
   if (!editing.value) return
   saving.value = true
-  try { await api.updateChapter(editing.value.id, { title: editingTitle.value, content: editingContent.value, status:'completed' }); if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value)); await refreshList(); msg.success('保存成功') }
-  catch (e:any) { msg.error('保存失败：'+formatError(e)) }
-  finally { saving.value = false }
+  try {
+    await api.updateChapter(editing.value.id, {
+      title: editingTitle.value,
+      content: editingContent.value,
+      status: 'completed',
+    })
+    if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
+    await refreshList()
+    msg.success('保存成功')
+  } catch (e: any) {
+    msg.error('保存失败：' + formatError(e))
+  } finally {
+    saving.value = false
+  }
 }
+
+// ===== 清空 =====
+async function clearContent() {
+  if (!editing.value || !await msg.confirm('确认清空？')) return
+  try {
+    await api.clearChapter(editing.value.id)
+    editingContent.value = ''
+    await refreshList()
+  } catch (e: any) {
+    msg.error('清空失败：' + formatError(e))
+  }
+}
+
+// ===== 从大纲创建 =====
 async function createFromOutline(o: any) {
   try {
     await api.createChapter({ chapter_number: o.chapter_number, title: o.title, outline_id: o.id })
-    await refreshList(); msg.success(`第${o.chapter_number}章已创建`)
-  } catch (e:any) { msg.error('创建失败：'+formatError(e)) }
-}
-async function createNewChapter() {
-  const nextNo = (chapters.value?.length||0)+1
-  try { await api.createChapter({ chapter_number: nextNo, title:`第 ${nextNo} 章` }); await refreshList(); msg.success('已创建') }
-  catch (e:any) { msg.error('创建失败：'+formatError(e)) }
-}
-async function onDelete(id:number) {
-  if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteChapter(id); await refreshList(); msg.success('已删除') }
-  catch (e:any) { msg.error('删除失败：'+formatError(e)) }
-}
-async function clearContent() {
-  if (!editing.value || !await msg.confirm('确认清空？')) return
-  try { await api.clearChapter(editing.value.id); editingContent.value=''; await refreshList() }
-  catch (e: any) { msg.error('清空失败：' + formatError(e)) }
+    await refreshList()
+    msg.success(`第${o.chapter_number}章已创建`)
+  } catch (e: any) {
+    msg.error('创建失败：' + formatError(e))
+  }
 }
 
-// 重写/局部重写应用后，重新加载章节内容
+// ===== 手动创建（one-to-many）=====
+const manualCreateOpen = ref(false)
+const manualCreateNo = ref(1)
+const manualCreateTitle = ref('')
+const manualCreateOutlineId = ref<number | undefined>()
+
+function openManualCreate() {
+  const nextNo = (chapters.value?.length || 0) + 1
+  manualCreateNo.value = nextNo
+  manualCreateTitle.value = `第 ${nextNo} 章`
+  manualCreateOutlineId.value = undefined
+  manualCreateOpen.value = true
+}
+
+async function onManualCreate() {
+  try {
+    await api.createChapter({
+      chapter_number: manualCreateNo.value,
+      title: manualCreateTitle.value,
+      outline_id: manualCreateOutlineId.value,
+    })
+    await refreshList()
+    manualCreateOpen.value = false
+    msg.success('章节已创建')
+  } catch (e: any) {
+    msg.error('创建失败：' + formatError(e))
+  }
+}
+
+// ===== 新建空白章 =====
+async function createNewChapter() {
+  const nextNo = (chapters.value?.length || 0) + 1
+  try {
+    await api.createChapter({ chapter_number: nextNo, title: `第 ${nextNo} 章` })
+    await refreshList()
+    msg.success('已创建')
+  } catch (e: any) {
+    msg.error('创建失败：' + formatError(e))
+  }
+}
+
+// ===== 删除 =====
+async function onDelete(id: number) {
+  if (!await msg.confirm('确认删除？')) return
+  try {
+    await api.deleteChapter(id)
+    await refreshList()
+    msg.success('已删除')
+  } catch (e: any) {
+    msg.error('删除失败：' + formatError(e))
+  }
+}
+
+// ===== 修改弹窗 =====
+function openModify(c: any) {
+  modifyChapter.value = c
+  modifyTitle.value = c.title || `第${c.chapter_number}章`
+  modifyStatus.value = c.status || 'draft'
+  modifyOpen.value = true
+}
+
+async function onModify() {
+  if (!modifyChapter.value) return
+  try {
+    await api.updateChapter(modifyChapter.value.id, {
+      title: modifyTitle.value,
+      status: modifyStatus.value,
+    })
+    await refreshList()
+    modifyOpen.value = false
+    msg.success('修改成功')
+  } catch (e: any) {
+    msg.error('修改失败：' + formatError(e))
+  }
+}
+
+// ===== 重写/局部重写应用后，重新加载章节内容 =====
 async function onRewriteApplied() {
   if (!editing.value) return
   try {
     const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${editing.value.id}`).catch(() => null)
-    if (ch) { editingContent.value = ch.content || ''; editingTitle.value = ch.title || editingTitle.value }
+    if (ch) {
+      editingContent.value = ch.content || ''
+      editingTitle.value = ch.title || editingTitle.value
+    }
     await refreshList()
     msg.success('章节内容已更新')
-  } catch (e: any) { msg.error('刷新失败：' + formatError(e)) }
+  } catch (e: any) {
+    msg.error('刷新失败：' + formatError(e))
+  }
 }
-// 重写/局部/去味（简化）
-const showRegen = ref(false); const regenInstr = ref(''); const regenerating = ref(false)
-async function onRegen() { if(!editing.value)return; regenerating.value=true; try{const r=await api.regenerateChapter(editing.value.id,{instructions:regenInstr.value,include_analysis:true});editingContent.value=r.content||'';showRegen.value=false;await refreshList();msg.success('重写完成')}catch(e:any){msg.error('重写失败：'+formatError(e))}finally{regenerating.value=false} }
-const showPartial = ref(false); const partialText=ref(''); const partialInstr=ref(''); const partialResult=ref(''); const partialing=ref(false)
-function openPartial(){const ta=document.querySelector('.ch-editor textarea')as any;if(ta&&ta.selectionStart!==ta.selectionEnd)partialText.value=ta.value.substring(ta.selectionStart,ta.selectionEnd);partialInstr.value='';partialResult.value='';showPartial.value=true}
-async function onPartial(){if(!editing.value||!partialText.value.trim())return;partialing.value=true;try{const r=await api.partialRegenerate(editing.value.id,{selected_text:partialText.value,user_instructions:partialInstr.value});partialResult.value=r.rewritten_text||''}catch(e:any){msg.error('失败：'+formatError(e))}finally{partialing.value=false}}
-function applyPartial(){if(partialResult.value&&editingContent.value.includes(partialText.value)){editingContent.value=editingContent.value.replace(partialText.value,partialResult.value);showPartial.value=false;msg.success('已应用')}}
-const showDenoise=ref(false);const denoiseText=ref('');const denoiseResult=ref('');const denoisePreview=ref(false);const denoising=ref(false)
-function openDenoise(){const ta=document.querySelector('.ch-editor textarea')as any;denoiseText.value=(ta&&ta.selectionStart!==ta.selectionEnd)?ta.value.substring(ta.selectionStart,ta.selectionEnd):editingContent.value;denoiseResult.value='';denoisePreview.value=false;showDenoise.value=true}
-async function onDenoise(){if(!denoiseText.value.trim())return;denoising.value=true;try{const r=await api.aiDenoising({text:denoiseText.value});denoiseResult.value=r.processed_text||'';denoisePreview.value=true}catch(e:any){msg.error('失败：'+formatError(e))}finally{denoising.value=false}}
-function applyDenoise(){editingContent.value=denoiseResult.value;showDenoise.value=false;msg.success('已应用')}
 
-// ===== 内嵌阅读器（带标注，合并 chapter-reader 功能）=====
+// ===== 去AI味 =====
+const showDenoise = ref(false)
+const denoiseText = ref('')
+const denoiseResult = ref('')
+const denoisePreview = ref(false)
+const denoising = ref(false)
+
+function openDenoise() {
+  const ta = document.querySelector('.ch-editor textarea') as any
+  denoiseText.value = (ta && ta.selectionStart !== ta.selectionEnd)
+    ? ta.value.substring(ta.selectionStart, ta.selectionEnd)
+    : editingContent.value
+  denoiseResult.value = ''
+  denoisePreview.value = false
+  showDenoise.value = true
+}
+
+async function onDenoise() {
+  if (!denoiseText.value.trim()) return
+  denoising.value = true
+  try {
+    const r = await api.aiDenoising({ text: denoiseText.value })
+    denoiseResult.value = r.processed_text || ''
+    denoisePreview.value = true
+  } catch (e: any) {
+    msg.error('失败：' + formatError(e))
+  } finally {
+    denoising.value = false
+  }
+}
+
+function applyDenoise() {
+  editingContent.value = denoiseResult.value
+  showDenoise.value = false
+  msg.success('已应用')
+}
+
+// ===== 内嵌阅读器（带标注）=====
 const readerOpen = ref(false)
 const readerChapter = ref<any>(null)
 const readerAnnotations = ref<any[]>([])
@@ -113,7 +489,6 @@ const readerSummary = ref<any>({})
 const readerLoading = ref(false)
 const readerActiveAnn = ref<any>(null)
 const readerShowSidebar = ref(true)
-const readerExpandedGroups = ref(true)
 
 const readerTypeMeta: Record<string, { label: string; color: string; icon: string }> = {
   hook: { label: '剧情钩子', color: '#C75B5B', icon: '🎣' },
@@ -121,13 +496,20 @@ const readerTypeMeta: Record<string, { label: string; color: string; icon: strin
   plot_point: { label: '关键情节', color: '#52A569', icon: '⭐' },
   character_event: { label: '角色事件', color: '#D49A4E', icon: '👤' },
 }
+
 const readerGroups = computed(() => {
   const groups: Record<string, any[]> = { hook: [], foreshadow: [], plot_point: [], character_event: [] }
   for (const a of (readerAnnotations.value || [])) {
     if (a && a.type && groups[a.type]) groups[a.type].push(a)
   }
   return (Object.keys(readerTypeMeta) as string[])
-    .map(type => ({ type, label: readerTypeMeta[type].label, icon: readerTypeMeta[type].icon, color: readerTypeMeta[type].color, items: groups[type] }))
+    .map(type => ({
+      type,
+      label: readerTypeMeta[type].label,
+      icon: readerTypeMeta[type].icon,
+      color: readerTypeMeta[type].color,
+      items: groups[type],
+    }))
     .filter(g => g.items.length > 0)
 })
 
@@ -138,10 +520,8 @@ async function openReader(c: any) {
   readerAnnotations.value = []
   readerSummary.value = {}
   try {
-    // 章节详情
     const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`)
     readerChapter.value = ch
-    // 标注
     const r = await api.getAnnotations(c.id)
     readerAnnotations.value = r.annotations || []
     readerSummary.value = r.summary || {}
@@ -151,19 +531,20 @@ async function openReader(c: any) {
     readerLoading.value = false
   }
 }
-// 阅读器内翻章
+
 async function readerNavigate(direction: -1 | 1) {
   const list = chapters.value || []
   const idx = list.findIndex((c: any) => c.id === readerChapter.value?.id)
   const next = list[idx + direction]
   if (next) await openReader(next)
 }
+
 function readerNavInfo() {
   const list = chapters.value || []
   const idx = list.findIndex((c: any) => c.id === readerChapter.value?.id)
   return { hasPrev: idx > 0, hasNext: idx < list.length - 1 }
 }
-// 阅读器内触发分析
+
 const readerAnalyzing = ref(false)
 async function readerAnalyze() {
   if (!readerChapter.value) return
@@ -171,7 +552,6 @@ async function readerAnalyze() {
   msg.info('正在分析，请等待…')
   try {
     await api.triggerAnalysis(readerChapter.value.id)
-    // 重新加载标注
     const r = await api.getAnnotations(readerChapter.value.id)
     readerAnnotations.value = r.annotations || []
     readerSummary.value = r.summary || {}
@@ -182,166 +562,432 @@ async function readerAnalyze() {
     readerAnalyzing.value = false
   }
 }
-
-const statusText=(s:string)=>({draft:'草稿',generating:'创作中',completed:'已完成'}[s]||s)
-const statusColor=(s:string)=>({draft:'default',generating:'processing',completed:'success'}[s]||'default')
-const createdChapterNos = computed(() => new Set((chapters.value||[]).map(c=>c.chapter_number)))
-
-// ===== 分页（客户端切片，几百章不卡）=====
-const pageSize = ref(20)
-const currentPage = ref(1)
-const pageSizeOptions = ['20', '50', '100']
-const pagedChapters = computed(() => {
-  const list = chapters.value || []
-  const start = (currentPage.value - 1) * pageSize.value
-  return list.slice(start, start + pageSize.value)
-})
-// 章节列表变化（删除/新增/刷新）时，修正越界页码
-watch([() => chapters.value?.length, pageSize], () => {
-  const total = chapters.value?.length || 0
-  const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
-  if (currentPage.value > maxPage) currentPage.value = maxPage
-})
 </script>
 
 <template>
   <div class="ch-page">
-    <div class="page-actions">
-      <a-button @click="createNewChapter">+ 空白章</a-button>
-      <BatchGeneratePanel :chapters="chapters || []" @done="refreshList" />
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <h2 class="page-title">📖 章节管理</h2>
+        <a-tag :color="outlineMode === 'one-to-one' ? 'blue' : 'green'" style="width: fit-content">
+          {{ outlineMode === 'one-to-one' ? '传统模式：章节由大纲管理' : '细化模式：章节可在大纲页面展开' }}
+        </a-tag>
+      </div>
+      <div class="page-header-right">
+        <a-input-search
+          v-model:value="searchKeyword"
+          placeholder="搜索章节（序号/标题/大纲）"
+          allow-clear
+          style="width: 240px"
+        />
+        <a-button v-if="outlineMode === 'one-to-many'" @click="openManualCreate">
+          + 手动创建
+        </a-button>
+        <a-button
+          :loading="batchAnalyzing"
+          :disabled="!chapters?.length || batchAnalyzableCount === 0"
+          style="color: #D49A4E; border-color: #D49A4E"
+          @click="onBatchAnalyze"
+        >
+          ⚡ 一键分析{{ batchAnalyzableCount > 0 ? ` (${batchAnalyzableCount})` : '' }}
+        </a-button>
+        <BatchGeneratePanel :chapters="chapters || []" @done="refreshList" />
+        <a-button :disabled="!chapters?.length" @click="onExportTxt">📥 导出TXT</a-button>
+      </div>
     </div>
+
     <!-- 从大纲创建（未创建的大纲） -->
-    <a-card v-if="outlines && outlines.filter(o=>!createdChapterNos.has(o.chapter_number)).length" size="small" title="从大纲创建章节" style="margin-bottom:12px">
+    <a-card
+      v-if="outlines && outlines.filter((o: any) => !createdChapterNos.has(o.chapter_number)).length"
+      size="small"
+      title="从大纲创建章节"
+      style="margin-bottom: 12px"
+    >
       <div class="outline-chips">
-        <a-button v-for="o in outlines.filter(o=>!createdChapterNos.has(o.chapter_number))" :key="o.id" size="small" @click="createFromOutline(o)">
+        <a-button
+          v-for="o in outlines.filter((o: any) => !createdChapterNos.has(o.chapter_number))"
+          :key="o.id"
+          size="small"
+          @click="createFromOutline(o)"
+        >
           第{{ o.chapter_number }}章 {{ o.title }}
         </a-button>
       </div>
     </a-card>
 
-    <div v-if="chapters && chapters.length" class="ch-list">
-      <div v-for="c in pagedChapters" :key="c.id" class="ch-row" @click="openEditor(c)">
-        <div class="ch-row-icon">📄</div>
-        <div class="ch-row-main">
-          <div class="ch-row-head">
-            <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title||'无标题' }}</span>
-            <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
-            <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count||0).toLocaleString() }}字</a-tag>
-            <a-tag v-if="c.quality_alert && c.quality_alert.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
-            <a-tag v-if="c.quality_alert && c.quality_alert.includes('low_score')" color="orange" size="small">低分</a-tag>
-            <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
+    <!-- ===== 章节列表 ===== -->
+    <template v-if="sortedChapters.length">
+      <!-- one-to-many 按大纲分组显示（仅当有多个分组时） -->
+      <a-collapse v-if="outlineMode === 'one-to-many' && groupedChapters.length > 1" :default-active-key="pagedGroupedChapters.map((_: any, i: number) => String(i))" style="background: transparent">
+        <a-collapse-panel
+          v-for="(group, gi) in pagedGroupedChapters"
+          :key="String(gi)"
+          :style="{ marginBottom: '12px', background: '#fff', borderRadius: '8px', border: '1px solid #E8E4DC' }"
+        >
+          <template #header>
+            <div class="group-header">
+              <a-tag :color="group.outlineId ? 'blue' : 'default'" style="margin: 0">
+                {{ group.outlineId ? `📖 大纲 ${group.outlineOrder}` : '📝 未分类' }}
+              </a-tag>
+              <span class="group-title">{{ group.outlineTitle }}</span>
+              <a-tag color="success" size="small">{{ group.chapters.length }} 章</a-tag>
+              <a-tag color="processing" size="small">
+                {{ group.chapters.reduce((s: number, c: any) => s + (c.word_count || 0), 0).toLocaleString() }} 字
+              </a-tag>
+            </div>
+          </template>
+          <div class="ch-list">
+            <div v-for="c in group.chapters" :key="c.id" class="ch-row" @click="openEditor(c)">
+              <div class="ch-row-icon">📄</div>
+              <div class="ch-row-main">
+                <div class="ch-row-head">
+                  <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title || '无标题' }}</span>
+                  <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
+                  <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
+                  <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small">🔒 需前置章节</a-tag>
+                </div>
+                <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
+              </div>
+              <div class="ch-row-actions" @click.stop>
+                <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
+                <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
+                  <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
+                <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
+                <a-popconfirm title="确认删除该章节？" @confirm="onDelete(c.id)">
+                  <a-button type="text" size="small" danger @click.stop>🗑️ 删除</a-button>
+                </a-popconfirm>
+              </div>
+            </div>
           </div>
-          <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0,80) }}</div>
-        </div>
-        <div class="ch-row-actions" @click.stop>
-          <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
-          <a-button type="text" size="small" @click.stop="openReader(c)">📖 阅读</a-button>
-          <a-button type="text" size="small" danger @click="onDelete(c.id)">删除</a-button>
+        </a-collapse-panel>
+      </a-collapse>
+
+      <!-- 默认扁平列表 -->
+      <div v-else class="ch-list">
+        <div v-for="c in pagedChapters" :key="c.id" class="ch-row" @click="openEditor(c)">
+          <div class="ch-row-icon">📄</div>
+          <div class="ch-row-main">
+            <div class="ch-row-head">
+              <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title || '无标题' }}</span>
+              <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
+              <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
+              <a-tag v-if="c.quality_alert?.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
+              <a-tag v-if="c.quality_alert?.includes('low_score')" color="orange" size="small">低分</a-tag>
+              <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
+              <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small" :title="getGenerateDisabledReason(c)">🔒 需前置章节</a-tag>
+            </div>
+            <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
+            <div v-else-if="!c.word_count" class="ch-row-empty">暂无内容</div>
+          </div>
+          <div class="ch-row-actions" @click.stop>
+            <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
+            <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
+            <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
+            <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
+          </div>
         </div>
       </div>
-    </div>
+    </template>
+
     <a-empty v-else description="暂无章节" />
 
     <!-- 分页 -->
-    <div v-if="chapters && chapters.length > pageSize" class="pagination-bar">
+    <div v-if="sortedChapters.length > pageSize" class="pagination-bar">
       <a-pagination
         v-model:current="currentPage"
         v-model:page-size="pageSize"
-        :total="chapters.length"
+        :total="sortedChapters.length"
         :page-size-options="pageSizeOptions"
         show-size-changer
-        :show-total="(t:number) => `共 ${t} 章`"
+        :show-total="(t: number) => `共 ${t} 章`"
         size="small"
       />
     </div>
 
-    <!-- 编辑器 -->
-    <a-modal v-model:open="editorOpen" :title="`编辑：第${editing?.chapter_number}章`" width="90%" :style="{top:'20px'}" :footer="null" :destroyOnClose="true">
+    <!-- ===== 编辑器弹窗 ===== -->
+    <a-modal
+      v-model:open="editorOpen"
+      :title="`编辑：第${editing?.chapter_number}章`"
+      width="90%"
+      :style="{ top: '10px' }"
+      :footer="null"
+      :destroy-on-close="true"
+    >
       <div v-if="editing" class="editor">
+        <!-- 标题 + 生成按钮行 -->
         <div class="editor-bar">
-          <a-input v-model:value="editingTitle" size="large" style="flex:1;font-weight:600" />
-          <a-button type="primary" :loading="generating" @click="onGenerate">{{ generating?'AI创作中…':'⚡ AI创作' }}</a-button>
+          <a-input v-model:value="editingTitle" size="large" style="flex: 1; font-weight: 600" />
+          <a-button
+            type="primary"
+            :loading="generating"
+            :disabled="!canGenerateChapter(editing)"
+            :title="!canGenerateChapter(editing) ? getGenerateDisabledReason(editing) : ''"
+            @click="onGenerate"
+          >
+            {{ generating ? 'AI创作中…' : '⚡ AI创作' }}
+          </a-button>
           <ClientOnly>
             <ChapterRewritePanel :chapter-id="editing.id" :chapter-content="editingContent" @applied="onRewriteApplied" />
             <template #fallback><a-button disabled>✏️ 重写/润色</a-button></template>
           </ClientOnly>
           <a-button :loading="denoising" @click="openDenoise">去AI味</a-button>
-          <a-button type="primary" :loading="saving" @click="onSave">保存</a-button>
+          <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
           <a-button @click="clearContent">清空</a-button>
         </div>
+
+        <!-- 高级选项行1：写作风格 + 叙事人称 -->
         <div class="editor-opts">
-          <span>视角：<a-select v-model:value="narrativePov" size="small" style="width:110px"><a-select-option label="第三人称" value="第三人称" /><a-select-option label="第一人称" value="第一人称" /></a-select></span>
-          <span>目标字数：<a-input-number v-model:value="targetWords" :min="500" :max="10000" :step="100" size="small" style="width:110px" /></span>
+          <span>风格：
+            <a-select v-model:value="selectedStyleId" size="small" style="width: 140px" placeholder="选择风格" allow-clear>
+              <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id">{{ s.name }}</a-select-option>
+            </a-select>
+          </span>
+          <span>视角：
+            <a-select v-model:value="narrativePov" size="small" style="width: 110px">
+              <a-select-option value="第三人称">第三人称</a-select-option>
+              <a-select-option value="第一人称">第一人称</a-select-option>
+              <a-select-option value="全知视角">全知视角</a-select-option>
+            </a-select>
+          </span>
+          <span>目标字数：
+            <a-input-number v-model:value="targetWords" :min="500" :max="10000" :step="100" size="small" style="width: 110px" />
+          </span>
         </div>
-        <div class="ch-editor"><a-textarea v-model:value="editingContent" :rows="18" placeholder="点击AI创作生成正文..." /></div>
-        <div class="editor-foot">字数：{{ editingContent.length.toLocaleString() }}</div>
+
+        <!-- 高级选项行2：Skill + 模型 + 思考模式 -->
+        <div class="editor-opts">
+          <span>Skill：
+            <a-select v-model:value="selectedSkillKey" size="small" style="width: 160px" placeholder="AI自动选择" allow-clear>
+              <a-select-option v-for="s in availableSkills" :key="s.name || s.template_key" :value="s.name || s.template_key">
+                {{ s.display_name || s.template_name || s.name }}
+              </a-select-option>
+            </a-select>
+          </span>
+          <span>模型：
+            <a-select v-model:value="selectedModel" size="small" style="width: 180px" placeholder="默认模型" allow-clear>
+              <a-select-option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</a-select-option>
+            </a-select>
+          </span>
+          <span>思考：
+            <a-select v-model:value="skillThinkingMode" size="small" style="width: 110px" placeholder="默认" allow-clear>
+              <a-select-option value="low">浅思考</a-select-option>
+              <a-select-option value="medium">深思考</a-select-option>
+              <a-select-option value="high">深度思考</a-select-option>
+            </a-select>
+          </span>
+        </div>
+
+        <!-- 内容编辑区 -->
+        <div class="ch-editor">
+          <a-textarea v-model:value="editingContent" :rows="18" :disabled="generating" placeholder="点击AI创作生成正文..." />
+        </div>
+        <div class="editor-foot">
+          <span>字数：{{ editingContent.length.toLocaleString() }}</span>
+        </div>
       </div>
     </a-modal>
 
-    <a-modal v-model:open="showRegen" title="重写全章" width="500px"><a-textarea v-model:value="regenInstr" :rows="4" placeholder="修改要求" /><template #footer><a-button @click="showRegen=false">取消</a-button><a-button type="primary" :loading="regenerating" @click="onRegen">重写</a-button></template></a-modal>
-    <a-modal v-model:open="showPartial" title="局部改写" width="600px"><a-textarea v-model:value="partialText" :rows="5" /><a-textarea v-model:value="partialInstr" :rows="2" placeholder="要求" style="margin-top:8px" /><div v-if="partialResult" style="margin-top:8px"><strong style="color:#4D8088">结果</strong><div style="background:#F0F5F5;padding:8px;border-radius:6px;margin-top:4px;white-space:pre-wrap">{{ partialResult }}</div><a-button type="primary" size="small" @click="applyPartial" style="margin-top:4px">应用替换</a-button></div><template #footer><a-button @click="showPartial=false">取消</a-button><a-button type="primary" :loading="partialing" @click="onPartial">AI改写</a-button></template></a-modal>
-    <a-modal v-model:open="showDenoise" title="去AI味" width="600px"><div v-if="!denoisePreview"><a-textarea v-model:value="denoiseText" :rows="6" /></div><div v-else><strong style="color:#4D8088">结果</strong><div style="background:#F0F5F5;padding:8px;border-radius:6px;margin-top:4px;white-space:pre-wrap">{{ denoiseResult }}</div></div><template #footer><a-button @click="showDenoise=false">{{denoisePreview?'关闭':'取消'}}</a-button><a-button v-if="denoisePreview" type="primary" @click="applyDenoise">应用</a-button><a-button v-else type="primary" :loading="denoising" @click="onDenoise">润色</a-button></template></a-modal>
+    <!-- ===== 修改弹窗 ===== -->
+    <a-modal v-model:open="modifyOpen" title="修改章节信息" width="480px">
+      <a-form :label-col="{ span: 5 }">
+        <a-form-item label="章节标题">
+          <a-input v-model:value="modifyTitle" />
+        </a-form-item>
+        <a-form-item label="章节序号">
+          <a-input-number :value="modifyChapter?.chapter_number" disabled style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="状态">
+          <a-select v-model:value="modifyStatus">
+            <a-select-option value="draft">草稿</a-select-option>
+            <a-select-option value="completed">已完成</a-select-option>
+          </a-select>
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="modifyOpen = false">取消</a-button>
+        <a-button type="primary" @click="onModify">保存</a-button>
+      </template>
+    </a-modal>
 
-    <!-- 内嵌阅读器（带标注，合并 chapter-reader 功能）-->
-    <a-modal v-model:open="readerOpen" :width="1100" :title="readerChapter ? `📖 阅读：第${readerChapter.chapter_number}章 · ${readerChapter.title}` : '阅读'" :style="{ top: '10px' }" :footer="null" :destroyOnClose="true">
-      <div v-if="readerLoading" style="text-align:center;padding:60px;color:#8C8C8C;">加载中…</div>
+    <!-- ===== 手动创建弹窗（one-to-many） ===== -->
+    <a-modal v-model:open="manualCreateOpen" title="手动创建章节" width="480px">
+      <a-form :label-col="{ span: 5 }">
+        <a-form-item label="章节序号">
+          <a-input-number v-model:value="manualCreateNo" :min="1" style="width: 100%" />
+        </a-form-item>
+        <a-form-item label="章节标题">
+          <a-input v-model:value="manualCreateTitle" />
+        </a-form-item>
+        <a-form-item label="关联大纲">
+          <a-select v-model:value="manualCreateOutlineId" placeholder="选择大纲" allow-clear style="width: 100%">
+            <a-select-option v-for="o in (outlines || [])" :key="o.id" :value="o.id">
+              第{{ o.chapter_number }}章 {{ o.title }}
+            </a-select-option>
+          </a-select>
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="manualCreateOpen = false">取消</a-button>
+        <a-button type="primary" @click="onManualCreate">创建</a-button>
+      </template>
+    </a-modal>
+
+    <!-- ===== 去AI味弹窗 ===== -->
+    <a-modal v-model:open="showDenoise" title="去AI味" width="600px">
+      <div v-if="!denoisePreview">
+        <a-textarea v-model:value="denoiseText" :rows="6" />
+      </div>
+      <div v-else>
+        <strong style="color: #4D8088">结果</strong>
+        <div style="background: #F0F5F5; padding: 8px; border-radius: 6px; margin-top: 4px; white-space: pre-wrap">{{ denoiseResult }}</div>
+      </div>
+      <template #footer>
+        <a-button @click="showDenoise = false">{{ denoisePreview ? '关闭' : '取消' }}</a-button>
+        <a-button v-if="denoisePreview" type="primary" @click="applyDenoise">应用</a-button>
+        <a-button v-else type="primary" :loading="denoising" @click="onDenoise">润色</a-button>
+      </template>
+    </a-modal>
+
+    <!-- ===== 内嵌阅读器（带标注） ===== -->
+    <a-modal
+      v-model:open="readerOpen"
+      :width="1100"
+      :title="readerChapter ? `📖 阅读：第${readerChapter.chapter_number}章 · ${readerChapter.title}` : '阅读'"
+      :style="{ top: '10px' }"
+      :footer="null"
+      :destroy-on-close="true"
+    >
+      <div v-if="readerLoading" style="text-align: center; padding: 60px; color: #8C8C8C">加载中…</div>
       <div v-else-if="readerChapter" class="reader-layout">
-        <!-- 正文（带标注） -->
         <div class="reader-main">
           <div class="reader-toolbar-bar">
             <a-button size="small" :disabled="!readerNavInfo().hasPrev" @click="readerNavigate(-1)">← 上一章</a-button>
-            <a-button size="small" type="link" @click="readerShowSidebar = !readerShowSidebar">{{ readerShowSidebar ? '隐藏标注' : '显示标注' }}</a-button>
-            <a-button size="small" :loading="readerAnalyzing" @click="readerAnalyze">🤖 {{ readerAnalyzing ? '分析中…' : (readerSummary.has_analysis ? '重新分析' : '分析此章') }}</a-button>
-            <a-button size="small" :disabled="!readerNavInfo().hasNext" style="margin-left:auto" @click="readerNavigate(1)">下一章 →</a-button>
+            <a-button size="small" type="link" @click="readerShowSidebar = !readerShowSidebar">
+              {{ readerShowSidebar ? '隐藏标注' : '显示标注' }}
+            </a-button>
+            <a-button size="small" :loading="readerAnalyzing" @click="readerAnalyze">
+              🤖 {{ readerAnalyzing ? '分析中…' : (readerSummary.has_analysis ? '重新分析' : '分析此章') }}
+            </a-button>
+            <a-button size="small" :disabled="!readerNavInfo().hasNext" style="margin-left: auto" @click="readerNavigate(1)">
+              下一章 →
+            </a-button>
           </div>
           <ClientOnly>
             <div class="reader-content-box">
-              <AnnotatedText :content="readerChapter.content || ''" :annotations="readerAnnotations" @select="(a: any) => readerActiveAnn = a" />
+              <AnnotatedText
+                :content="readerChapter.content || ''"
+                :annotations="readerAnnotations"
+                @select="(a: any) => readerActiveAnn = a"
+              />
             </div>
           </ClientOnly>
         </div>
-        <!-- 标注侧栏 -->
         <div v-if="readerShowSidebar" class="reader-side">
           <div class="reader-side-title">
             <span>本章标注</span>
             <span v-if="readerSummary.total" class="reader-side-count">{{ readerSummary.total }}</span>
           </div>
           <div v-if="readerSummary.total" class="reader-side-stats">
-            <span v-for="g in readerGroups" :key="'s'+g.type" :style="{ color: g.color }">{{ g.icon }} {{ g.items.length }}</span>
+            <span v-for="g in readerGroups" :key="'s' + g.type" :style="{ color: g.color }">
+              {{ g.icon }} {{ g.items.length }}
+            </span>
           </div>
           <div v-for="g in readerGroups" :key="g.type" class="reader-side-group">
-            <div class="reader-group-title" :style="{ color: g.color }">{{ g.icon }} {{ g.label }}（{{ g.items.length }}）</div>
-            <div v-for="(a, i) in g.items" :key="i" class="reader-ann-item" :class="{ active: readerActiveAnn === a }" :style="{ borderLeftColor: g.color }" @click="readerActiveAnn = a">
+            <div class="reader-group-title" :style="{ color: g.color }">
+              {{ g.icon }} {{ g.label }}（{{ g.items.length }}）
+            </div>
+            <div
+              v-for="(a, i) in g.items"
+              :key="i"
+              class="reader-ann-item"
+              :class="{ active: readerActiveAnn === a }"
+              :style="{ borderLeftColor: g.color }"
+              @click="readerActiveAnn = a"
+            >
               <div class="reader-ann-title">{{ a.title }}</div>
               <div class="reader-ann-content">{{ a.content }}</div>
             </div>
           </div>
-          <div v-if="!readerSummary.total" class="reader-no-annot">无标注{{ readerSummary.has_analysis === false ? '（此章节尚未分析）' : '' }}</div>
+          <div v-if="!readerSummary.total" class="reader-no-annot">
+            无标注{{ readerSummary.has_analysis === false ? '（此章节尚未分析）' : '' }}
+          </div>
         </div>
       </div>
     </a-modal>
+
+    <!-- ===== 章节分析面板 ===== -->
+    <ChapterAnalysisPanel
+      v-if="analysisPanelChapter"
+      ref="analysisPanelRef"
+      :chapter-id="analysisPanelChapter.id"
+      :chapter-number="analysisPanelChapter.chapter_number"
+      :quality-score="analysisPanelChapter.quality_score"
+    />
   </div>
 </template>
 
 <style scoped>
-.ch-page { display:flex; flex-direction:column; gap:12px; }
-.page-actions { display:flex; gap:8px; }
-.pagination-bar { display:flex; justify-content:center; padding:8px 0; }
-.outline-chips { display:flex; flex-wrap:wrap; gap:6px; }
-.ch-list { display:flex; flex-direction:column; gap:8px; }
-.ch-row { display:flex; align-items:flex-start; gap:10px; padding:14px 16px; background:#fff; border:1px solid #E8E4DC; border-radius:8px; cursor:pointer; transition:all .2s; }
-.ch-row:hover { border-color:#B8CDD1; box-shadow:0 2px 8px rgba(43,43,43,0.06); }
-.ch-row-icon { font-size:20px; flex-shrink:0; }
-.ch-row-main { flex:1; min-width:0; }
-.ch-row-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.ch-row-title { font-size:15px; font-weight:500; }
-.ch-row-summary { font-size:13px; color:#8C8C8C; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ch-row-actions { display:flex; gap:2px; flex-shrink:0; }
-.editor { display:flex; flex-direction:column; gap:10px; }
-.editor-bar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-.editor-opts { display:flex; gap:20px; font-size:13px; color:#595959; }
-.editor-foot { font-size:12px; color:#8C8C8C; text-align:right; }
-/* 内嵌阅读器 */
+.ch-page { display: flex; flex-direction: column; gap: 12px; }
+
+/* 页面头部 */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #E8E4DC;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #FAFAF7;
+}
+.page-header-left { display: flex; align-items: center; gap: 12px; }
+.page-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.page-title { margin: 0; font-size: 20px; }
+
+/* 大纲 chips */
+.outline-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* 分组头部 */
+.group-header { display: flex; align-items: center; gap: 10px; }
+.group-title { font-size: 15px; font-weight: 600; }
+
+/* 分页 */
+.pagination-bar { display: flex; justify-content: center; padding: 8px 0; }
+
+/* 章节列表 */
+.ch-list { display: flex; flex-direction: column; gap: 8px; }
+.ch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #E8E4DC;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.ch-row:hover { border-color: #B8CDD1; box-shadow: 0 2px 8px rgba(43, 43, 43, 0.06); }
+.ch-row-icon { font-size: 20px; flex-shrink: 0; }
+.ch-row-main { flex: 1; min-width: 0; }
+.ch-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ch-row-title { font-size: 15px; font-weight: 500; }
+.ch-row-summary { font-size: 13px; color: #8C8C8C; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-row-empty { font-size: 13px; color: #B5C7CB; margin-top: 4px; }
+.ch-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
+
+/* 编辑器 */
+.editor { display: flex; flex-direction: column; gap: 10px; }
+.editor-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.editor-opts { display: flex; gap: 20px; font-size: 13px; color: #595959; flex-wrap: wrap; }
+.editor-foot { font-size: 12px; color: #8C8C8C; text-align: right; }
+.ch-editor textarea { font-family: 'Noto Serif SC', serif; font-size: 15px; line-height: 2; }
+
+/* 阅读器 */
 .reader-layout { display: grid; grid-template-columns: 1fr 280px; gap: 14px; height: calc(100vh - 160px); }
 .reader-main { display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
 .reader-toolbar-bar { display: flex; align-items: center; gap: 8px; }

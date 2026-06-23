@@ -22,14 +22,24 @@ async function viewDetail(chapterNumber: number) {
   try {
     const r = await api.getAnalysis(chapterNumber)
     detail.value = r
-  } catch (e:any) {
-    detail.value = { detail: '加载失败' }
+  } catch (e: any) {
+    const status = e?.response?.status || e?.status
+    if (status === 404) {
+      detail.value = null  // 无分析数据，显示空状态
+    } else {
+      detail.value = { detail: '加载失败：' + formatError(e) }
+    }
   } finally { loading.value = false }
 }
 
 const analysisMap = computed(() => {
   const m: Record<number, any> = {}
-  for (const a of (analyses.value||[])) m[a.chapter_number] = a
+  for (const a of (analyses.value||[])) {
+    // 只有当分析有实际数据（quality_scores 或 plot_stage）才算真正已分析
+    if (a && (a.quality_scores || a.plot_stage)) {
+      m[a.chapter_number] = a
+    }
+  }
   return m
 })
 
@@ -65,7 +75,12 @@ async function analyzeChapter(chapterId: number, chapterNumber: number) {
     await refresh()
     await viewDetail(chapterNumber)
   } catch (e: any) {
-    msg.error('分析失败：' + formatError(e))
+    const status = e?.response?.status || e?.status
+    if (status === 400) {
+      msg.error('分析失败：章节内容过少，无法分析')
+    } else {
+      msg.error('分析失败：' + formatError(e))
+    }
   } finally {
     analyzing.value = false
   }
