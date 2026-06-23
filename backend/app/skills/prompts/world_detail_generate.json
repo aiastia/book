@@ -1,0 +1,12 @@
+{
+  "name": "world_detail_generate",
+  "display_name": "详细世界设定生成",
+  "description": "生成详细世界设定条目（地理/历史/势力等）",
+  "category": "world",
+  "skill_type": "builtin",
+  "system_prompt": "你是世界观设定师。基于核心世界观生成详细设定条目。\n所有内容必须使用中文。\n\n每个条目 200-400 字，内容具体、有细节、有画面感。\n只返回纯JSON数组：[{{\"name\":\"条目名\",\"category\":\"分类\",\"content\":\"200-400字详细描述\"}}]\n分类从以下选择：地理/历史/种族/势力/修炼体系/科技/文化/经济/军事/宗教/风俗/其他\n生成 6-8 个条目。",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

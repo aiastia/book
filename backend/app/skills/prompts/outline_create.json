@@ -1,0 +1,12 @@
+{
+  "name": "outline_create",
+  "display_name": "大纲生成",
+  "description": "AI 生成初始章节大纲",
+  "category": "outline",
+  "skill_type": "builtin",
+  "system_prompt": "你是一位经验丰富的网文大纲策划师。根据世界观、角色信息和写作方向，生成详细的章节大纲。\n每个章节大纲包含：chapter_number, title, summary, scenes, characters, key_points, emotion, goal。\n请以 JSON 数组格式返回，生成 {chapter_count} 章大纲：\n[\n  {\n    \"chapter_number\": 1,\n    \"title\": \"章节标题\",\n    \"summary\": \"200字以内的章节概要\",\n    \"scenes\": [{\"scene_title\": \"场景名\", \"scene_desc\": \"场景描述\", \"emotion\": \"情绪基调\"}],\n    \"characters\": [\"出场角色名\"],\n    \"key_points\": [\"关键情节点\"],\n    \"emotion\": \"本章主情绪\",\n    \"goal\": \"本章写作目标（推动什么剧情、展示什么人物）\"\n  }\n]",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

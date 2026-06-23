@@ -1,0 +1,12 @@
+{
+  "name": "inspiration_title_user",
+  "display_name": "灵感模式-书名生成(用户提示词)",
+  "description": "根据用户的原始想法生成6个书名建议的用户提示词",
+  "category": "import",
+  "skill_type": "builtin",
+  "system_prompt": "用户的想法：{initial_idea}\n请生成6个书名建议",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

@@ -22,7 +22,7 @@ from app.core.database import Base, async_session, engine
 from app.models.user import User
 from app.models.skill import Skill
 from app.skills.builtin import init_builtin_skills
-from app.skills.prompt_import import _force_builtin_override
+from app.skills.builtin import init_builtin_skills
 
 # 默认用户配置
 _DEFAULT_USER = {
@@ -146,11 +146,9 @@ async def lifespan(app: FastAPI):
     await _cleanup_zombie_tasks()
     # 初始化默认用户
     await _ensure_default_user()
-    # 初始化内置 Skills（builtin.py 中的所有模板，含从 JSON 迁移的 28 个）
+    # 初始化内置 Skills（builtin.py 是唯一真相源，自动处理用户自定义版本）
     async with async_session() as db:
         await init_builtin_skills(db)
-        # 用 builtin.py 的正确版本覆盖变量名错误的旧模板（兼容已有数据库）
-        await _force_builtin_override(db)
         existing_count = await db.scalar(select(func.count(Skill.id)))
         print(f"[启动] 提示词模板已就绪（数据库共 {existing_count or 0} 个 Skill）")
     # 同步 Skill 表到 PromptTemplate 版本管理表（首次部署 + 新增 Skill 自动同步）
@@ -159,14 +157,13 @@ async def lifespan(app: FastAPI):
         synced = 0
         all_skills = (await db.execute(select(Skill))).scalars().all()
         for skill in all_skills:
-            # 检查是否已有同名 PromptTemplate
+            pt_name = skill.name.upper()
             existing_pt = (await db.execute(
-                select(PromptTemplate).where(PromptTemplate.name == skill.name.upper())
+                select(PromptTemplate).where(PromptTemplate.name == pt_name)
             )).scalar_one_or_none()
             if not existing_pt:
-                # 首次创建：从 Skill 同步
                 pt = PromptTemplate(
-                    name=skill.name.upper(),
+                    name=pt_name,
                     category=skill.category or "other",
                     description=skill.description or skill.display_name or skill.name,
                     is_system=True,
@@ -187,7 +184,6 @@ async def lifespan(app: FastAPI):
                 pt.current_version_id = ver.id
                 synced += 1
             else:
-                # 已存在：同步最新内容到激活版本
                 if existing_pt.current_version_id:
                     active_ver = (await db.execute(
                         select(PromptVersion).where(PromptVersion.id == existing_pt.current_version_id)

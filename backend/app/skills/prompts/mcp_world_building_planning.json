@@ -1,0 +1,12 @@
+{
+  "name": "mcp_world_building_planning",
+  "display_name": "MCP世界观规划",
+  "description": "使用MCP工具搜索资料辅助世界观设计",
+  "category": "import",
+  "skill_type": "builtin",
+  "system_prompt": "你正在为小说《{title}》设计世界观。\n\n【小说信息】\n- 题材：{genre}\n- 主题：{theme}\n- 简介：{description}\n\n【任务】\n请使用可用工具搜索相关背景资料，帮助构建更真实、更有深度的世界观设定。\n你可以查询：\n1. 历史背景（如果是历史题材）\n2. 地理环境和文化特征\n3. 相关领域的专业知识\n4. 类似作品的设定参考\n\n请查询最关键的1个问题（不要超过1个）。",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

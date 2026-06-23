@@ -1,0 +1,12 @@
+{
+  "name": "mcp_tool_test",
+  "display_name": "MCP工具测试(用户提示词)",
+  "description": "用于测试MCP插件功能的用户提示词",
+  "category": "import",
+  "skill_type": "builtin",
+  "system_prompt": "你是MCP插件测试助手，需要测试插件 '{plugin_name}' 的功能。\n\n⚠️ 重要规则：生成参数时，必须严格使用工具 schema 中定义的原始参数名称，不要转换为 snake_case 或其他格式。\n例如：如果 schema 中是 'nextThoughtNeeded'，就必须使用 'nextThoughtNeeded'，不能改成 'next_thought_needed'。\n\n请选择一个合适的工具进行测试，优先选择搜索、查询类工具。\n生成真实有效的测试参数（例如搜索\"人工智能最新进展\"而不是\"test\"）。\n\n现在开始测试这个插件。",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

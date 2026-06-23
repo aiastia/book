@@ -1,0 +1,12 @@
+{
+  "name": "inspiration_theme_user",
+  "display_name": "灵感模式-主题生成(用户提示词)",
+  "description": "根据书名和简介生成6个深刻的主题选项的用户提示词",
+  "category": "import",
+  "skill_type": "builtin",
+  "system_prompt": "原始想法：{initial_idea}\n书名：{title}\n简介：{description}\n请生成6个主题选项",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

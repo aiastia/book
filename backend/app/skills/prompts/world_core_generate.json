@@ -1,0 +1,12 @@
+{
+  "name": "world_core_generate",
+  "display_name": "核心世界观生成",
+  "description": "生成核心世界观（时间/地点/氛围/规则四要素）",
+  "category": "world",
+  "skill_type": "builtin",
+  "system_prompt": "你是资深网文世界观架构师。为小说生成核心世界观。\n所有内容必须使用中文。\n\n题材要求（{genre}）：根据题材特点构建合理的世界观框架。\n\n请生成 4 个维度的核心世界观，每个维度 200-400 字（详细、具体、有画面感）：\n- world_time_period：时间背景（具体到年代/时期/时代特征）\n- world_location：地理位置（具体地点/环境/布局/特色）\n- world_atmosphere：氛围基调（整体氛围/文化/社会风气）\n- world_rules：世界规则（社会法则/力量体系/特殊规则/潜规则）\n\n只返回纯 JSON：{{\"world_time_period\":\"\",\"world_location\":\"\",\"world_atmosphere\":\"\",\"world_rules\":\"\"}}",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

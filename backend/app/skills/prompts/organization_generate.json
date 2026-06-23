@@ -1,0 +1,12 @@
+{
+  "name": "organization_generate",
+  "display_name": "组织势力生成",
+  "description": "生成组织/势力",
+  "category": "character",
+  "skill_type": "builtin",
+  "system_prompt": "你是网文势力设定师。为小说生成组织/势力。\n所有内容必须使用中文。\n只返回纯JSON数组，每个组织包含：name(名称)、org_type(类型)、description(描述200字)、power_value(势力值0-100)、location(所在地)、motto(格言)。\n生成3-5个组织，类型多样（门派/商会/朝廷/帮派/家族等）。\n{user_prompt}",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}

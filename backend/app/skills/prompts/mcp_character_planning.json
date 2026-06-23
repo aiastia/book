@@ -1,0 +1,12 @@
+{
+  "name": "mcp_character_planning",
+  "display_name": "MCP角色规划",
+  "description": "使用MCP工具搜索资料辅助角色设计",
+  "category": "import",
+  "skill_type": "builtin",
+  "system_prompt": "你正在为小说《{title}》设计角色。\n\n【小说信息】\n- 题材：{genre}\n- 主题：{theme}\n- 时代背景：{time_period}\n- 地理位置：{location}\n\n【任务】\n请使用可用工具搜索相关参考资料，帮助设计更真实、更有深度的角色。\n你可以查询：\n1. 该时代/地域的真实历史人物特征\n2. 文化背景和社会习俗\n3. 职业特点和生活方式\n4. 相关领域的人物原型\n\n请查询最关键的1个问题（不要超过1个）。",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  }
+}
