@@ -140,7 +140,7 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
     career_result, cerr = await _safe_skill_call(engine, ai_client, "career_system_generation", {
         "title": proj.title, "genre": proj.genre or "网文",
         "world_info": f"规则：{proj.world_rules or ''}",
-        "user_prompt": f"请为《{proj.title}》生成职业体系。",
+        "user_prompt": f"请为《{proj.title}》生成职业体系：精确 2 个主职业 + 3 个副职业。主职业需有完整的进阶境界体系。",
     }, "职业")
     if cerr:
         return cerr
@@ -590,6 +590,15 @@ async def _run_init_task(task_id: int, resume_from: str = None):
         for idx in range(start_idx, len(INIT_STEPS)):
             step_key, step_label, step_progress, done_field = INIT_STEPS[idx]
 
+            # 检查是否被取消
+            await db.refresh(task)
+            if task.cancel_requested:
+                task.status = "cancelled"
+                task.status_message = "任务已取消"
+                task.updated_at = datetime.utcnow()
+                await db.commit()
+                return
+
             # 跳过已完成的步骤（resume 时）
             if getattr(task, done_field, 0) == 1:
                 continue
@@ -672,3 +681,20 @@ async def resume_init_task(task_id: int, db: AsyncSession = Depends(get_db), use
     await db.commit()
     asyncio.create_task(_run_init_task(task_id, resume_from=resume_from))
     return {"task_id": task_id, "status": "running", "resume_from": resume_from}
+
+
+@router.post("/init-task/{task_id}/cancel")
+async def cancel_init_task(task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """取消初始化任务。"""
+    task = (await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))).scalar_one_or_none()
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    if task.status in ("pending", "running"):
+        task.cancel_requested = 1
+        # pending 任务可直接置 cancelled
+        if task.status == "pending":
+            task.status = "cancelled"
+            task.status_message = "任务已取消"
+        task.updated_at = datetime.utcnow()
+        await db.commit()
+    return {"task_id": task_id, "status": task.status}

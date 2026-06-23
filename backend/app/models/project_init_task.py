@@ -32,6 +32,8 @@ class ProjectInitTask(Base):
     # 失败信息
     failed_step = Column(String(100), default="")  # 失败的步骤名（用于 resume）
     error = Column(String(1000), default="")
+    # 取消标志
+    cancel_requested = Column(Integer, default=0)  # 0=未取消, 1=已请求取消
     # 用户选择的初始大纲章数
     chapter_count = Column(Integer, default=3)
     created_at = Column(DateTime, default=datetime.utcnow)

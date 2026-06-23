@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.api.routes.auth import router as auth_router
 from app.api.routes.compat import router as compat_router
@@ -20,8 +20,9 @@ from app.api.routes.admin import router as admin_router
 from app.core.auth import get_password_hash
 from app.core.database import Base, async_session, engine
 from app.models.user import User
+from app.models.skill import Skill
 from app.skills.builtin import init_builtin_skills
-from app.skills.prompt_import import import_prompt_templates, import_to_prompt_templates
+from app.skills.prompt_import import _force_builtin_override
 
 # 默认用户配置
 _DEFAULT_USER = {
@@ -121,6 +122,7 @@ async def _auto_migrate():
         ("project_init_tasks", "ADD COLUMN items_done INTEGER DEFAULT 0"),
         ("project_init_tasks", "ADD COLUMN failed_step VARCHAR(100) DEFAULT ''"),
         ("project_init_tasks", "ADD COLUMN chapter_count INTEGER DEFAULT 3"),
+        ("project_init_tasks", "ADD COLUMN cancel_requested INTEGER DEFAULT 0"),
         # 第7批：评分系统增强（8维 + 一致性 + 告警）
         ("plot_analyses", "ADD COLUMN consistency_issues JSON"),
         ("chapters", "ADD COLUMN quality_alert VARCHAR(50) DEFAULT ''"),
@@ -144,19 +146,59 @@ async def lifespan(app: FastAPI):
     await _cleanup_zombie_tasks()
     # 初始化默认用户
     await _ensure_default_user()
-    # 初始化内置 Skills
+    # 初始化内置 Skills（builtin.py 中的所有模板，含从 JSON 迁移的 28 个）
     async with async_session() as db:
         await init_builtin_skills(db)
-    # 导入提示词模板到 Skill 表
+        # 用 builtin.py 的正确版本覆盖变量名错误的旧模板（兼容已有数据库）
+        await _force_builtin_override(db)
+        existing_count = await db.scalar(select(func.count(Skill.id)))
+        print(f"[启动] 提示词模板已就绪（数据库共 {existing_count or 0} 个 Skill）")
+    # 同步 Skill 表到 PromptTemplate 版本管理表（首次部署 + 新增 Skill 自动同步）
     async with async_session() as db:
-        count = await import_prompt_templates(db)
-        if count:
-            print(f"[启动] 已导入 {count} 个提示词模板")
-    # 导入提示词模板到 PromptTemplate 表
-    async with async_session() as db:
-        count = await import_to_prompt_templates(db)
-        if count:
-            print(f"[启动] 已导入 {count} 个提示词模板到 PromptTemplate 表")
+        from app.models.prompt_template import PromptTemplate, PromptVersion
+        synced = 0
+        all_skills = (await db.execute(select(Skill))).scalars().all()
+        for skill in all_skills:
+            # 检查是否已有同名 PromptTemplate
+            existing_pt = (await db.execute(
+                select(PromptTemplate).where(PromptTemplate.name == skill.name.upper())
+            )).scalar_one_or_none()
+            if not existing_pt:
+                # 首次创建：从 Skill 同步
+                pt = PromptTemplate(
+                    name=skill.name.upper(),
+                    category=skill.category or "other",
+                    description=skill.description or skill.display_name or skill.name,
+                    is_system=True,
+                )
+                db.add(pt)
+                await db.flush()
+                ver = PromptVersion(
+                    template_id=pt.id,
+                    version=1,
+                    system_prompt=skill.system_prompt or "",
+                    user_prompt="",
+                    variables=skill.parameters or {},
+                    config={},
+                    is_active=True,
+                )
+                db.add(ver)
+                await db.flush()
+                pt.current_version_id = ver.id
+                synced += 1
+            else:
+                # 已存在：同步最新内容到激活版本
+                if existing_pt.current_version_id:
+                    active_ver = (await db.execute(
+                        select(PromptVersion).where(PromptVersion.id == existing_pt.current_version_id)
+                    )).scalar_one_or_none()
+                    if active_ver and active_ver.system_prompt != skill.system_prompt:
+                        active_ver.system_prompt = skill.system_prompt or ""
+                        active_ver.variables = skill.parameters or {}
+                        synced += 1
+        if synced:
+            await db.commit()
+            print(f"[启动] PromptTemplate 同步完成（{synced} 个更新）")
     yield
     await engine.dispose()
 

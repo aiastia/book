@@ -16,8 +16,7 @@ async function onDelete(p: any, e: Event) {
   try { await api.deleteProjectById(p.id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
-async function onExport(p: any, e: Event, format: string = 'json') {
-  e.stopPropagation()
+async function onExport(p: any, format: string = 'json') {
   try {
     if (format === 'txt') {
       // TXT 整书下载
@@ -152,7 +151,7 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
               <a-dropdown :trigger="['click']">
                 <span @click="(e) => e.stopPropagation()" title="导出">⬇</span>
                 <template #overlay>
-                  <a-menu @click="(info: any) => onExport(p, $event, info.key)">
+                  <a-menu @click="(info: any) => onExport(p, info.key)">
                     <a-menu-item key="json">📦 全量 JSON（含设定/记忆/分析）</a-menu-item>
                     <a-menu-item key="txt">📄 整书 TXT（纯正文）</a-menu-item>
                   </a-menu>

@@ -138,19 +138,38 @@ export function useBackgroundTasks() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   }
 
-  async function cancelTask(id: number) {
+  async function cancelTask(id: number | string) {
     try {
-      await apiPost(`/api/tasks/${id}/cancel`, {})
+      // legacy init-task 的 id 格式是 'legacy-{number}'
+      if (typeof id === 'string' && id.startsWith('legacy-')) {
+        const numericId = parseInt(id.replace('legacy-', ''))
+        await apiPost(`/api/projects/init-task/${numericId}/cancel`, {})
+      } else {
+        await apiPost(`/api/tasks/${id}/cancel`, {})
+      }
       const t = tasks.value.find(t => t.id === id)
       if (t) t.status = 'cancelled'
+      // 同时更新 legacy task status
+      if (legacyTaskStatus.value) {
+        legacyTaskStatus.value = { ...legacyTaskStatus.value, status: 'cancelled', status_message: '任务已取消' }
+      }
     } catch (e) {
       console.warn('取消失败', e)
     }
   }
 
-  async function dismissTask(id: number) {
+  async function dismissTask(id: number | string) {
     tasks.value = tasks.value.filter(t => t.id !== id)
-    try { await apiDelete(`/api/tasks/${id}`) } catch {}
+    // legacy task: 清除 localStorage
+    if (typeof id === 'string' && id.startsWith('legacy-')) {
+      if (import.meta.client) {
+        localStorage.removeItem('moyu_init_task')
+        legacyTaskId.value = null
+        legacyTaskStatus.value = null
+      }
+    } else {
+      try { await apiDelete(`/api/tasks/${id}`) } catch {}
+    }
   }
 
   // 刷新页面后恢复（仅客户端）
@@ -179,9 +198,9 @@ export function useBackgroundTasks() {
         _steps: [
           { label: '世界观', done: legacyTaskStatus.value?.world_done },
           { label: '职业', done: legacyTaskStatus.value?.career_done },
+          { label: '组织', done: legacyTaskStatus.value?.org_done },
           { label: '角色', done: legacyTaskStatus.value?.characters_done },
           { label: '关系', done: legacyTaskStatus.value?.relations_done },
-          { label: '组织', done: legacyTaskStatus.value?.org_done },
           { label: '地点', done: legacyTaskStatus.value?.locations_done },
           { label: '物品', done: legacyTaskStatus.value?.items_done },
           { label: '大纲', done: legacyTaskStatus.value?.outline_done },

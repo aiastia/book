@@ -1,188 +1,47 @@
-"""从 prompt-templates JSON 文件批量导入提示词到 Skill 表"""
-import json
-import os
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.models.skill import Skill
-from app.models.prompt_template import PromptTemplate, PromptVersion
+"""Skill 提示词覆盖工具。
 
-# 模板 key 到 Skill category 的映射
-CATEGORY_MAP = {
-    "world": "world",
-    "character": "character",
-    "outline": "outline",
-    "chapter": "chapter",
-    "analysis": "analysis",
-    "foreshadow": "foreshadow",
-    "inspire": "inspire",
-    "skill": "skill",
-    "mcp": "mcp",
-    "import": "import",
-    "tool": "tool",
+builtin.py 是唯一的提示词来源（含从 JSON 迁移的模板）。
+此模块提供 _force_builtin_override()，在启动时用 builtin 正确版本
+覆盖数据库中变量名错误的旧模板。
+"""
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.skill import Skill
+from app.skills.builtin import BUILTIN_SKILLS
+
+
+# 这些 JSON 模板的变量名与路由传参不匹配，会导致提示词中残留 {变量} 占位符。
+# 已在 builtin.py 中提供了修正版本，启动时强制覆盖。
+SKIP_OVERWRITE_KEYS = {
+    "CHARACTERS_BATCH_GENERATION",
+    "SINGLE_CHARACTER_GENERATION",
+    "AUTO_CHARACTER_GENERATION",
+    "AUTO_CHARACTER_ANALYSIS",
+    "CAREER_SYSTEM_GENERATION",
 }
 
 
-def _guess_category(key: str) -> str:
-    """根据 template_key 前缀推断 category"""
-    if key.startswith("SKILL_STORY_"):
-        return "skill"
-    if key.startswith("MCP_"):
-        return "mcp"
-    if key.startswith("INSPIRATION_"):
-        return "inspire"
-    if key.startswith("BOOK_IMPORT_"):
-        return "import"
-    if key.startswith("CHAPTER_"):
-        return "chapter"
-    if key.startswith("OUTLINE_"):
-        return "outline"
-    if key.startswith("WORLD_"):
-        return "world"
-    if key.startswith("AUTO_CHARACTER") or key.startswith("CHARACTERS_") or key.startswith("SINGLE_CHARACTER"):
-        return "character"
-    if key.startswith("AUTO_ORGANIZATION") or key.startswith("SINGLE_ORGANIZATION") or key.startswith("CAREER"):
-        return "world"
-    if key.startswith("PLOT_"):
-        return "analysis"
-    if key in ("AI_DENOISING", "PARTIAL_REGENERATE", "NOVEL_COVER_PROMPT_TEMPLATE", "CHAPTER_REGENERATION_SYSTEM"):
-        return "tool"
-    return "other"
+async def _force_builtin_override(db: AsyncSession):
+    """每次启动时用 builtin.py 的正确版本覆盖 DB 中变量名错误的 skill。
 
-
-def load_templates_from_json(json_path: str) -> list[dict]:
-    """从 JSON 文件读取提示词模板列表"""
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("templates", [])
-
-
-def template_to_skill_data(tpl: dict) -> dict:
-    """将单个 JSON 模板转换为 Skill 数据字典"""
-    key = tpl["template_key"]
-    name = tpl["template_key"].lower()
-    display_name = tpl.get("template_name", key)
-    content = tpl.get("template_content", "")
-
-    # 某些模板有 system_prompt 和 user_prompt 区分（如灵感系列）
-    is_system = "_SYSTEM" in key
-
-    return {
-        "name": name,
-        "display_name": display_name,
-        "description": tpl.get("template_description", display_name),
-        "category": _guess_category(key),
-        "skill_type": "builtin",
-        "system_prompt": content,
-        "parameters": tpl.get("template_variables") or {},
-        "is_enabled": True,
+    仅覆盖 system_prompt 和 parameters，保留 is_enabled 等用户配置。
+    """
+    # 映射 JSON key → builtin skill name
+    name_map = {
+        "characters_batch_generation": "characters_batch_generation",
+        "single_character_generation": "character_generate",
+        "auto_character_generation": None,
+        "auto_character_analysis": None,
+        "career_system_generation": "career_system_generation",
     }
-
-
-async def import_prompt_templates(db: AsyncSession, json_path: str = None):
-    """批量导入提示词模板到 Skill 表（幂等：同名跳过）"""
-    if json_path is None:
-        # 默认路径：项目根目录下的 prompt-templates 文件
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        json_path = os.path.join(base_dir, "prompt-templates-2026-06-05.json")
-
-    if not os.path.exists(json_path):
-        return 0
-
-    templates = load_templates_from_json(json_path)
-    imported = 0
-
-    for tpl in templates:
-        skill_data = template_to_skill_data(tpl)
-        # 检查是否已存在
-        result = await db.execute(select(Skill).where(Skill.name == skill_data["name"]))
-        existing = result.scalar_one_or_none()
-        if existing:
-            # 更新已有记录的提示词内容（保留用户自定义的开关状态）
-            existing.display_name = skill_data["display_name"]
-            existing.description = skill_data["description"]
-            existing.category = skill_data["category"]
-            existing.system_prompt = skill_data["system_prompt"]
-            existing.parameters = skill_data["parameters"]
-        else:
-            skill = Skill(**skill_data)
-            db.add(skill)
-        imported += 1
-
-    await db.commit()
-    return imported
-
-
-async def import_to_prompt_templates(db: AsyncSession, json_path: str = None):
-    """批量导入提示词模板到 PromptTemplate + PromptVersion 表（幂等：同名更新内容）"""
-    if json_path is None:
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        json_path = os.path.join(base_dir, "prompt-templates-2026-06-05.json")
-
-    if not os.path.exists(json_path):
-        return 0
-
-    templates = load_templates_from_json(json_path)
-    imported = 0
-
-    for tpl in templates:
-        key = tpl.get("template_key", "")
-        if not key:
+    builtin_by_name = {s["name"]: s for s in BUILTIN_SKILLS}
+    for json_name in SKIP_OVERWRITE_KEYS:
+        builtin_name = name_map.get(json_name.lower())
+        if not builtin_name or builtin_name not in builtin_by_name:
             continue
-        name = key
-        category = _guess_category(key)
-        description = tpl.get("template_description", "") or tpl.get("template_name", "")
-        system_prompt = tpl.get("template_content", "")
-
-        # 解析 variables（JSON 字符串或列表）
-        variables = tpl.get("parameters") or tpl.get("template_variables") or []
-        if isinstance(variables, str):
-            try:
-                variables = json.loads(variables)
-            except (json.JSONDecodeError, TypeError):
-                variables = []
-
-        # 检查是否已存在同名模板
-        result = await db.execute(select(PromptTemplate).where(PromptTemplate.name == name))
+        bs = builtin_by_name[builtin_name]
+        result = await db.execute(select(Skill).where(Skill.name == json_name.lower()))
         existing = result.scalar_one_or_none()
-
         if existing:
-            # 更新模板元信息
-            existing.description = description
-            existing.category = category
-            # 更新当前激活版本的内容
-            if existing.current_version_id:
-                ver_result = await db.execute(
-                    select(PromptVersion).where(PromptVersion.id == existing.current_version_id)
-                )
-                active_ver = ver_result.scalar_one_or_none()
-                if active_ver:
-                    active_ver.system_prompt = system_prompt
-                    active_ver.variables = variables
-        else:
-            template = PromptTemplate(
-                name=name,
-                category=category,
-                description=description,
-                is_system=True,
-            )
-            db.add(template)
-            await db.flush()
-
-            version = PromptVersion(
-                template_id=template.id,
-                version=1,
-                system_prompt=system_prompt,
-                user_prompt="",
-                variables=variables,
-                config={},
-                is_active=True,
-            )
-            db.add(version)
-            await db.flush()
-
-            template.current_version_id = version.id
-
-        imported += 1
-
+            existing.system_prompt = bs["system_prompt"]
+            existing.parameters = bs.get("parameters", {})
     await db.commit()
-    return imported

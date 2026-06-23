@@ -326,7 +326,7 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
             </div>
           </a-form-item>
           <a-row :gutter="12">
-            <a-col :span="12"><a-form-item label="叙事视角"><a-input v-model:value="quickResult.narrative_pov" placeholder="叙事视角" /></a-form-item></a-col>
+            <a-col :span="12"><a-form-item label="叙事视角"><a-select v-model:value="quickResult.narrative_pov" style="width:100%"><a-select-option label="第三人称" value="第三人称" /><a-select-option label="第一人称" value="第一人称" /><a-select-option label="全知视角" value="全知视角" /><a-select-option label="第二人称" value="第二人称" /></a-select></a-form-item></a-col>
             <a-col :span="12"><a-form-item label="目标字数"><a-input-number v-model:value="quickResult.target_word_count" :min="10000" :max="5000000" :step="10000" style="width:100%" /></a-form-item></a-col>
           </a-row>
         </a-form>
