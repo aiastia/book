@@ -64,11 +64,12 @@ function onImportFile(e: any) {
 
 // ===== 新建向导 =====
 const showCreate = ref(false)
-const genres = ['玄幻', '都市', '科幻', '言情', '历史', '武侠', '游戏', '悬疑', '其他']
+const genres = ['玄幻', '都市', '科幻', '言情', '历史', '武侠', '游戏', '悬疑', '修仙', '末世', '无限流', '二次元', '同人', '其他']
 const wizard = reactive({
   title: '', genre: '玄幻', synopsis: '', theme: '',
   outline_mode: 'one_to_many', narrative_pov: '第三人称',
   character_count: 5, target_word_count: 100000, protagonist_name: '',
+  chapter_count: 3,
 })
 const creating = ref(false)
 const genStep = ref('')  // 生成进度提示
@@ -91,7 +92,7 @@ async function onCreate() {
     genStep.value = '提交生成任务...'
     try {
       const task = await apiPost<any>(`/api/projects/${pid}/init-task`,
-        { protagonist_name: wizard.protagonist_name }, { timeout: 10000 })
+        { protagonist_name: wizard.protagonist_name, chapter_count: wizard.chapter_count }, { timeout: 10000 })
       const { start } = useInitTask()
       start(task.task_id)
     } catch (e: any) {
@@ -101,7 +102,7 @@ async function onCreate() {
       genStep.value = '生成角色...'
       try { await apiPost(`/api/projects/${pid}/characters/batch-generate`, { count: wizard.character_count, requirements: wizard.protagonist_name ? `主角名字：${wizard.protagonist_name}` : '' }, { timeout: 120000 }) } catch {}
       genStep.value = '生成大纲...'
-      try { await apiPost(`/api/projects/${pid}/outlines/generate`, { chapter_count: 10 }, { timeout: 120000 }) } catch {}
+      try { await apiPost(`/api/projects/${pid}/outlines/generate`, { chapter_count: wizard.chapter_count }, { timeout: 120000 }) } catch {}
     }
 
     genStep.value = ''
@@ -189,7 +190,7 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
       <a-form-item label="小说简介"><a-textarea v-model:value="wizard.synopsis" :rows="2" :maxlength="300" show-count placeholder="一句话描述故事" /></a-form-item>
       <a-form-item label="主题"><a-textarea v-model:value="wizard.theme" :rows="2" :maxlength="500" show-count placeholder="故事的核心主题（如：复仇与救赎）" /></a-form-item>
       <a-row :gutter="12">
-        <a-col :span="8"><a-form-item label="类型"><a-select v-model:value="wizard.genre" style="width:100%"><a-select-option v-for="g in genres" :key="g" :label="g" :value="g" /></a-select></a-form-item></a-col>
+        <a-col :span="8"><a-form-item label="类型"><a-auto-complete v-model:value="wizard.genre" :options="genres.map(g => ({ value: g }))" :filter-option="(input:string, option:any) => option.value.toLowerCase().includes(input.toLowerCase())" allow-clear placeholder="选择或输入类型" /></a-form-item></a-col>
         <a-col :span="8"><a-form-item label="叙事视角"><a-select v-model:value="wizard.narrative_pov" style="width:100%"><a-select-option label="第三人称" value="第三人称" /><a-select-option label="第一人称" value="第一人称" /><a-select-option label="全知视角" value="全知视角" /></a-select></a-form-item></a-col>
         <a-col :span="8"><a-form-item label="主角名字（可选）"><a-input v-model:value="wizard.protagonist_name" placeholder="留空则AI生成" /></a-form-item></a-col>
       </a-row>
@@ -210,6 +211,11 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
       </a-form-item>
       <a-row :gutter="12">
         <a-col :span="12"><a-form-item label="角色数量"><a-input-number v-model:value="wizard.character_count" :min="2" :max="15" /> 个</a-form-item></a-col>
+        <a-col :span="12"><a-form-item label="初始大纲"><a-radio-group v-model:value="wizard.chapter_count">
+          <a-radio-button :value="3">3 章</a-radio-button>
+          <a-radio-button :value="5">5 章</a-radio-button>
+          <a-radio-button :value="10">10 章</a-radio-button>
+        </a-radio-group></a-form-item></a-col>
         <a-col :span="12"><a-form-item label="目标字数"><a-input-number v-model:value="wizard.target_word_count" :min="10000" :max="5000000" :step="10000" /> 字</a-form-item></a-col>
       </a-row>
       <div style="text-align:right;margin-top:8px;">

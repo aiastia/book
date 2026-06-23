@@ -20,12 +20,20 @@ class ProjectInitTask(Base):
     status = Column(String(20), default="pending")  # pending/running/completed/failed
     progress = Column(Integer, default=0)  # 0-100
     status_message = Column(String(500), default="")
-    # 各步骤完成情况
+    # 各步骤完成情况（8 步完整流程）
     world_done = Column(Integer, default=0)
-    org_done = Column(Integer, default=0)
+    career_done = Column(Integer, default=0)
     characters_done = Column(Integer, default=0)
+    relations_done = Column(Integer, default=0)
+    org_done = Column(Integer, default=0)
+    locations_done = Column(Integer, default=0)
+    items_done = Column(Integer, default=0)
     outline_done = Column(Integer, default=0)
+    # 失败信息
+    failed_step = Column(String(100), default="")  # 失败的步骤名（用于 resume）
     error = Column(String(1000), default="")
+    # 用户选择的初始大纲章数
+    chapter_count = Column(Integer, default=3)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -35,8 +43,15 @@ class ProjectInitTask(Base):
             "status": self.status, "progress": self.progress,
             "status_message": self.status_message,
             "world_done": self.world_done,
-            "org_done": self.org_done, "characters_done": self.characters_done,
+            "career_done": self.career_done,
+            "characters_done": self.characters_done,
+            "relations_done": self.relations_done,
+            "org_done": self.org_done,
+            "locations_done": self.locations_done,
+            "items_done": self.items_done,
             "outline_done": self.outline_done,
+            "failed_step": self.failed_step,
             "error": self.error,
+            "chapter_count": self.chapter_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

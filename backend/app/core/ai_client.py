@@ -61,8 +61,11 @@ class AIClient:
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key or "dummy-key",
-                timeout=httpx.Timeout(300.0, connect=30.0),  # 读写300秒，连接30秒
-                max_retries=3,  # SDK 层自动重试连接错误
+                timeout=httpx.Timeout(
+                    float(settings.AI_TIMEOUT),
+                    connect=float(settings.AI_CONNECT_TIMEOUT),
+                ),
+                max_retries=settings.AI_MAX_RETRIES,
             )
         return self._client
 
@@ -177,7 +180,7 @@ class AIClient:
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
-        max_retries: int = 3,
+        max_retries: int = None,
     ) -> dict:
         """带重试的 JSON 调用：解析失败时最多重试 max_retries 次。
 
@@ -185,6 +188,8 @@ class AIClient:
         - 仅对「JSON 解析失败」重试；AI 调用本身报错（如 401/网络）不重试。
         - 每次重试在 messages 末尾追加格式强化提示，并把上次失败内容反馈给 AI。
         """
+        if max_retries is None:
+            max_retries = settings.AI_MAX_RETRIES
         hint_messages = list(messages)
         last_result = None
         for attempt in range(1, max_retries + 1):
@@ -207,7 +212,8 @@ class AIClient:
             if last_result.get("error") and last_result.get("json") is None and not last_result.get("parse_error") and not is_conn_error:
                 return last_result
             if is_conn_error and attempt < max_retries:
-                await asyncio.sleep(2 * attempt)  # 连接错误退避重试
+                delay = min(settings.AI_RETRY_DELAY * attempt, settings.AI_RETRY_MAX_DELAY)
+                await asyncio.sleep(delay)
                 continue
 
             # JSON 解析失败 → 准备重试（最后一次也跳出）

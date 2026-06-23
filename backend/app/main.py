@@ -114,6 +114,16 @@ async def _auto_migrate():
         # 大纲模式：1对1 / 1对多
         ("projects", "ADD COLUMN outline_mode VARCHAR(20) DEFAULT 'one_to_one' NOT NULL"),
         ("chapters", "ADD COLUMN sub_index INTEGER DEFAULT 1"),
+        # 第6批：初始化流程增强（8步进度 + 重试 + resume）
+        ("project_init_tasks", "ADD COLUMN career_done INTEGER DEFAULT 0"),
+        ("project_init_tasks", "ADD COLUMN relations_done INTEGER DEFAULT 0"),
+        ("project_init_tasks", "ADD COLUMN locations_done INTEGER DEFAULT 0"),
+        ("project_init_tasks", "ADD COLUMN items_done INTEGER DEFAULT 0"),
+        ("project_init_tasks", "ADD COLUMN failed_step VARCHAR(100) DEFAULT ''"),
+        ("project_init_tasks", "ADD COLUMN chapter_count INTEGER DEFAULT 3"),
+        # 第7批：评分系统增强（8维 + 一致性 + 告警）
+        ("plot_analyses", "ADD COLUMN consistency_issues JSON"),
+        ("chapters", "ADD COLUMN quality_alert VARCHAR(50) DEFAULT ''"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

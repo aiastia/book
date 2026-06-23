@@ -134,7 +134,10 @@ function onVersionChange(vid: number) {
   </PageHeader>
 
   <div class="page-content">
-    <p class="page-desc">系统内置的提示词模板，支持多版本管理和切换。你可以基于默认模板创建自定义版本。</p>
+    <p class="page-desc">提示词模板的版本管理和精细化调优。你可以基于默认模板创建自定义版本，切换激活版本。
+      <br/><b>此页面负责</b>：版本管理、激活切换、版本对比（精细化调优）。
+      <br/><b>Skill 开关</b>：如需开关 Skill 或安装新 Skill，请使用「Skill 管理」页面。
+    </p>
 
     <div class="tpl-layout">
       <!-- 左侧：模板列表 -->

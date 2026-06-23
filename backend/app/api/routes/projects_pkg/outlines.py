@@ -2,6 +2,7 @@
 import json
 import logging
 from app.api.routes.projects_pkg.base import *
+from app.core.database import async_session
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,66 @@ async def generate_outlines(project_id: int, req: OutlineGenerateRequest, db: As
         await db.commit()
     await db.commit()
     return {"outlines": created, "count": len(created)}
+
+
+@router.post("/{project_id}/outlines/generate-async")
+async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步生成大纲：立即返回 task_id，后台执行。"""
+    project = await get_user_project(db, project_id, user)
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run_outline(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="preparing", message="准备生成大纲...")
+        async with async_session() as task_db:
+            proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
+            ctx = await _project_context(task_db, payload["project_id"], proj)
+            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+            await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
+            result = await engine.execute_skill("outline_create", ai_client, {
+                **ctx,
+                "synopsis": proj.synopsis or "暂无简介",
+                "chapter_count": str(payload["chapter_count"]),
+                "user_prompt": f"请为这部{proj.genre or '网文'}生成{payload['chapter_count']}章大纲。",
+            })
+            if result.get("error"):
+                await tracker.fail(result["error"])
+                return
+            await tracker.update(stage="saving", message="保存大纲...")
+            outlines_data = result.get("json") or []
+            if isinstance(outlines_data, list):
+                created_objs = []
+                for idx, item in enumerate(outlines_data):
+                    o = _build_outline(payload["project_id"], item, index=idx)
+                    task_db.add(o)
+                    created_objs.append(o)
+                await task_db.flush()
+                if (proj.outline_mode or "one_to_one") == "one_to_one":
+                    for o in created_objs:
+                        existing = (await task_db.execute(
+                            select(Chapter).where(Chapter.project_id == payload["project_id"], Chapter.chapter_number == o.chapter_number)
+                        )).scalars().first()
+                        if existing:
+                            continue
+                        ch = Chapter(
+                            project_id=payload["project_id"], chapter_number=o.chapter_number,
+                            title=o.title, summary=o.summary[:200] if o.summary else "",
+                            status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                        )
+                        task_db.add(ch)
+                await task_db.commit()
+            await tracker.complete(message=f"大纲生成完成（{len(outlines_data)}章）")
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="outline_new",
+        title="生成大纲",
+        payload={"chapter_count": req.chapter_count, "project_id": project_id, "user_id": user.id},
+        runner=_run_outline,
+    )
+    return {"task_id": task_id}
 
 
 @router.get("/{project_id}/outlines")
@@ -268,6 +329,100 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     return response
 
 
+@router.post("/{project_id}/outlines/continue-async")
+async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步续写大纲：立即返回 task_id，后台执行。"""
+    await get_user_project(db, project_id, user)
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run_continue(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="preparing", message="准备续写大纲...")
+        # 复用同步逻辑（在独立 session 中）
+        async with async_session() as task_db:
+            # 构造一个 mock request 对象
+            class MockReq:
+                chapter_count = payload["chapter_count"]
+            # 调用核心逻辑（提取为共享函数会更优雅，但这里直接复用）
+            proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
+            outlines = (await task_db.execute(select(Outline).where(Outline.project_id == payload["project_id"]).order_by(Outline.chapter_number))).scalars().all()
+            current_count = max((o.chapter_number for o in outlines), default=0)
+            await tracker.update(stage="generating", message=f"AI 续写第{current_count+1}到{current_count+payload['chapter_count']}章...")
+            # 调用同步版本的核心逻辑
+            from app.api.routes.projects_pkg.outlines import continue_outlines as _co
+            # 直接调用路由函数太复杂，这里内联核心逻辑
+            ctx = await _project_context(task_db, payload["project_id"], proj)
+            from app.core.config import settings
+            full_limit = settings.OUTLINE_CONTEXT_CHAPTERS
+            if len(outlines) <= full_limit:
+                recent_outlines_json = json.dumps([
+                    {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
+                    for o in outlines
+                ], ensure_ascii=False)
+            else:
+                recent = outlines[-full_limit:]
+                older = outlines[:-full_limit]
+                older_brief = [
+                    {"chapter_number": o.chapter_number, "title": o.title, "summary": (o.summary or "")[:200]}
+                    for o in older
+                ]
+                if len(older_brief) > 30:
+                    compressed = []
+                    for i in range(0, len(older_brief), 5):
+                        chunk = older_brief[i:i+5]
+                        first, last = chunk[0], chunk[-1]
+                        summaries = "；".join(c["summary"][:30] for c in chunk if c["summary"])
+                        compressed.append({
+                            "chapter_number": f"{first['chapter_number']}-{last['chapter_number']}",
+                            "title": f"第{first['chapter_number']}-{last['chapter_number']}章概要",
+                            "summary": summaries[:200],
+                        })
+                    older_brief = compressed
+                recent_outlines_json = json.dumps(older_brief + [
+                    {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
+                    for o in recent
+                ], ensure_ascii=False)
+            chapters = (await task_db.execute(select(Chapter).where(Chapter.project_id == payload["project_id"]).order_by(Chapter.chapter_number))).scalars().all()
+            existing_chapters = json.dumps([{"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""} for c in chapters], ensure_ascii=False) if chapters else "暂无"
+            foreshadows_list = (await task_db.execute(select(Foreshadow).where(Foreshadow.project_id == payload["project_id"], Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
+            foreshadow_context = "\n".join([f"- {f.title}({f.status}): {f.content[:100]}" for f in foreshadows_list]) or "暂无"
+            start_chapter, end_chapter = current_count + 1, current_count + payload["chapter_count"]
+            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+            result = await engine.execute_skill("outline_continue", ai_client, {
+                "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无简介",
+                "chapter_count": str(payload["chapter_count"]), "current_chapter_count": str(current_count),
+                "start_chapter": str(start_chapter), "end_chapter": str(end_chapter),
+                "total_planned_chapters": str(current_count + payload["chapter_count"]),
+                "recent_outlines": recent_outlines_json, "existing_chapters": existing_chapters,
+                "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
+                "foreshadow_context": foreshadow_context,
+                "foreshadow_reminders": foreshadow_context,
+                "narrative_pov": proj.narrative_pov or "第三人称", "narrative_perspective": proj.narrative_pov or "第三人称",
+                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。",
+            })
+            if result.get("error"):
+                await tracker.fail(result["error"])
+                return
+            await tracker.update(stage="saving", message="保存大纲...")
+            outlines_data = result.get("json") or []
+            if isinstance(outlines_data, list):
+                for item in outlines_data:
+                    task_db.add(_build_outline(payload["project_id"], item))
+                await task_db.commit()
+            await tracker.complete(message=f"续写完成（{len(outlines_data)}章）")
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="outline_continue",
+        title="续写大纲",
+        payload={"chapter_count": req.chapter_count, "project_id": project_id, "user_id": user.id},
+        runner=_run_continue,
+    )
+    return {"task_id": task_id}
+
+
 @router.post("/{project_id}/outlines/{outline_id}/expand")
 async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """大纲展开为多章（1对多模式核心）：AI 将一条大纲拆成 N 个章节计划，创建 N 个 Chapter。
@@ -300,19 +455,13 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
     if not isinstance(expanded_data, list):
         raise HTTPException(500, "AI 返回的展开格式不正确")
 
-    # 计算起始章号 = 前置大纲已展开的章节数总和 + 1
-    prev_outlines = (await db.execute(
-        select(Outline).where(
-            Outline.project_id == project_id,
-            Outline.chapter_number < outline.chapter_number,
-        ).order_by(Outline.chapter_number)
-    )).scalars().all()
-    start_chapter = 1
-    for po in prev_outlines:
-        cnt = await db.scalar(select(func.count(Chapter.id)).where(
-            Chapter.outline_id == po.id, Chapter.project_id == project_id,
-        ))
-        start_chapter += (cnt or 0)
+    # 计算起始章号
+    # 策略：取当前已存在的最大 chapter_number + 1（而非累加前置大纲章节数）
+    # 这样即使前置大纲未展开，章号也不会冲突
+    max_ch = await db.scalar(select(func.max(Chapter.chapter_number)).where(
+        Chapter.project_id == project_id,
+    ))
+    start_chapter = (max_ch or 0) + 1
 
     # 创建 N 个 Chapter
     created = []

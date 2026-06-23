@@ -35,6 +35,27 @@ const currentPrompt = ref('')
 // 快速模式结果
 const quickResult = ref<any>(null)
 
+// 类型输入（快速模式可编辑用）
+const genreInputVisible = ref(false)
+const genreInputValue = ref('')
+const genreInputRef = ref<any>(null)
+function showGenreInput() {
+  genreInputVisible.value = true
+  nextTick(() => genreInputRef.value?.focus?.())
+}
+function addGenre() {
+  const val = genreInputValue.value.trim()
+  if (val && quickResult.value) {
+    if (Array.isArray(quickResult.value.genre)) {
+      if (!quickResult.value.genre.includes(val)) quickResult.value.genre.push(val)
+    } else {
+      quickResult.value.genre = [val]
+    }
+  }
+  genreInputVisible.value = false
+  genreInputValue.value = ''
+}
+
 // 创建中状态
 const creating = ref(false)
 const genStep = ref('')  // 自动生成进度
@@ -130,7 +151,7 @@ async function onCreateProject() {
     genStep.value = '提交生成任务...'
     try {
       const task = await apiPost<any>(`/api/projects/${pid}/init-task`,
-        { protagonist_name: protagonistName }, { timeout: 10000 })
+        { protagonist_name: protagonistName, chapter_count: 3 }, { timeout: 10000 })
       // 启动全局进度追踪（可在任意页面查看）
       const { start } = useInitTask()
       start(task.task_id)
@@ -286,19 +307,29 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
       </a-card>
     </template>
 
-    <!-- 快速模式结果 -->
+    <!-- 快速模式结果（可编辑） -->
     <template v-if="mode === 'quick' && quickResult">
       <a-card hoverable>
-        <h3 v-if="quickResult.title" style="font-size:18px;color:#4D8088;margin-bottom:16px;">{{ quickResult.title }}</h3>
-        <div v-if="quickResult.description" class="result-section"><h4>简介</h4><p>{{ quickResult.description }}</p></div>
-        <div v-if="quickResult.theme" class="result-section"><h4>主题</h4><p>{{ quickResult.theme }}</p></div>
-        <div v-if="quickResult.genre" class="result-section">
-          <h4>类型</h4>
-          <div v-if="Array.isArray(quickResult.genre)"><a-tag v-for="g in quickResult.genre" :key="g" style="margin-right:6px;">{{ g }}</a-tag></div>
-          <p v-else>{{ quickResult.genre }}</p>
+        <div style="margin-bottom:16px;">
+          <a-tag color="blue" size="small">✨ AI 补全完成，你可以修改以下内容后创建项目</a-tag>
         </div>
-        <div v-if="quickResult.narrative_pov" class="result-section"><h4>叙事视角</h4><p>{{ quickResult.narrative_pov }}</p></div>
-        <div v-if="quickResult.target_word_count" class="result-section"><h4>目标字数</h4><p>{{ quickResult.target_word_count }}</p></div>
+        <a-form layout="vertical">
+          <a-form-item label="书名"><a-input v-model:value="quickResult.title" placeholder="书名" /></a-form-item>
+          <a-form-item label="简介"><a-textarea v-model:value="quickResult.description" :rows="3" placeholder="简介" /></a-form-item>
+          <a-form-item label="主题"><a-input v-model:value="quickResult.theme" placeholder="主题" /></a-form-item>
+          <a-form-item label="类型">
+            <a-input v-if="!Array.isArray(quickResult.genre)" v-model:value="quickResult.genre" placeholder="类型" />
+            <div v-else>
+              <a-tag v-for="(g, i) in quickResult.genre" :key="i" closable size="small" style="margin-right:6px;" @close="quickResult.genre.splice(i, 1)">{{ g }}</a-tag>
+              <a-input v-if="genreInputVisible" ref="genreInputRef" v-model:value="genreInputValue" size="small" style="width:120px;" placeholder="新类型" @press-enter="addGenre" @blur="addGenre" />
+              <a-button v-else size="small" type="dashed" @click="showGenreInput">+ 添加类型</a-button>
+            </div>
+          </a-form-item>
+          <a-row :gutter="12">
+            <a-col :span="12"><a-form-item label="叙事视角"><a-input v-model:value="quickResult.narrative_pov" placeholder="叙事视角" /></a-form-item></a-col>
+            <a-col :span="12"><a-form-item label="目标字数"><a-input-number v-model:value="quickResult.target_word_count" :min="10000" :max="5000000" :step="10000" style="width:100%" /></a-form-item></a-col>
+          </a-row>
+        </a-form>
         <a-alert v-if="creating && genStep" :message="genStep + '...'" type="info" show-icon style="margin-top:16px;" />
         <div style="margin-top:20px;display:flex;gap:8px;">
           <a-button type="primary" :loading="creating" @click="onCreateProject">

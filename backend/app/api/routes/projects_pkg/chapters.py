@@ -1,6 +1,7 @@
 """章节：CRUD / 生成 / 流式生成 / 重写 / 局部重写 / 清空"""
 import json
 from app.api.routes.projects_pkg.base import *
+from app.core.database import async_session
 
 
 router = make_router()
@@ -81,6 +82,40 @@ async def generate_chapter(project_id: int, chapter_id: int, db: AsyncSession = 
     if result.get("error"):
         raise HTTPException(500, result["error"])
     return result
+
+
+@router.post("/{project_id}/chapters/{chapter_id}/generate-async")
+async def generate_chapter_async(project_id: int, chapter_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步生成章节：立即返回 task_id，后台执行，前端轮询进度。"""
+    await get_user_project(db, project_id, user)
+    # 查章节信息用于任务标题
+    ch = (await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))).scalar_one_or_none()
+    if not ch:
+        raise HTTPException(404, "章节不存在")
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run_chapter(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="preparing", message=f"准备生成第{payload['chapter_number']}章...")
+        async with async_session() as task_db:
+            service = ChapterService(task_db, payload["project_id"], payload["user_id"])
+            await tracker.update(stage="generating", message=f"AI 正在生成第{payload['chapter_number']}章...")
+            result = await service.generate_chapter(payload["chapter_id"])
+            if result.get("error"):
+                await tracker.fail(result["error"])
+                return
+            await tracker.complete(result=result, message=f"第{payload['chapter_number']}章生成完成（{result.get('word_count', 0)}字）")
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="chapter_generate",
+        title=f"生成第{ch.chapter_number}章",
+        payload={"chapter_id": chapter_id, "project_id": project_id, "user_id": user.id, "chapter_number": ch.chapter_number},
+        runner=_run_chapter,
+    )
+    return {"task_id": task_id, "chapter_id": chapter_id}
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/generate-stream")

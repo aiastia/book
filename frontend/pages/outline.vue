@@ -67,21 +67,26 @@ function getSummaryPreview(o: any): string {
 
 async function onGenerate() {
   generating.value = true
-  try { await api.generateOutlines({ chapter_count: genCount.value }); await refresh(); showGen.value = false; msg.success('大纲生成完成') }
+  try {
+    const { task_id } = await api.generateOutlinesAsync(genCount.value)
+    const { trackTask } = useBackgroundTasks()
+    trackTask(task_id, 'outline_new', `生成${genCount.value}章大纲`)
+    showGen.value = false
+    msg.success('大纲生成任务已提交，可在右下角查看进度')
+    // 轮询完成后刷新
+    setTimeout(() => refresh(), 5000)
+  }
   catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { generating.value = false }
 }
 async function onContinue() {
   generating.value = true
   try {
-    const result = await api.continueOutlines({ chapter_count: genCount.value })
-    await refresh()
-    msg.success(`续写完成，新增 ${result.count} 章大纲`)
-    // 检测新角色
-    if (result.new_characters && result.new_characters.length > 0) {
-      newCharNames.value = result.new_characters
-      showNewChars.value = true
-    }
+    const { task_id } = await api.continueOutlinesAsync({ chapter_count: genCount.value })
+    const { trackTask } = useBackgroundTasks()
+    trackTask(task_id, 'outline_continue', `续写${genCount.value}章大纲`)
+    msg.success('大纲续写任务已提交，可在右下角查看进度')
+    setTimeout(() => refresh(), 5000)
   }
   catch (e: any) { msg.error('续写失败：' + formatError(e)) }
   finally { generating.value = false }
@@ -136,10 +141,6 @@ async function onDelete(id: number) {
 }
 
 function openExpand(o: any) {
-  const list = outlines.value || []
-  const idx = list.findIndex((x: any) => x.id === o.id)
-  const prevUnexpanded = list.slice(0, idx).some((x: any) => !x.has_chapters)
-  if (prevUnexpanded) { msg.warning('请按顺序展开大纲'); return }
   if (o.has_chapters) { viewExpansion(o); return }
   expandTarget.value = o
   expandCount.value = 3

@@ -46,23 +46,73 @@ BUILTIN_SKILLS = [
         "category": "character",
         "skill_type": "builtin",
         "system_prompt": """你是一位专业的网文角色设计师。根据世界观和角色定位，创建立体的角色档案。
+所有内容必须使用中文。
 请以 JSON 格式返回：
 {
-  "name": "角色名",
-  "role": "主角/配角/反派",
+  "name": "角色名（中文）",
+  "role": "主角/配角/反派/路人",
   "gender": "性别",
   "age": "年龄",
-  "appearance": "外貌描述",
-  "personality": "性格特征（包含优点和缺点）",
-  "background": "背景故事",
-  "ability": "能力/技能",
-  "occupation": "职业",
-  "motivation": "核心动机",
-  "weakness": "弱点",
-  "speech_style": "说话风格特征",
-  "relationships_suggestions": ["与其他角色的潜在关系"]
+  "identity": "社会身份（如：学生/剑客/皇子/商人）",
+  "occupation": "职业（如：炼丹师/刺客/将军）",
+  "appearance": "外貌描述（100-200字）",
+  "personality": "性格特征（包含优点和缺点，100-200字）",
+  "background": "背景故事（100-300字）",
+  "growth_experience": "成长经历（影响性格形成的关键事件，100-200字）",
+  "ability": "能力/技能（具体描述）",
+  "story_goal": "故事目标（角色想要达成什么）",
+  "motivation": "内在动机（为什么追求这个目标）",
+  "weakness": "弱点/软肋",
+  "arc_type": "变化类型（成长/堕落/救赎/顿悟/平淡）",
+  "character_change": "人物变化轨迹（从什么变成什么）",
+  "speech_style": "说话风格特征（如：冷静寡言/活泼话多/文绉绉/粗犷直白）",
+  "relationships_suggestions": ["与其他角色的潜在关系"],
+  "organization_memberships": ["所属组织名（如有）"]
 }""",
         "parameters": {"type": "object", "properties": {"world_info": {"type": "string"}, "role_type": {"type": "string"}, "existing_chars": {"type": "string"}}},
+    },
+    {
+        "name": "characters_batch_generation",
+        "display_name": "批量角色生成",
+        "description": "批量生成多个角色（初始化用）",
+        "category": "character",
+        "skill_type": "builtin",
+        "system_prompt": """你是一位专业的网文角色设计师。为小说批量创建一组立体的角色。
+
+【重要要求】
+1. 所有内容必须使用中文，禁止使用英文
+2. 必须包含至少 1 个主角（role="主角"）、1 个反派（role="反派"）、其余为配角（role="配角"）
+3. 每个角色必须包含完整字段，不能省略
+
+只返回纯 JSON 数组（不要 markdown 代码块），每个角色包含：
+[{
+  "name": "角色名（中文）",
+  "role": "主角/配角/反派/路人",
+  "gender": "性别",
+  "age": "年龄",
+  "identity": "社会身份（如：学生/剑客/皇子）",
+  "occupation": "职业（如：炼丹师/刺客/将军，必须填写）",
+  "appearance": "外貌描述（100-200字）",
+  "personality": "性格特征（100-200字）",
+  "background": "背景故事（100-300字）",
+  "growth_experience": "成长经历（影响性格的关键事件，100-200字，必须填写）",
+  "ability": "能力/技能（必须填写，不能为空）",
+  "story_goal": "故事目标（必须填写）",
+  "motivation": "内在动机（必须填写，角色为什么追求目标）",
+  "weakness": "弱点/软肋（必须填写）",
+  "arc_type": "变化类型（成长/堕落/救赎/顿悟/平淡）",
+  "character_change": "人物变化轨迹",
+  "speech_style": "说话风格特征（必须填写，如：冷静寡言/活泼话多/文绉绉）",
+  "organization_memberships": ["角色所属的组织名（可为空数组）"]
+}]
+
+【题材】{genre}
+【书名】{title}
+【简介】{synopsis}
+【已有角色】{existing_characters}
+【世界观】{world_info}
+{user_prompt}""",
+        "parameters": {"type": "object", "properties": {"genre": {"type": "string"}, "title": {"type": "string"}, "synopsis": {"type": "string"}, "count": {"type": "string"}, "existing_characters": {"type": "string"}, "world_info": {"type": "string"}, "user_prompt": {"type": "string"}}},
     },
     {
         "name": "outline_create",
@@ -382,6 +432,7 @@ BUILTIN_SKILLS = [
         "category": "world",
         "skill_type": "builtin",
         "system_prompt": """你是资深网文世界观架构师。为小说生成核心世界观。
+所有内容必须使用中文。
 
 题材要求（{genre}）：根据题材特点构建合理的世界观框架。
 
@@ -401,6 +452,7 @@ BUILTIN_SKILLS = [
         "category": "world",
         "skill_type": "builtin",
         "system_prompt": """你是世界观设定师。基于核心世界观生成详细设定条目。
+所有内容必须使用中文。
 
 每个条目 200-400 字，内容具体、有细节、有画面感。
 只返回纯JSON数组：[{{"name":"条目名","category":"分类","content":"200-400字详细描述"}}]
@@ -415,6 +467,7 @@ BUILTIN_SKILLS = [
         "category": "character",
         "skill_type": "builtin",
         "system_prompt": """你是网文势力设定师。为小说生成组织/势力。
+所有内容必须使用中文。
 只返回纯JSON数组，每个组织包含：name(名称)、org_type(类型)、description(描述200字)、power_value(势力值0-100)、location(所在地)、motto(格言)。
 生成3-5个组织，类型多样（门派/商会/朝廷/帮派/家族等）。
 {user_prompt}""",
@@ -427,6 +480,7 @@ BUILTIN_SKILLS = [
         "category": "character",
         "skill_type": "builtin",
         "system_prompt": """你是网文职业体系设计师。根据世界观生成职业体系。
+所有内容必须使用中文。
 只返回纯JSON数组：[{{"name":"职业名","career_type":"main或sub","category":"分类","description":"描述","stages":[{{"name":"阶段名","requirement":"要求"}}],"abilities":["能力"]}}]
 生成3-5个职业，每个含进阶阶段。
 {user_prompt}""",
@@ -450,7 +504,8 @@ intimacy 范围 -100 到 100。生成 5-8 条主要关系。""",
         "category": "world",
         "skill_type": "builtin",
         "system_prompt": """你是世界观设定师。为小说生成重要地点。
-只返回纯JSON数组：[{{"name":"地点名","location_type":"城市/区域/建筑/秘境/自然景观","description":"100-200字","atmosphere":"氛围","importance":"normal/major/key"}}]
+所有内容必须使用中文（包括地名、描述、氛围等）。
+只返回纯JSON数组：[{{"name":"地点名（中文）","location_type":"城市/区域/建筑/秘境/自然景观","description":"100-200字中文描述","atmosphere":"氛围（中文）","importance":"normal/major/key"}}]
 生成 5-8 个地点，至少 1 个重要地点。""",
         "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "world_info": {"type": "string"}}},
     },
@@ -461,7 +516,8 @@ intimacy 范围 -100 到 100。生成 5-8 条主要关系。""",
         "category": "world",
         "skill_type": "builtin",
         "system_prompt": """你是网文物品设定师。为小说生成重要物品/道具。
-只返回纯JSON数组：[{{"name":"物品名","category":"装备/消耗/关键道具/材料","rarity":"common/uncommon/rare/epic/legendary","item_type":"类型","description":"100-200字","is_key_item":0}}]
+所有内容必须使用中文（包括物品名、描述等）。
+只返回纯JSON数组：[{{"name":"物品名（中文）","category":"装备/消耗/关键道具/材料","rarity":"common/uncommon/rare/epic/legendary","item_type":"类型（中文）","description":"100-200字中文描述","is_key_item":0}}]
 生成 5-8 个物品，至少 1 个关键剧情道具(is_key_item=1)。""",
         "parameters": {"type": "object", "properties": {"title": {"type": "string"}, "world_info": {"type": "string"}}},
     },

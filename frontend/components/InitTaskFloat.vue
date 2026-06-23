@@ -3,6 +3,7 @@
 // 展示所有后台任务（通用队列 + 旧项目初始化）
 const { tasks, isActive, cancelTask, dismissTask } = useBackgroundTasks()
 const collapsed = ref(false)
+const resuming = ref(false)
 watch(isActive, (v) => { if (v) collapsed.value = false })
 
 const statusMeta = (s: string) => {
@@ -42,6 +43,20 @@ function tagStyle(status: string) {
   const m = statusMeta(status)
   return { background: m.color + '20', color: m.color, borderColor: m.color + '40' }
 }
+
+async function onResume(taskId: number | string) {
+  const api = useProjectApi()
+  resuming.value = true
+  try {
+    // legacy task 的 id 是数字
+    const numericId = typeof taskId === 'string' ? parseInt(taskId.replace('legacy-', '')) : taskId
+    await api.resumeInitTask(numericId)
+  } catch (e: any) {
+    console.error('resume failed', e)
+  } finally {
+    resuming.value = false
+  }
+}
 </script>
 
 <template>
@@ -72,12 +87,19 @@ function tagStyle(status: string) {
         </div>
         <!-- 旧 init-task 的步骤展示 -->
         <div v-if="t._steps && t._isLegacy" class="task-steps">
-          <span v-for="(s, i) in t._steps" :key="i" class="step-item" :class="{ done: s.done }">
-            <span class="step-icon">{{ s.done ? '&#10003;' : '&#8226;' }}</span>{{ s.label }}
+          <span v-for="(s, i) in t._steps" :key="i"
+            class="step-item"
+            :class="{ done: s.done, failed: t._failedStep && t.status === 'failed' && !s.done }">
+            <span class="step-icon">{{ s.done ? '&#10003;' : (t._failedStep && t.status === 'failed' ? '&#9888;' : '&#8226;') }}</span>{{ s.label }}
           </span>
         </div>
         <!-- 操作按钮 -->
         <div class="task-actions">
+          <a-button
+            v-if="t._isLegacy && t.status === 'failed'"
+            size="small" type="primary" :loading="resuming"
+            @click.stop="onResume(t._taskId || t.id)"
+          >从失败处重试</a-button>
           <a-button
             v-if="t.status === 'pending' || t.status === 'running'"
             size="small" danger type="link" @click.stop="cancelTask(t.id)"
@@ -118,6 +140,7 @@ function tagStyle(status: string) {
 .task-steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
 .step-item { display: flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 8px; border-radius: 4px; background: #F8F6F1; color: #8C8C8C; }
 .step-item.done { background: #EAF0F1; color: #4D8088; font-weight: 500; }
+.step-item.failed { background: #FFF0F0; color: #C75B5B; font-weight: 500; }
 .step-icon { font-size: 10px; }
 .task-actions { display: flex; justify-content: flex-end; gap: 4px; }
 .empty-hint { font-size: 12px; color: #8C8C8C; text-align: center; padding: 12px 0; }

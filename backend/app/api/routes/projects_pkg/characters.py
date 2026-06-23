@@ -1,6 +1,7 @@
 """角色：CRUD / 生成 / 批量生成 / 自动分析 / 自动生成"""
 import json
 from app.api.routes.projects_pkg.base import *
+from app.core.database import async_session
 
 
 router = make_router()
@@ -176,6 +177,41 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
             print(f"[characters] 自动建关系失败（忽略）: {e}")
 
     return {"characters": created, "count": len(created), "relations_built": relations_built}
+
+
+@router.post("/{project_id}/characters/batch-generate-async")
+async def batch_generate_characters_async(project_id: int, req: BatchCharacterRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步批量生成角色：立即返回 task_id，后台执行。"""
+    await get_user_project(db, project_id, user)
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run_chars(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="preparing", message="准备生成角色...")
+        # 复用同步逻辑（调用 MockReq）
+        async with async_session() as task_db:
+            class MockReq:
+                count = payload["count"]
+                requirements = payload.get("requirements", "")
+            result = await batch_generate_characters(
+                payload["project_id"], MockReq(), task_db,
+                type("U", (), {"id": payload["user_id"]})(),
+            )
+            if isinstance(result, dict) and result.get("count", 0) > 0:
+                await tracker.complete(message=f"生成完成（{result['count']}个角色）")
+            else:
+                await tracker.fail("角色生成失败")
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="characters",
+        title=f"批量生成角色",
+        payload={"count": req.count, "requirements": req.requirements, "project_id": project_id, "user_id": user.id},
+        runner=_run_chars,
+    )
+    return {"task_id": task_id}
 
 
 @router.post("/{project_id}/characters/auto-analysis")

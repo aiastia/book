@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     AI_TOP_P: float = 0.9
     AI_MAX_TOKENS: int = 4096
 
+    # AI 超时和重试配置（环境变量：MOYU_AI_TIMEOUT / MOYU_AI_MAX_RETRIES）
+    AI_TIMEOUT: int = 300               # 读写超时（秒），默认 5 分钟
+    AI_CONNECT_TIMEOUT: int = 60        # 连接超时（秒）
+    AI_MAX_RETRIES: int = 3             # SDK 层重试次数
+    AI_RETRY_DELAY: float = 2.0         # 重试基础间隔（秒），指数退避
+    AI_RETRY_MAX_DELAY: float = 30.0    # 重试最大间隔（秒）
+
     # 章节生成参数
     CHAPTER_DEFAULT_WORDS: int = 2500
     CHAPTER_MIN_WORDS: int = 2000

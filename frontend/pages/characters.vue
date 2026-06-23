@@ -76,7 +76,14 @@ async function onGenerate() {
 }
 async function onBatch() {
   batchLoading.value = true
-  try { const r = await api.batchGenerateCharacters({ count: batchCount.value, requirements: batchReq.value }); await refresh(); showBatch.value=false; msg.success(`批量生成 ${r.count} 个角色`) }
+  try {
+    const { task_id } = await api.batchGenerateCharactersAsync({ count: batchCount.value, requirements: batchReq.value })
+    const { trackTask } = useBackgroundTasks()
+    trackTask(task_id, 'characters', `批量生成${batchCount.value}个角色`)
+    showBatch.value = false
+    msg.success('批量生成任务已提交，可在右下角查看进度')
+    setTimeout(() => refresh(), 5000)
+  }
   catch (e:any) { msg.error('批量生成失败：'+formatError(e)) }
   finally { batchLoading.value = false }
 }

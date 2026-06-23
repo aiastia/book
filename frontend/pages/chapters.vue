@@ -45,11 +45,12 @@ async function onGenerate() {
   if (!editing.value) return
   generating.value = true
   try {
-    await api.generateChapter(editing.value.id)
-    const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${editing.value.id}`).catch(() => null)
-    if (ch) { editingContent.value = ch.content || ''; editingTitle.value = ch.title || editingTitle.value }
-    await refreshList()
-    msg.success(`章节生成完成！${ch?.word_count || ''} 字`)
+    const { task_id } = await api.generateChapterAsync(editing.value.id)
+    const { trackTask } = useBackgroundTasks()
+    trackTask(task_id, 'chapter_generate', `生成第${editing.value.chapter_number}章`)
+    msg.success('章节生成任务已提交，可在右下角查看进度')
+    editorOpen.value = false
+    setTimeout(() => refreshList(), 5000)
   } catch (e:any) { msg.error('生成失败：'+formatError(e)) }
   finally { generating.value = false }
 }

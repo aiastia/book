@@ -139,6 +139,8 @@ const grouped = computed(() => {
   <div class="page-content">
     <p style="color:#888;font-size:13px;margin-bottom:16px;">
       Skill 是 AI 生成各类型内容的提示词模板。可开关、自定义编辑、通过 MD 文档安装新 Skill。
+      <br/><b>此页面负责</b>：Skill 的开关、基础编辑、安装、重置（日常运维）。
+      <br/><b>提示词调优</b>：如需版本管理和精细化调优，请使用「提示词」页面。
     </p>
 
     <!-- 按分类展示 -->

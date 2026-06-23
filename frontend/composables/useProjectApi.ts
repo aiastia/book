@@ -54,6 +54,9 @@ export function useProjectApi() {
   function getInitTaskStatus(taskId: number) {
     return apiGet<any>(`/api/projects/init-task/${taskId}/status`, { timeout: 8000 })
   }
+  function resumeInitTask(taskId: number) {
+    return apiPost<any>(`/api/projects/init-task/${taskId}/resume`, {}, { timeout: 10000 })
+  }
 
   // ---- 项目导入导出 ----
   function importProject(data: any) {
@@ -67,6 +70,9 @@ export function useProjectApi() {
 
   function generateOutlines(chapterCount: number = 10) {
     return apiPost<{ outlines: any[]; count: number }>(`/api/projects/${pid()}/outlines/generate`, { chapter_count: chapterCount }, { timeout: 60000 })
+  }
+  function generateOutlinesAsync(chapterCount: number = 3) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/outlines/generate-async`, { chapter_count: chapterCount }, { timeout: 10000 })
   }
 
   function createOutline(body: any) {
@@ -104,7 +110,10 @@ export function useProjectApi() {
 
   /** AI 生成章节正文（后台非流式） */
   function generateChapter(chapterId: number) {
-    return apiPost<any>(`/api/projects/${pid()}/chapters/${chapterId}/generate`, {}, { timeout: 120000 })
+    return apiPost<any>(`/api/projects/${pid()}/chapters/${chapterId}/generate`, {}, { timeout: 300000 })
+  }
+  function generateChapterAsync(chapterId: number) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, {}, { timeout: 10000 })
   }
 
   /** 清空章节内容 */
@@ -122,7 +131,7 @@ export function useProjectApi() {
   }
 
   function generateCharacter(body: { role_type?: string; extra?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/characters/generate`, body, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/characters/generate`, body, { timeout: 60000 })
   }
 
   function updateCharacter(characterId: number, body: any) {
@@ -225,33 +234,36 @@ export function useProjectApi() {
 
   // ---- 灵感模式 ----
   function inspire(idea: string) {
-    return apiPost<any>(`/api/projects/${pid()}/inspire`, { idea }, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/inspire`, { idea }, { timeout: 60000 })
   }
 
   function globalInspire(idea: string) {
-    return apiPost<any>('/api/projects/global-inspire', { idea }, { timeout: 30000 })
+    return apiPost<any>('/api/projects/global-inspire', { idea }, { timeout: 60000 })
   }
 
   // ---- 灵感步骤向导 ----
   function inspirationStep(step: string, body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
-    return apiPost<{ prompt: string; options: string[] }>(`/api/projects/${pid()}/inspiration/step/${step}`, body, { timeout: 30000 })
+    return apiPost<{ prompt: string; options: string[] }>(`/api/projects/${pid()}/inspiration/step/${step}`, body, { timeout: 60000 })
   }
 
   function globalInspirationStep(step: string, body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
-    return apiPost<{ prompt: string; options: string[] }>(`/api/projects/global-inspiration/step/${step}`, body, { timeout: 30000 })
+    return apiPost<{ prompt: string; options: string[] }>(`/api/projects/global-inspiration/step/${step}`, body, { timeout: 60000 })
   }
 
   function inspirationQuickComplete(body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/inspiration/quick-complete`, body, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/inspiration/quick-complete`, body, { timeout: 60000 })
   }
 
   function globalInspirationQuickComplete(body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
-    return apiPost<any>('/api/projects/global-inspiration/quick-complete', body, { timeout: 30000 })
+    return apiPost<any>('/api/projects/global-inspiration/quick-complete', body, { timeout: 60000 })
   }
 
   // ---- 大纲续写/展开 ----
   function continueOutlines(body: { chapter_count: number }) {
     return apiPost<{ outlines: any[]; count: number; new_characters?: string[] }>(`/api/projects/${pid()}/outlines/continue`, body, { timeout: 60000 })
+  }
+  function continueOutlinesAsync(body: { chapter_count: number }) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/outlines/continue-async`, body, { timeout: 10000 })
   }
 
   function expandOutline(outlineId: number, body: { target_chapter_count: number }) {
@@ -268,26 +280,29 @@ export function useProjectApi() {
   function batchGenerateCharacters(body: { count: number; requirements?: string }) {
     return apiPost<{ characters: any[]; count: number }>(`/api/projects/${pid()}/characters/batch-generate`, body, { timeout: 60000 })
   }
+  function batchGenerateCharactersAsync(body: { count: number; requirements?: string }) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/characters/batch-generate-async`, body, { timeout: 10000 })
+  }
 
   function autoAnalyzeCharacters() {
-    return apiPost<any>(`/api/projects/${pid()}/characters/auto-analysis`, {}, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/characters/auto-analysis`, {}, { timeout: 60000 })
   }
 
   function autoGenerateCharacter(body: { analysis_result?: any; specification?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/characters/auto-generate`, body, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/characters/auto-generate`, body, { timeout: 60000 })
   }
 
   // ---- 组织 AI 生成 ----
   function generateOrganization(body: { user_input?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/organizations/generate`, body, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/organizations/generate`, body, { timeout: 60000 })
   }
 
   function autoAnalyzeOrganizations() {
-    return apiPost<any>(`/api/projects/${pid()}/organizations/auto-analysis`, {}, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/organizations/auto-analysis`, {}, { timeout: 60000 })
   }
 
   function autoGenerateOrganization(body: { analysis_result?: any; specification?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/organizations/auto-generate`, body, { timeout: 30000 })
+    return apiPost<any>(`/api/projects/${pid()}/organizations/auto-generate`, body, { timeout: 60000 })
   }
 
   function generateCareerSystem(body?: { append?: boolean; count?: number; career_type?: string; user_prompt?: string }) {
@@ -301,7 +316,7 @@ export function useProjectApi() {
 
   // ---- 封面提示词 ----
   function generateCoverPrompt() {
-    return apiPost<{ cover_prompt: string }>(`/api/projects/${pid()}/cover/generate-prompt`, {}, { timeout: 30000 })
+    return apiPost<{ cover_prompt: string }>(`/api/projects/${pid()}/cover/generate-prompt`, {}, { timeout: 60000 })
   }
 
   // ---- 拆书导入反向解析 ----
@@ -613,13 +628,16 @@ export function useProjectApi() {
     importProject,
     createInitTask,
     getInitTaskStatus,
+    resumeInitTask,
     // 大纲
     getOutlines,
     generateOutlines,
+    generateOutlinesAsync,
     createOutline,
     updateOutline,
     deleteOutline,
     continueOutlines,
+    continueOutlinesAsync,
     expandOutline,
     getOutlineChapters,
     deleteOutlineChapters,
@@ -630,6 +648,7 @@ export function useProjectApi() {
     updateChapter,
     deleteChapter,
     generateChapter,
+    generateChapterAsync,
     clearChapter,
     aiDenoising,
     // 角色
@@ -639,6 +658,7 @@ export function useProjectApi() {
     updateCharacter,
     deleteCharacter,
     batchGenerateCharacters,
+    batchGenerateCharactersAsync,
     autoAnalyzeCharacters,
     autoGenerateCharacter,
     // 世界观
