@@ -293,7 +293,11 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
 
 
 async def _link_org_memberships(db, pid, raw_chars):
-    """从 AI 返回的数据中提取组织关联，写入 Character.organization_id"""
+    """从 AI 返回的数据中提取组织关联，写入 Character.organization_id + OrganizationMember。
+
+    修复：去掉 break，一个角色所属的所有组织都写入 OrganizationMember；
+    organization_id 记录主组织（第一个匹配的）。
+    """
     from app.models.organization import Organization, OrganizationMember
     from sqlalchemy import func
 
@@ -308,6 +312,7 @@ async def _link_org_memberships(db, pid, raw_chars):
             continue
         if isinstance(memberships, str):
             memberships = [memberships]
+        first_linked = False  # organization_id 只记第一个匹配
         for org_name in memberships:
             if isinstance(org_name, dict):
                 org_name = org_name.get("name", org_name.get("organization", ""))
@@ -320,8 +325,11 @@ async def _link_org_memberships(db, pid, raw_chars):
                         org_id = o_id
                         break
             if org_id:
-                char.organization_id = org_id
-                # 同时写入 OrganizationMember（避免重复）
+                # organization_id 记主组织（第一个匹配），其余仍写入多对多表
+                if not first_linked:
+                    char.organization_id = org_id
+                    first_linked = True
+                # 所有匹配的组织都写入 OrganizationMember（避免重复）
                 existing = await db.scalar(
                     select(func.count(OrganizationMember.id)).where(
                         OrganizationMember.organization_id == org_id,
@@ -335,7 +343,6 @@ async def _link_org_memberships(db, pid, raw_chars):
                         role=item.get("org_role", "成员")[:50] if isinstance(item.get("org_role"), str) else "成员",
                         status="active",
                     ))
-                break  # 一个角色只关联第一个匹配的组织
 
 
 async def _step_assign_careers(db, task, pid, proj, engine, ai_client):

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 剧情分析：对标参考站 — 按章节展示分析维度（钩子/情节点/冲突/角色状态/评分/建议）
+// 剧情分析：按章节展示分析维度，对标 MuMuAINovel Tab 布局
+import { apiGet } from '~/composables/useApi'
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '剧情分析 — 墨语' })
@@ -14,28 +15,53 @@ const { data: chapters } = await api.getChapters()
 const selectedChapter = ref<number | null>(null)
 const detail = ref<any>(null)
 const loading = ref(false)
+const activeTab = ref('overview')
+// 视图模式：annotation（正文+标注，对标 MuMu）/ report（详细报告）
+const viewMode = ref<'annotation' | 'report'>('annotation')
+// 正文 + 标注数据
+const chapterContent = ref('')
+const annotations = ref<any[]>([])
+const annotationSummary = ref<any>({})
+const activeAnnotation = ref<any>(null)
+const showAnnotations = ref(true)
+const { groupAnnotations } = useAnnotationTypes()
 
 async function viewDetail(chapterNumber: number) {
   selectedChapter.value = chapterNumber
   loading.value = true
   detail.value = null
+  chapterContent.value = ''
+  annotations.value = []
+  annotationSummary.value = {}
+  activeAnnotation.value = null
+  activeTab.value = 'overview'
+  // 并行加载：分析报告 + 章节正文 + 标注
+  const cid = chapterIdByNumber(chapterNumber)
   try {
-    const r = await api.getAnalysis(chapterNumber)
+    const [r, ch, ann] = await Promise.all([
+      apiGet<any>(`/api/projects/${currentProjectId.value}/analyses/${chapterNumber}`).catch(() => null),
+      cid ? apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${cid}`).catch(() => null) : Promise.resolve(null),
+      cid ? api.getAnnotations(cid).catch(() => null) : Promise.resolve(null),
+    ])
     detail.value = r
+    if (ch) chapterContent.value = ch.content || ''
+    if (ann) {
+      annotations.value = ann.annotations || []
+      annotationSummary.value = ann.summary || {}
+    }
   } catch (e: any) {
     const status = e?.response?.status || e?.status
-    if (status === 404) {
-      detail.value = null  // 无分析数据，显示空状态
-    } else {
-      detail.value = { detail: '加载失败：' + formatError(e) }
-    }
+    if (status === 404) detail.value = null
+    else msg.error('加载分析失败：' + formatError(e))
   } finally { loading.value = false }
 }
+
+// 标注分组
+const annotationGroups = computed(() => groupAnnotations(annotations.value))
 
 const analysisMap = computed(() => {
   const m: Record<number, any> = {}
   for (const a of (analyses.value||[])) {
-    // 只有当分析有实际数据（quality_scores 或 plot_stage）才算真正已分析
     if (a && (a.quality_scores || a.plot_stage)) {
       m[a.chapter_number] = a
     }
@@ -45,56 +71,131 @@ const analysisMap = computed(() => {
 
 // 评分维度中文映射
 const scoreLabels: Record<string, string> = {
-  pacing: '节奏',
-  engagement: '吸引力',
-  coherence: '连贯性',
-  writing_quality: '文笔',
-  character_depth: '角色',
-  dialogue_quality: '对话',
-  world_consistency: '设定',
-  plot_logic: '逻辑',
-  overall: '综合',
+  overall: '整体质量', pacing: '节奏把控', engagement: '吸引力', coherence: '连贯性',
+  writing_quality: '文笔质量', character_depth: '角色塑造',
+  dialogue_quality: '对话质量', world_consistency: '世界观一致性',
+  plot_logic: '剧情逻辑', attraction: '番茄吸量力', retention: '番茄留存力',
+  bookmark_ratio: '番茄追更比潜力',
 }
 
-const scoreText = (qs: any) => {
-  if (!qs || typeof qs !== 'object') return '-'
-  return qs.overall || qs.pacing || '-'
+// 从 analysis_report 文本解析评分卡片（自动支持任意维度数，含番茄维度）
+const reportScores = computed<Array<{ label: string; value: number }>>(() => {
+  const report = detail.value?.analysis_report || ''
+  const items: Array<{ label: string; value: number }> = []
+  const block = report.match(/【整体评分】[\s\S]*?(?=\n【|\n\s*\n|$)/)
+  if (block) {
+    for (const line of block[0].split('\n')) {
+      if (line.includes('评分理由')) continue
+      const m = line.match(/^\s*([^:：]+)[:：]\s*([\d.]+)/)
+      if (m) {
+        const label = m[1].trim()
+        const value = parseFloat(m[2])
+        if (!isNaN(value) && label) items.push({ label, value })
+      }
+    }
+  }
+  return items
+})
+
+// 评分理由（从报告文本或 quality_scores 提取）
+const scoreJustification = computed(() => {
+  const report = detail.value?.analysis_report || ''
+  const m = report.match(/评分理由[:：]\s*(.+)/)
+  if (m) return m[1].trim()
+  return detail.value?.quality_scores?.score_justification || ''
+})
+
+// 是否使用报告解析的评分卡（有 report 优先用，否则降级 quality_scores）
+const useReportScores = computed(() => reportScores.value.length > 0)
+
+// 降级用：从 quality_scores 构造的评分卡（排除 overall 单独显示，排除 score_justification）
+const qualityScoreCards = computed(() => {
+  const qs = detail.value?.quality_scores || {}
+  return Object.entries(qs)
+    .filter(([k, v]) => k !== 'score_justification' && typeof v === 'number')
+    .map(([k, v]) => ({ key: k, label: scoreLabels[k] || k, value: v as number }))
+})
+
+function scoreColor(v: number): string {
+  if (v >= 8) return '#52A569'
+  if (v >= 6) return '#4D8088'
+  if (v >= 4) return '#D49A4E'
+  return '#C75B5B'
 }
 
-// 手动触发分析（对标 MuMu）
+function scoreLevel(v: number): string {
+  if (v >= 9) return '优秀'
+  if (v >= 7) return '良好'
+  if (v >= 5) return '一般'
+  if (v >= 3) return '较差'
+  return '很差'
+}
+
+function pacingText(p: string): string {
+  return { fast: '快速', medium: '中等', slow: '缓慢' }[p] || p || ''
+}
+
+// 手动触发分析（异步后台任务 + 右下角面板进度）
 const analyzing = ref(false)
 const analyzingAll = ref(false)
+const { trackTask } = useBackgroundTasks()
 
 async function analyzeChapter(chapterId: number, chapterNumber: number) {
   analyzing.value = true
-  msg.info(`正在分析第${chapterNumber}章，请耐心等待…`)
   try {
-    const r = await api.triggerAnalysis(chapterId)
-    msg.success(`第${chapterNumber}章分析完成`)
-    // 刷新分析列表 + 重新加载详情
-    await refresh()
-    await viewDetail(chapterNumber)
+    const r = await api.triggerAnalysisAsync(chapterId)
+    if (r?.task_id) {
+      trackTask({ id: r.task_id, task_type: 'chapter_analyze', title: `分析第${chapterNumber}章`, status: 'pending' })
+      msg.success(`第${chapterNumber}章分析任务已提交，可在右下角查看进度`)
+      // 轮询任务状态，完成后刷新
+      pollAnalysisTask(r.task_id, chapterNumber)
+    } else {
+      msg.info('该章节已在分析中或无需分析')
+    }
   } catch (e: any) {
     const status = e?.response?.status || e?.status
     if (status === 400) {
       msg.error('分析失败：章节内容过少，无法分析')
     } else {
-      msg.error('分析失败：' + formatError(e))
+      msg.error('提交分析失败：' + formatError(e))
     }
   } finally {
     analyzing.value = false
   }
 }
 
+async function pollAnalysisTask(taskId: number, chapterNumber: number, onDone?: () => void) {
+  const maxAttempts = 300 // 约 10 分钟
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    try {
+      const t = await apiGet<any>(`/api/tasks/${taskId}`)
+      if (t.status === 'completed') {
+        await refresh()
+        await viewDetail(chapterNumber)
+        msg.success(`第${chapterNumber}章分析完成`)
+        onDone?.()
+        return
+      }
+      if (t.status === 'failed' || t.status === 'cancelled') {
+        msg.error(`第${chapterNumber}章分析失败：${t.error || ''}`)
+        onDone?.()
+        return
+      }
+    } catch { /* 忽略单次轮询错误，继续 */ }
+  }
+}
+
 async function analyzeAll() {
   if (!await msg.confirm('将分析所有未分析的章节，可能需要较长时间。确认开始？')) return
   analyzingAll.value = true
-  msg.info('正在批量分析，请耐心等待…')
   try {
     const r = await api.analyzeAllUnanalyzed()
-    await refresh()
-    if (r.analyzed > 0) {
-      msg.success(`分析完成：成功 ${r.analyzed} 章` + (r.failed.length ? `，失败 ${r.failed.length} 章` : ''))
+    if (r?.task_id) {
+      trackTask({ id: r.task_id, task_type: 'chapter_batch_analyze', title: '批量剧情分析', status: 'pending' })
+      msg.success('批量分析任务已提交，可在右下角查看进度')
+      // 完成后刷新
+      pollBatchAnalysisTask(r.task_id)
     } else {
       msg.info('所有章节都已分析过')
     }
@@ -105,195 +206,910 @@ async function analyzeAll() {
   }
 }
 
-// 找章节ID（用于手动分析）
+async function pollBatchAnalysisTask(taskId: number) {
+  const maxAttempts = 600
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 3000))
+    try {
+      const t = await apiGet<any>(`/api/tasks/${taskId}`)
+      if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
+        await refresh()
+        if (selectedChapter.value) await viewDetail(selectedChapter.value)
+        return
+      }
+    } catch { /* 忽略单次轮询错误 */ }
+  }
+}
+
 function chapterIdByNumber(num: number): number | null {
   const c = (chapters.value || []).find((x: any) => x.chapter_number === num)
   return c?.id || null
 }
 
-// 找未分析的章节（有内容但无分析）
+// ===== 章节导航（上一章/下一章）=====
+const sortedChapterNumbers = computed(() =>
+  [...(chapters.value || [])].map((c: any) => c.chapter_number).sort((a, b) => a - b)
+)
+
+const navInfo = computed(() => {
+  if (!selectedChapter.value) return { hasPrev: false, hasNext: false }
+  const nums = sortedChapterNumbers.value
+  const idx = nums.indexOf(selectedChapter.value)
+  return {
+    hasPrev: idx > 0,
+    hasNext: idx >= 0 && idx < nums.length - 1,
+    prevNum: idx > 0 ? nums[idx - 1] : null,
+    nextNum: idx >= 0 && idx < nums.length - 1 ? nums[idx + 1] : null,
+  }
+})
+
+function goPrevChapter() {
+  if (navInfo.value.hasPrev && navInfo.value.prevNum != null) viewDetail(navInfo.value.prevNum)
+}
+function goNextChapter() {
+  if (navInfo.value.hasNext && navInfo.value.nextNum != null) viewDetail(navInfo.value.nextNum)
+}
+
 const unanalyzedChapters = computed(() => {
   const analyzedNums = new Set((analyses.value || []).map((a: any) => a.chapter_number))
   return (chapters.value || []).filter((c: any) =>
     c.content && c.content.length > 50 && !analyzedNums.has(c.chapter_number)
   )
 })
+
+// 解析钩子数据
+function parseHooks(data: any): Array<{ type: string; content: string }> {
+  if (!data) return []
+  if (Array.isArray(data)) return data.map(h => ({ type: h.type || '', content: typeof h === 'string' ? h : (h.description || h.content || JSON.stringify(h)) }))
+  if (typeof data === 'object') {
+    const arr = data.hooks || data.items || []
+    return arr.map((h: any) => ({ type: h.type || '', content: typeof h === 'string' ? h : (h.description || h.content || JSON.stringify(h)) }))
+  }
+  return []
+}
+
+// 解析建议
+function parseSuggestions(data: any): string[] {
+  if (!Array.isArray(data)) return []
+  return data.map(s => typeof s === 'string' ? s : (s.suggestion || s.content || JSON.stringify(s)))
+}
+
+// 解析情节点
+function parseKeyPoints(data: any): string[] {
+  if (!Array.isArray(data)) return []
+  return data.map(p => typeof p === 'string' ? p : (p.event || p.description || JSON.stringify(p)))
+}
+
+// 解析冲突
+function parseConflicts(data: any): Array<{ type: string; description: string }> {
+  if (!Array.isArray(data)) return []
+  return data.map(c => ({
+    type: c.type || '',
+    description: typeof c === 'string' ? c : (c.description || JSON.stringify(c)),
+  }))
+}
+
+// 解析角色状态
+function parseCharacterStates(data: any[]): Array<{ name: string; state: string; survival: string }> {
+  if (!Array.isArray(data)) return []
+  return data.map(cs => ({
+    name: typeof cs === 'object' ? (cs.character || cs.character_name || '角色') : '角色',
+    state: typeof cs === 'object' ? (cs.state_after || cs.mental_change || cs.change || '') : cs,
+    survival: typeof cs === 'object' ? (cs.survival_status || '') : '',
+  }))
+}
+
+// 计算各 tab 的数据计数
+const hookCount = computed(() => parseHooks(detail.value?.hooks).length)
+const foreshadowCount = computed(() => (detail.value?.foreshadows || []).length)
+const conflictCount = computed(() => parseConflicts(detail.value?.conflicts).length)
+const characterCount = computed(() => parseCharacterStates(detail.value?.character_states).length)
+const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestions).length)
 </script>
 
 <template>
   <div class="analysis-page">
-    <!-- 操作栏 -->
-    <div class="analysis-actions">
-      <a-button :loading="analyzingAll" :disabled="!unanalyzedChapters.length" @click="analyzeAll">
-        🤖 一键分析未分析章节（{{ unanalyzedChapters.length }}）
-      </a-button>
-    </div>
-    <!-- 章节列表（带分析状态） -->
-    <div class="ch-selector">
-      <div v-for="c in (chapters||[])" :key="c.id"
-        class="ch-sel-item" :class="{active: selectedChapter===c.chapter_number}"
-        @click="viewDetail(c.chapter_number)">
-        <span>第{{ c.chapter_number }}章</span>
-        <div style="display:flex;gap:4px;align-items:center;">
-          <a-tag v-if="c.quality_alert && c.quality_alert.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
-          <a-tag v-if="c.quality_alert && c.quality_alert.includes('low_score')" color="orange" size="small">低分</a-tag>
-          <a-tag v-if="analysisMap[c.chapter_number]" color="success" size="small">已分析</a-tag>
-          <a-tag v-else-if="c.content && c.content.length > 50" color="warning" size="small">未分析</a-tag>
-          <a-tag v-else size="small">无内容</a-tag>
-        </div>
+    <!-- 页面标题 -->
+    <div class="page-header">
+      <div class="page-header-left">
+        <h1 class="page-title">📊 剧情分析</h1>
+        <p class="page-desc">AI 多维度分析章节质量，发现改进空间</p>
+      </div>
+      <div class="page-header-right">
+        <a-button
+          type="primary"
+          :loading="analyzingAll"
+          :disabled="!unanalyzedChapters.length"
+          @click="analyzeAll"
+        >
+          🤖 一键分析未分析章节（{{ unanalyzedChapters.length }}）
+        </a-button>
       </div>
     </div>
 
-    <!-- 分析详情 -->
-    <div v-if="loading" style="text-align:center;padding:40px"><a-spin /></div>
-    <!-- 未分析提示 + 分析按钮 -->
-    <div v-if="!loading && (!detail || !detail.id || detail.detail)" class="detail-content">
-      <a-empty :description="detail?.detail || '该章节暂无分析数据'" />
-      <div v-if="selectedChapter" style="text-align:center;margin-top:16px">
-        <a-button type="primary" :loading="analyzing"
-          @click="analyzeChapter(chapterIdByNumber(selectedChapter)!, selectedChapter)">
-          🤖 {{ analyzing ? '分析中…' : '立即分析此章节' }}
-        </a-button>
+    <div class="analysis-body">
+      <!-- 左侧章节列表 -->
+      <div class="chapter-sidebar">
+        <div class="sidebar-title">章节列表</div>
+        <div class="chapter-list">
+          <div
+            v-for="c in (chapters||[])"
+            :key="c.id"
+            class="chapter-item"
+            :class="{ active: selectedChapter === c.chapter_number }"
+            @click="viewDetail(c.chapter_number)"
+          >
+            <div class="chapter-item-left">
+              <span class="chapter-num">{{ c.chapter_number }}</span>
+              <span class="chapter-label">第{{ c.chapter_number }}章</span>
+            </div>
+            <div class="chapter-item-right">
+              <a-tag v-if="c.quality_alert && c.quality_alert.includes('consistency_issue')" color="red" size="small">⚠矛盾</a-tag>
+              <a-tag v-if="c.quality_alert && c.quality_alert.includes('low_score')" color="orange" size="small">低分</a-tag>
+              <span v-if="analysisMap[c.chapter_number]" class="status-dot success" />
+              <span v-else-if="c.content && c.content.length > 50" class="status-dot pending" />
+              <span v-else class="status-dot empty" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧分析内容 -->
+      <div class="analysis-content">
+        <!-- 加载中 -->
+        <div v-if="loading" class="state-wrap">
+          <a-spin size="large" />
+          <div class="state-text">加载分析数据...</div>
+        </div>
+
+        <!-- 未选择章节 -->
+        <div v-else-if="!selectedChapter" class="state-wrap">
+          <div class="state-icon">📊</div>
+          <div class="state-text">从左侧选择一个章节查看分析</div>
+        </div>
+
+        <!-- 无分析数据 -->
+        <div v-else-if="!detail || !detail.id || detail.detail" class="state-wrap">
+          <div class="state-icon">📭</div>
+          <div class="state-text">{{ detail?.detail || '该章节暂无分析数据' }}</div>
+          <a-button type="primary" :loading="analyzing" @click="analyzeChapter(chapterIdByNumber(selectedChapter)!, selectedChapter)">
+            {{ analyzing ? '提交中...' : '🤖 开始分析此章节' }}
+          </a-button>
+        </div>
+
+        <!-- 分析结果 -->
+        <template v-else>
+          <!-- 工具栏 -->
+          <div class="content-toolbar">
+            <div class="toolbar-title">第{{ detail.chapter_number }}章 · 剧情分析</div>
+            <div class="toolbar-actions">
+              <!-- 视图切换 -->
+              <a-radio-group v-model:value="viewMode" size="small" button-style="solid">
+                <a-radio-button value="annotation">📖 正文标注</a-radio-button>
+                <a-radio-button value="report">📊 详细报告</a-radio-button>
+              </a-radio-group>
+              <a-button size="small" :disabled="!navInfo.hasPrev" @click="goPrevChapter">← 上一章</a-button>
+              <a-button size="small" :disabled="!navInfo.hasNext" @click="goNextChapter">下一章 →</a-button>
+              <a-button size="small" :loading="analyzing" @click="analyzeChapter(chapterIdByNumber(detail.chapter_number)!, detail.chapter_number)">
+                🔄 {{ analyzing ? '提交中...' : '重新分析' }}
+              </a-button>
+            </div>
+          </div>
+
+          <!-- ===== 视图：正文 + 标注（对标 MuMu ChapterAnalysis 三栏联动）===== -->
+          <div v-if="viewMode === 'annotation'" class="annotation-view">
+            <div class="annot-main">
+              <!-- 标注开关 -->
+              <div v-if="annotationSummary.total" class="annot-toolbar">
+                <a-switch v-model:checked="showAnnotations" size="small" />
+                <span class="annot-switch-label">显示标注</span>
+                <span class="annot-summary">
+                  共 {{ annotationSummary.total }} 个标注：
+                  <span v-for="g in annotationGroups" :key="g.type" :style="{ color: g.color }">
+                    {{ g.icon }} {{ g.items.length }}
+                  </span>
+                </span>
+              </div>
+              <div v-if="annotationSummary.has_analysis === false" class="annot-hint">
+                该章节尚未分析，暂无标注。可点击「重新分析」生成。
+              </div>
+              <ClientOnly>
+                <div class="annot-content">
+                  <AnnotatedText
+                    v-if="chapterContent && showAnnotations && annotations.length"
+                    :content="chapterContent"
+                    :annotations="annotations"
+                    :active-id="activeAnnotation ? `${activeAnnotation.type}-${activeAnnotation.position}` : null"
+                    @select="(a: any) => activeAnnotation = a"
+                  />
+                  <div v-else-if="chapterContent" class="annot-raw">{{ chapterContent }}</div>
+                  <a-empty v-else description="暂无章节内容" />
+                </div>
+              </ClientOnly>
+            </div>
+            <!-- 标注侧边栏 -->
+            <div class="annot-side">
+              <div class="annot-side-title">
+                <span>本章标注</span>
+                <span v-if="annotationSummary.total" class="annot-side-count">{{ annotationSummary.total }}</span>
+              </div>
+              <div v-if="annotationGroups.length === 0" class="annot-empty">暂无标注</div>
+              <div v-for="g in annotationGroups" :key="g.type" class="annot-group">
+                <div class="annot-group-title" :style="{ color: g.color }">
+                  {{ g.icon }} {{ g.label }}（{{ g.items.length }}）
+                </div>
+                <div
+                  v-for="(a, i) in g.items"
+                  :key="i"
+                  class="annot-item"
+                  :class="{ active: activeAnnotation === a }"
+                  :style="{ borderLeftColor: g.color }"
+                  @click="activeAnnotation = a"
+                >
+                  <div class="annot-item-title">{{ a.title || '—' }}</div>
+                  <div class="annot-item-content">{{ a.content || '' }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== 视图：详细报告（原有 Tabs）===== -->
+          <div v-else class="report-view">
+
+          <!-- 概览信息条 -->
+          <div class="overview-bar">
+            <div class="overview-item" v-if="detail.plot_stage">
+              <span class="overview-label">剧情阶段</span>
+              <a-tag color="blue">{{ detail.plot_stage }}</a-tag>
+            </div>
+            <div class="overview-item" v-if="detail.pacing">
+              <span class="overview-label">节奏</span>
+              <a-tag color="cyan">{{ pacingText(detail.pacing) }}</a-tag>
+            </div>
+            <div class="overview-item" v-if="detail.dialogue_ratio">
+              <span class="overview-label">对话占比</span>
+              <span class="overview-value">{{ (detail.dialogue_ratio * 100).toFixed(0) }}%</span>
+            </div>
+            <div class="overview-item" v-if="detail.description_ratio">
+              <span class="overview-label">描写占比</span>
+              <span class="overview-value">{{ (detail.description_ratio * 100).toFixed(0) }}%</span>
+            </div>
+            <div class="overview-item" v-if="detail.conflict_types?.length">
+              <span class="overview-label">冲突类型</span>
+              <a-tag v-for="ct in detail.conflict_types" :key="ct" color="red">{{ ct }}</a-tag>
+            </div>
+          </div>
+
+          <!-- Tab 内容 -->
+          <a-tabs v-model:activeKey="activeTab" size="small" class="analysis-tabs">
+            <!-- Tab 1: 总览 -->
+            <a-tab-pane key="overview" tab="📋 总览">
+              <div class="tab-scroll">
+                <!-- 评分卡片（优先用报告解析，降级 quality_scores） -->
+                <div v-if="useReportScores" class="score-section">
+                  <div class="score-grid">
+                    <div v-for="(s, i) in reportScores" :key="i" class="score-card"
+                         :class="{ highlight: /整体|overall/i.test(s.label) }">
+                      <div class="score-label">{{ s.label }}</div>
+                      <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
+                      <div class="score-bar">
+                        <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
+                      </div>
+                      <div v-if="/整体|overall/i.test(s.label)" class="score-level" :style="{ color: scoreColor(s.value) }">{{ scoreLevel(s.value) }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="qualityScoreCards.length" class="score-section">
+                  <div class="score-grid">
+                    <div v-for="s in qualityScoreCards" :key="s.key" class="score-card"
+                         :class="{ highlight: s.key === 'overall' }">
+                      <div class="score-label">{{ s.label }}</div>
+                      <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value }}</div>
+                      <div class="score-bar">
+                        <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
+                      </div>
+                      <div v-if="s.key === 'overall'" class="score-level" :style="{ color: scoreColor(s.value) }">{{ scoreLevel(s.value) }}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 评分理由 -->
+                <div v-if="scoreJustification" class="section-card justify">
+                  <div class="section-card-title">📝 评分理由</div>
+                  <div class="justify-text">{{ scoreJustification }}</div>
+                </div>
+
+                <!-- 分析摘要（完整报告文本） -->
+                <div v-if="detail.analysis_report" class="section-card">
+                  <div class="section-card-title">📄 分析摘要</div>
+                  <pre class="report-pre">{{ detail.analysis_report }}</pre>
+                </div>
+
+                <!-- 一致性问题 -->
+                <div v-if="detail.consistency_issues?.length" class="section-card warn">
+                  <div class="section-card-title">⚠️ 一致性问题</div>
+                  <div v-for="(issue, i) in detail.consistency_issues" :key="i" class="issue-item">
+                    {{ typeof issue === 'string' ? issue : JSON.stringify(issue) }}
+                  </div>
+                </div>
+
+                <!-- 改进建议 -->
+                <div v-if="parseSuggestions(detail.suggestions).length" class="section-card">
+                  <div class="section-card-title">💡 改进建议</div>
+                  <div v-for="(s, i) in parseSuggestions(detail.suggestions)" :key="i" class="suggestion-item">
+                    <span class="suggestion-badge">{{ i + 1 }}</span>
+                    <span>{{ s }}</span>
+                  </div>
+                </div>
+              </div>
+            </a-tab-pane>
+
+            <!-- Tab 2: 钩子 -->
+            <a-tab-pane key="hooks">
+              <template #tab>🎣 钩子 <a-badge v-if="hookCount" :count="hookCount" :number-style="{ backgroundColor: '#C75B5B', fontSize: '11px' }" /></template>
+              <div class="tab-scroll">
+                <div v-if="hookCount" class="data-list">
+                  <div v-for="(h, i) in parseHooks(detail.hooks)" :key="i" class="data-card">
+                    <a-tag v-if="h.type" color="blue">{{ h.type }}</a-tag>
+                    <div class="data-text">{{ h.content }}</div>
+                  </div>
+                </div>
+                <a-empty v-else description="暂无钩子数据" />
+              </div>
+            </a-tab-pane>
+
+            <!-- Tab 3: 伏笔 -->
+            <a-tab-pane key="foreshadows">
+              <template #tab>🔮 伏笔 <a-badge v-if="foreshadowCount" :count="foreshadowCount" :number-style="{ backgroundColor: '#1677FF', fontSize: '11px' }" /></template>
+              <div class="tab-scroll">
+                <div v-if="foreshadowCount" class="data-list">
+                  <div v-for="(f, i) in detail.foreshadows" :key="i" class="data-card">
+                    <div class="data-card-top">
+                      <a-tag size="small">{{ typeof f === 'object' ? (f.action || f.type || '伏笔') : '伏笔' }}</a-tag>
+                    </div>
+                    <div class="data-text">{{ typeof f === 'object' ? (f.title || f.description || JSON.stringify(f)) : f }}</div>
+                  </div>
+                </div>
+                <a-empty v-else description="暂无伏笔数据" />
+              </div>
+            </a-tab-pane>
+
+            <!-- Tab 4: 冲突与情节点 -->
+            <a-tab-pane key="conflicts">
+              <template #tab>⚡ 冲突 <a-badge v-if="conflictCount" :count="conflictCount" :number-style="{ backgroundColor: '#D49A4E', fontSize: '11px' }" /></template>
+              <div class="tab-scroll">
+                <!-- 关键情节点 -->
+                <div v-if="parseKeyPoints(detail.key_plot_points).length" class="section-card">
+                  <div class="section-card-title">⭐ 关键情节点</div>
+                  <div v-for="(p, i) in parseKeyPoints(detail.key_plot_points)" :key="i" class="data-card">
+                    <div class="data-card-top">
+                      <span class="item-no">{{ i + 1 }}</span>
+                    </div>
+                    <div class="data-text">{{ p }}</div>
+                  </div>
+                </div>
+                <!-- 冲突 -->
+                <div v-if="conflictCount" class="data-list">
+                  <div v-for="(c, i) in parseConflicts(detail.conflicts)" :key="i" class="data-card">
+                    <div class="data-card-top">
+                      <a-tag v-if="c.type" color="red">{{ c.type }}</a-tag>
+                    </div>
+                    <div class="data-text">{{ c.description }}</div>
+                  </div>
+                </div>
+                <a-empty v-if="!parseKeyPoints(detail.key_plot_points).length && !conflictCount" description="暂无冲突数据" />
+              </div>
+            </a-tab-pane>
+
+            <!-- Tab 5: 角色 -->
+            <a-tab-pane key="characters">
+              <template #tab>👤 角色 <a-badge v-if="characterCount" :count="characterCount" :number-style="{ backgroundColor: '#D49A4E', fontSize: '11px' }" /></template>
+              <div class="tab-scroll">
+                <div v-if="characterCount" class="data-list">
+                  <div v-for="(cs, i) in parseCharacterStates(detail.character_states)" :key="i" class="data-card">
+                    <div class="data-card-top">
+                      <span class="data-title">{{ cs.name }}</span>
+                      <a-tag v-if="cs.survival && cs.survival !== '存活'" color="red" size="small">{{ cs.survival }}</a-tag>
+                    </div>
+                    <div class="data-text">{{ cs.state }}</div>
+                  </div>
+                </div>
+                <a-empty v-else description="暂无角色状态数据" />
+              </div>
+            </a-tab-pane>
+
+            <!-- Tab 6: 情感 -->
+            <a-tab-pane key="emotion" tab="🎭 情感">
+              <div class="tab-scroll">
+                <div v-if="detail.emotional_curve && Object.keys(detail.emotional_curve).length">
+                  <div class="emotion-arc">
+                    <div class="emotion-stage">
+                      <div class="emotion-label">开头</div>
+                      <div class="emotion-text">{{ detail.emotional_curve.start || '—' }}</div>
+                    </div>
+                    <div class="emotion-arrow">→</div>
+                    <div class="emotion-stage">
+                      <div class="emotion-label">中段</div>
+                      <div class="emotion-text">{{ detail.emotional_curve.middle || '—' }}</div>
+                    </div>
+                    <div class="emotion-arrow">→</div>
+                    <div class="emotion-stage">
+                      <div class="emotion-label">结尾</div>
+                      <div class="emotion-text">{{ detail.emotional_curve.end || '—' }}</div>
+                    </div>
+                  </div>
+                  <div v-if="detail.emotional_curve.arc_summary" class="section-card">
+                    <div class="section-card-title">情感弧线总结</div>
+                    <div class="data-text">{{ detail.emotional_curve.arc_summary }}</div>
+                  </div>
+                </div>
+                <a-empty v-else description="暂无情感数据" />
+              </div>
+            </a-tab-pane>
+
+            <!-- Tab 7: 组织状态 -->
+            <a-tab-pane v-if="detail.organization_states?.length" key="orgs">
+              <template #tab>🏛️ 组织</template>
+              <div class="tab-scroll">
+                <div class="data-list">
+                  <div v-for="(os, i) in detail.organization_states" :key="i" class="data-card">
+                    <div class="data-card-top">
+                      <a-tag color="purple" size="small">{{ typeof os === 'object' ? (os.organization || '组织') : '' }}</a-tag>
+                    </div>
+                    <div class="data-text">{{ typeof os === 'object' ? (os.change || JSON.stringify(os)) : os }}</div>
+                  </div>
+                </div>
+              </div>
+            </a-tab-pane>
+          </a-tabs>
+          </div>
+        </template>
       </div>
     </div>
-    <div v-if="detail && detail.id && !detail.detail" class="detail-content">
-      <!-- 重新分析按钮 -->
-      <div class="detail-action-bar">
-        <a-button size="small" :loading="analyzing"
-          @click="analyzeChapter(chapterIdByNumber(detail.chapter_number)!, detail.chapter_number)">
-          🔄 {{ analyzing ? '分析中…' : '重新分析' }}
-        </a-button>
-      </div>
-      <!-- 剧情阶段 + 节奏 + 占比 -->
-      <a-card size="small" style="margin-bottom:12px">
-        <div class="meta-row">
-          <a-tag v-if="detail.plot_stage" color="blue">阶段：{{ detail.plot_stage }}</a-tag>
-          <a-tag v-if="detail.pacing" color="cyan">节奏：{{ {fast:'快',medium:'中',slow:'慢'}[detail.pacing] || detail.pacing }}</a-tag>
-          <span v-if="detail.dialogue_ratio" class="ratio-pill">对话 {{ (detail.dialogue_ratio * 100).toFixed(0) }}%</span>
-          <span v-if="detail.description_ratio" class="ratio-pill">描写 {{ (detail.description_ratio * 100).toFixed(0) }}%</span>
-        </div>
-      </a-card>
-      <!-- 评分 -->
-      <a-card v-if="detail.quality_scores" size="small" title="质量评分" style="margin-bottom:12px">
-        <div class="score-grid">
-          <div v-for="(v,k) in detail.quality_scores" :key="k" class="score-item" :class="{ 'score-low': v < 5, 'score-warn': v >= 5 && v < 7 }">
-            <span class="score-label">{{ scoreLabels[k] || k }}</span>
-            <span class="score-value">{{ v }}</span>
-          </div>
-        </div>
-      </a-card>
-      <!-- 一致性问题 -->
-      <a-card v-if="detail.consistency_issues && detail.consistency_issues.length" size="small" title="⚠️ 一致性问题" style="margin-bottom:12px">
-        <div v-for="(issue,i) in detail.consistency_issues" :key="i" class="analysis-item consistency-issue">
-          <a-tag color="red" size="small">问题{{ i+1 }}</a-tag>
-          {{ typeof issue === 'string' ? issue : JSON.stringify(issue) }}
-        </div>
-      </a-card>
-      <!-- 情感曲线（#14） -->
-      <a-card v-if="detail.emotional_curve && Object.keys(detail.emotional_curve).length" size="small" title="情感弧线" style="margin-bottom:12px">
-        <div class="emotion-arc">
-          <div class="emotion-stage">
-            <div class="emotion-label">开头</div>
-            <div class="emotion-text">{{ detail.emotional_curve.start || '—' }}</div>
-          </div>
-          <div class="emotion-arrow">→</div>
-          <div class="emotion-stage">
-            <div class="emotion-label">中段</div>
-            <div class="emotion-text">{{ detail.emotional_curve.middle || '—' }}</div>
-          </div>
-          <div class="emotion-arrow">→</div>
-          <div class="emotion-stage">
-            <div class="emotion-label">结尾</div>
-            <div class="emotion-text">{{ detail.emotional_curve.end || '—' }}</div>
-          </div>
-        </div>
-        <div v-if="detail.emotional_curve.arc_summary" class="emotion-summary">{{ detail.emotional_curve.arc_summary }}</div>
-      </a-card>
-      <!-- 冲突类型（#14） -->
-      <a-card v-if="detail.conflict_types && detail.conflict_types.length" size="small" style="margin-bottom:12px">
-        <div class="conflict-types">
-          <span class="ct-title">冲突类型：</span>
-          <a-tag v-for="(ct,i) in detail.conflict_types" :key="i" color="volcano">{{ ct }}</a-tag>
-        </div>
-      </a-card>
-      <!-- 钩子 -->
-      <a-card v-if="detail.hooks && (Array.isArray(detail.hooks)?detail.hooks.length:Object.keys(detail.hooks).length)" size="small" title="钩子" style="margin-bottom:12px">
-        <div v-for="(h,i) in (Array.isArray(detail.hooks)?detail.hooks:(detail.hooks.hooks||detail.hooks.items||[]))" :key="i" class="analysis-item">
-          {{ typeof h==='string'?h:(h.description||h.content||JSON.stringify(h)) }}
-        </div>
-      </a-card>
-      <!-- 关键情节点 -->
-      <a-card v-if="detail.key_plot_points && detail.key_plot_points.length" size="small" title="关键情节点" style="margin-bottom:12px">
-        <div v-for="(p,i) in detail.key_plot_points" :key="i" class="analysis-item">
-          <span class="item-no">{{ i+1 }}</span>{{ typeof p==='string'?p:(p.event||p.description||JSON.stringify(p)) }}
-        </div>
-      </a-card>
-      <!-- 冲突 -->
-      <a-card v-if="detail.conflicts && detail.conflicts.length" size="small" title="冲突" style="margin-bottom:12px">
-        <div v-for="(cf,i) in detail.conflicts" :key="i" class="analysis-item">
-          <span class="item-no">{{ i+1 }}</span>{{ typeof cf==='string'?cf:(cf.description||cf.type||JSON.stringify(cf)) }}
-        </div>
-      </a-card>
-      <!-- 组织状态变化（#14） -->
-      <a-card v-if="detail.organization_states && detail.organization_states.length" size="small" title="组织状态变化" style="margin-bottom:12px">
-        <div v-for="(os,i) in detail.organization_states" :key="i" class="analysis-item">
-          <a-tag color="purple" size="small">{{ typeof os==='object'?(os.organization||'组织'):'' }}</a-tag>
-          {{ typeof os==='object'?(os.change||JSON.stringify(os)):os }}
-        </div>
-      </a-card>
-      <!-- 角色状态 -->
-      <a-card v-if="detail.character_states && detail.character_states.length" size="small" title="角色状态变化" style="margin-bottom:12px">
-        <div v-for="(cs,i) in detail.character_states" :key="i" class="analysis-item">
-          <strong>{{ typeof cs==='object'?(cs.character||cs.character_name||'角色'):'' }}</strong>：
-          {{ typeof cs==='object'?(cs.state_after||cs.mental_change||cs.change||'') : cs }}
-          <a-tag v-if="typeof cs==='object' && cs.survival_status && cs.survival_status !== '存活'" size="small" color="red">{{ cs.survival_status }}</a-tag>
-        </div>
-      </a-card>
-      <!-- 建议 -->
-      <a-card v-if="detail.suggestions && detail.suggestions.length" size="small" title="改进建议" style="margin-bottom:12px">
-        <div v-for="(s,i) in detail.suggestions" :key="i" class="analysis-item suggestion">💡 {{ typeof s==='string'?s:(s.suggestion||s.content||JSON.stringify(s)) }}</div>
-      </a-card>
-      <!-- 伏笔 -->
-      <a-card v-if="detail.foreshadows && detail.foreshadows.length" size="small" title="伏笔动态" style="margin-bottom:12px">
-        <div v-for="(f,i) in detail.foreshadows" :key="i" class="analysis-item">
-          <a-tag size="small">{{ typeof f==='object'?(f.action||f.type||''):'伏笔' }}</a-tag>
-          {{ typeof f==='object'?(f.title||f.description||JSON.stringify(f)):f }}
-        </div>
-      </a-card>
-    </div>
-    <a-empty v-else-if="selectedChapter" description="该章节暂无分析数据" />
-    <a-empty v-else description="选择左侧章节查看分析详情" />
   </div>
 </template>
 
 <style scoped>
-.analysis-page { display:grid; grid-template-columns:240px 1fr; gap:16px; min-height:400px; }
-.ch-selector { display:flex; flex-direction:column; gap:6px; max-height:600px; overflow-y:auto; }
-.ch-sel-item { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border:1px solid #E8E4DC; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
-.ch-sel-item:hover { border-color:#B8CDD1; }
-.ch-sel-item.active { border-color:#4D8088; background:#EAF0F1; color:#4D8088; font-weight:600; }
-.detail-content { }
-.analysis-actions { grid-column: 1 / -1; margin-bottom: 8px; }
-.detail-action-bar { display: flex; gap: 8px; margin-bottom: 12px; }
-.score-grid { display:flex; flex-wrap:wrap; gap:12px; }
-.score-item { display:flex; flex-direction:column; align-items:center; min-width:60px; }
-.score-label { font-size:11px; color:#8C8C8C; }
-.score-value { font-size:20px; font-weight:700; color:#4D8088; font-family:Georgia,serif; }
-.analysis-item { padding:6px 0; font-size:14px; line-height:1.6; color:#595959; border-bottom:1px solid #F8F6F1; display:flex; gap:8px; }
-.analysis-item:last-child { border-bottom:none; }
-.item-no { width:20px; height:20px; border-radius:50%; background:#4D8088; color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-.suggestion { color:#D49A4E; }
-.meta-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.ratio-pill { font-size:12px; background:#F8F6F1; color:#595959; padding:2px 8px; border-radius:4px; }
-.emotion-arc { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-.emotion-stage { flex:1; text-align:center; padding:8px; background:#FAFAF7; border-radius:6px; }
-.emotion-label { font-size:11px; color:#8C8C8C; margin-bottom:4px; }
-.emotion-text { font-size:13px; color:#2B2B2B; }
-.emotion-arrow { color:#B5C7CB; font-size:16px; }
-.emotion-summary { font-size:13px; color:#595959; line-height:1.6; padding-top:8px; border-top:1px solid #F0EDE6; }
-.conflict-types { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-.ct-title { font-size:13px; color:#595959; }
-.score-low .score-value { color:#E74C3C; }
-.score-warn .score-value { color:#D49A4E; }
-.consistency-issue { color:#E74C3C; background:#FFF5F5; padding:8px; border-radius:6px; margin-bottom:4px; }
+.analysis-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 页面标题 */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.page-header-left { display: flex; align-items: baseline; gap: 12px; }
+.page-title { margin: 0; font-size: 22px; font-weight: 700; color: var(--color-fg); }
+.page-desc { margin: 0; font-size: 13px; color: var(--color-fg-muted); }
+
+/* 主体布局 */
+.analysis-body {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左侧章节列表 */
+.chapter-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  overflow: hidden;
+}
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-fg);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-page);
+}
+.chapter-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+}
+.chapter-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all .15s;
+  font-size: 13px;
+  color: var(--color-fg-secondary);
+}
+.chapter-item:hover {
+  background: var(--color-bg-page);
+}
+.chapter-item.active {
+  background: var(--color-info-bg);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.chapter-item-left { display: flex; align-items: center; gap: 8px; }
+.chapter-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--color-bg-page);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-fg-muted);
+  flex-shrink: 0;
+}
+.chapter-item.active .chapter-num {
+  background: var(--color-primary);
+  color: #fff;
+}
+.chapter-label { white-space: nowrap; }
+.chapter-item-right { display: flex; align-items: center; gap: 4px; }
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.success { background: var(--color-success); }
+.status-dot.pending { background: var(--color-warning); }
+.status-dot.empty { background: var(--color-border); }
+
+/* 右侧内容区 */
+.analysis-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* 状态页 */
+.state-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 12px;
+}
+.state-icon { font-size: 48px; }
+.state-text { color: var(--color-fg-muted); font-size: 14px; }
+
+/* 工具栏 */
+.content-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-page);
+}
+.toolbar-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-fg);
+}
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 概览信息条 */
+.overview-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.overview-item { display: flex; align-items: center; gap: 4px; }
+.overview-label { font-size: 13px; color: var(--color-fg-muted); }
+.overview-value { font-size: 13px; color: var(--color-fg-secondary); font-weight: 500; }
+
+/* Tabs */
+.analysis-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.analysis-tabs :deep(.ant-tabs-nav) {
+  padding: 0 16px;
+  margin-bottom: 0;
+}
+.analysis-tabs :deep(.ant-tabs-content) {
+  flex: 1;
+  min-height: 0;
+}
+.analysis-tabs :deep(.ant-tabs-tabpane) {
+  height: 100%;
+}
+.tab-scroll {
+  height: calc(100vh - 340px);
+  min-height: 300px;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* 评分 */
+.score-section { margin-bottom: 20px; }
+.score-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.score-card {
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  min-width: 88px;
+  text-align: center;
+  flex: 1;
+  max-width: 120px;
+}
+.score-card.highlight {
+  background: linear-gradient(135deg, #F0F5F5, #EAF0F1);
+  border-color: var(--color-info-border);
+  min-width: 100px;
+}
+.score-label { font-size: 11px; color: var(--color-fg-muted); margin-bottom: 4px; }
+.score-num { font-size: 24px; font-weight: 700; line-height: 1.2; font-family: Georgia, serif; }
+.score-level { font-size: 11px; font-weight: 600; margin-top: 2px; }
+.score-bar {
+  height: 4px;
+  background: var(--color-border-light);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+
+/* 区块卡片 */
+.section-card {
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.section-card.warn {
+  background: var(--color-danger-bg);
+  border-color: #F0D0D0;
+}
+.section-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  margin-bottom: 10px;
+}
+
+/* 建议 */
+.suggestion-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 14px;
+  color: var(--color-fg-secondary);
+  line-height: 1.6;
+  padding: 4px 0;
+}
+.suggestion-badge {
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* 问题 */
+.issue-item {
+  font-size: 14px;
+  color: var(--color-danger);
+  line-height: 1.6;
+  padding: 6px 0;
+  border-bottom: 1px solid #F0D0D0;
+}
+.issue-item:last-child { border-bottom: none; }
+
+/* 评分理由 */
+.section-card.justify { background: #EAF3F1; border-color: #C8DDD9; }
+.justify-text {
+  font-size: 13px;
+  color: var(--color-fg-secondary);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+/* 分析摘要报告 */
+.report-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--color-fg-secondary);
+}
+
+/* 数据卡片 */
+.data-list { display: flex; flex-direction: column; gap: 8px; }
+.data-card {
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+.data-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.data-title { font-size: 14px; font-weight: 600; color: var(--color-fg); }
+.data-text { font-size: 14px; color: var(--color-fg-secondary); line-height: 1.6; }
+.item-no {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* 情感弧线 */
+.emotion-arc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.emotion-stage {
+  flex: 1;
+  text-align: center;
+  padding: 12px;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+.emotion-label { font-size: 11px; color: var(--color-fg-muted); margin-bottom: 4px; }
+.emotion-text { font-size: 13px; color: var(--color-fg); }
+.emotion-arrow { color: var(--color-info-border); font-size: 16px; }
+
+/* ===== 视图切换容器 ===== */
+.annotation-view, .report-view {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+.report-view { flex-direction: column; }
+.report-view .overview-bar, .report-view .analysis-tabs { width: 100%; }
+
+/* ===== 正文 + 标注三栏 ===== */
+.annot-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+}
+.annot-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-page);
+  font-size: 13px;
+}
+.annot-switch-label { font-size: 13px; color: var(--color-fg-secondary); }
+.annot-summary { font-size: 12px; color: var(--color-fg-muted); display: flex; gap: 10px; font-weight: 600; }
+.annot-hint { padding: 12px 16px; font-size: 13px; color: var(--color-warning); }
+.annot-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 28px;
+  font-size: 15px;
+  line-height: 2;
+}
+.annot-raw { white-space: pre-wrap; word-break: break-word; }
+
+/* 标注侧边栏 */
+.annot-side {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  padding: 10px;
+}
+.annot-side-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.annot-side-count {
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+}
+.annot-empty { font-size: 13px; color: var(--color-fg-muted); text-align: center; padding: 24px 0; }
+.annot-group { margin-bottom: 12px; }
+.annot-group-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.annot-item {
+  padding: 8px 10px;
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-border);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.annot-item:hover { background: var(--color-info-bg); }
+.annot-item.active { background: var(--color-info-bg); border-left-width: 4px; }
+.annot-item-title { font-size: 12px; font-weight: 600; color: var(--color-fg); margin-bottom: 3px; }
+.annot-item-content {
+  font-size: 12px;
+  color: var(--color-fg-secondary);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
 </style>

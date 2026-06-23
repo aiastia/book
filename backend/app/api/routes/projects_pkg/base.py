@@ -81,6 +81,7 @@ class ChapterUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     status: Optional[str] = None
+    expansion_plan: Optional[dict] = None  # 章节规划（情节概要/关键事件/涉及角色/情感基调/冲突类型/叙事目标/预估字数）
 
 
 class OutlineCreate(BaseModel):
@@ -102,6 +103,7 @@ class CharacterCreate(BaseModel):
     age: str = ""
     identity: str = ""
     occupation: str = ""
+    sub_occupations: str = ""
     appearance: str = ""
     personality: str = ""
     background: str = ""

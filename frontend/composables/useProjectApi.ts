@@ -96,11 +96,18 @@ export function useProjectApi() {
     return useApi<any>(pid() ? `/api/projects/${pid()}/chapters/${chapterId}` : '/api/_skip', { key: `chapter-${pid() || 'skip'}-${chapterId}` })
   }
 
-  function createChapter(body: { chapter_number: number; title?: string; content?: string }) {
+  function createChapter(body: {
+    chapter_number: number; title?: string; content?: string;
+    outline_id?: number | null; sub_index?: number;
+    expansion_plan?: Record<string, any> | null; generation_mode?: string;
+  }) {
     return apiPost<{ id: number; chapter_number: number }>(`/api/projects/${pid()}/chapters`, body)
   }
 
-  function updateChapter(chapterId: number, body: { title?: string; content?: string; status?: string }) {
+  function updateChapter(chapterId: number, body: {
+    title?: string; content?: string; status?: string;
+    expansion_plan?: Record<string, any> | null;
+  }) {
     return apiPut(`/api/projects/${pid()}/chapters/${chapterId}`, body)
   }
 
@@ -225,11 +232,21 @@ export function useProjectApi() {
   function getAnalysis(chapterNumber: number) {
     return useApi<any>(pid() ? `/api/projects/${pid()}/analyses/${chapterNumber}` : '/api/_skip', { key: `analysis-${pid() || 'skip'}-${chapterNumber}` })
   }
+  function triggerAnalysisAsync(chapterId: number) {
+    return apiPost<{ task_id: number; chapter_id: number; status: string }>(`/api/projects/${pid()}/chapters/${chapterId}/analyze`, {}, { timeout: 10000 })
+  }
+  /** 同步别名：现已改为异步（返回 task_id），保留旧名兼容旧调用方 */
   function triggerAnalysis(chapterId: number) {
-    return apiPost<{ ok: boolean; analysis: any }>(`/api/projects/${pid()}/chapters/${chapterId}/analyze`, {}, { timeout: 120000 })
+    return triggerAnalysisAsync(chapterId)
+  }
+  function getAnalysisTaskStatus(chapterId: number) {
+    return apiGet<any>(`/api/projects/${pid()}/chapters/${chapterId}/analyze/status`)
   }
   function analyzeAllUnanalyzed() {
-    return apiPost<{ analyzed: number; failed: any[]; total_chapters: number }>(`/api/projects/${pid()}/chapters/analyze-all`, {}, { timeout: 600000 })
+    return apiPost<{ task_id: number | null; analyzed: number; total: number; total_chapters: number; status: string }>(`/api/projects/${pid()}/chapters/analyze-all`, {}, { timeout: 10000 })
+  }
+  function getNavigation(chapterId: number) {
+    return apiGet<{ current: { id: number; chapter_number: number; title: string }; previous: any | null; next: any | null }>(`/api/projects/${pid()}/chapters/${chapterId}/navigation`)
   }
 
   // ---- 灵感模式 ----
@@ -771,7 +788,10 @@ export function useProjectApi() {
     getAnalyses,
     getAnalysis,
     triggerAnalysis,
+    triggerAnalysisAsync,
+    getAnalysisTaskStatus,
     analyzeAllUnanalyzed,
+    getNavigation,
     // 灵感
     inspire,
     globalInspire,

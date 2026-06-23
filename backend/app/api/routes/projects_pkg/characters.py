@@ -3,9 +3,26 @@ import json
 from app.api.routes.projects_pkg.base import *
 from app.core.database import async_session
 
-
 router = make_router()
 
+
+def _normalize_sub_occupations(data: dict) -> str:
+    """从 AI 返回中提取副职业，归一为分号分隔字符串。"""
+    raw = data.get("sub_occupations") or data.get("secondary_occupations") or []
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.replace("，", ";").replace(",", ";").split(";") if p.strip()]
+        return ";".join(parts)[:500]
+    if isinstance(raw, list):
+        out = []
+        for o in raw:
+            if isinstance(o, str) and o.strip():
+                out.append(o.strip())
+            elif isinstance(o, dict):
+                n = o.get("name") or o.get("occupation")
+                if n:
+                    out.append(str(n).strip())
+        return ";".join(out)[:500]
+    return ""
 
 @router.get("/{project_id}/characters")
 async def list_characters(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
@@ -13,6 +30,7 @@ async def list_characters(project_id: int, db: AsyncSession = Depends(get_db), u
     return [{
         "id": c.id, "name": c.name, "role": c.role, "gender": c.gender, "age": c.age,
         "identity": c.identity, "occupation": c.occupation,
+        "sub_occupations": c.sub_occupations or "",
         "appearance": c.appearance, "personality": c.personality,
         "background": c.background, "growth_experience": c.growth_experience,
         "ability": c.ability, "story_goal": c.story_goal, "motivation": c.motivation,
@@ -58,6 +76,7 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
         age=str(data.get("age", ""))[:20],
         identity=str(data.get("identity", ""))[:200],
         occupation=str(data.get("occupation", ""))[:100],
+        sub_occupations=_normalize_sub_occupations(data),
         appearance=str(data.get("appearance", "")),
         personality=str(data.get("personality", "")),
         background=str(data.get("background", "")),
@@ -78,6 +97,7 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
     return {
         "id": char.id, "name": char.name, "role": char.role, "gender": char.gender,
         "age": char.age, "identity": char.identity, "occupation": char.occupation,
+        "sub_occupations": char.sub_occupations or "",
         "appearance": char.appearance, "personality": char.personality,
         "background": char.background, "growth_experience": char.growth_experience,
         "ability": char.ability, "story_goal": char.story_goal,
@@ -149,6 +169,7 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
             age=str(item.get("age", ""))[:50],
             identity=str(item.get("identity", ""))[:200],
             occupation=str(item.get("occupation", ""))[:200],
+            sub_occupations=_normalize_sub_occupations(item),
             appearance=str(item.get("appearance", ""))[:2000],
             personality=str(item.get("personality", item.get("character_traits", "")))[:2000],
             background=str(item.get("background", ""))[:2000],
@@ -264,6 +285,7 @@ async def auto_generate_character(project_id: int, req: AutoCharacterGenerateReq
         appearance=char_data.get("appearance", ""), personality=char_data.get("personality", ""),
         background=char_data.get("background", ""), ability=char_data.get("ability", ""),
         occupation=char_data.get("occupation", ""),
+        sub_occupations=_normalize_sub_occupations(char_data),
     ))
     await db.commit()
     return {"character": char_data}

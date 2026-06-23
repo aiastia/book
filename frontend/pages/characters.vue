@@ -41,7 +41,7 @@ const batchLoading = ref(false)
 
 const editing = ref<any>(null)
 const editForm = reactive({
-  name:'', role:'配角', gender:'', age:'', identity:'', occupation:'',
+  name:'', role:'配角', gender:'', age:'', identity:'', occupation:'', sub_occupations:'',
   appearance:'', personality:'', background:'', growth_experience:'', ability:'',
   story_goal:'', motivation:'', weakness:'', arc_type:'', character_change:'', speech_style:'',
   status:'alive', mental_state:'', organization_id: null as number | null,
@@ -54,7 +54,8 @@ const displayFields = [
   { key:'identity', label:'身份' },
   { key:'age', label:'年龄' },
   { key:'gender', label:'性别' },
-  { key:'occupation', label:'职业' },
+  { key:'occupation', label:'主职业' },
+  { key:'sub_occupations', label:'副职业' },
   { key:'appearance', label:'外貌' },
   { key:'personality', label:'性格' },
   { key:'background', label:'背景' },
@@ -63,10 +64,13 @@ const displayFields = [
   { key:'motivation', label:'动机' },
   { key:'weakness', label:'弱点' },
   { key:'growth_experience', label:'成长经历' },
-  { key:'character_change', label:'人物变化' },
+  { key:'arc_type', label:'变化类型' },
+  { key:'character_change', label:'人物变化轨迹' },
   { key:'speech_style', label:'说话风格' },
   { key:'mental_state', label:'当前心理' },
 ]
+// 副职业字符串 → 数组（用于标签显示）
+const subOccupationTags = (s: string) => (s || '').split(';').map(x => x.trim()).filter(Boolean)
 
 async function onGenerate() {
   generating.value = true
@@ -128,7 +132,10 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
         <div class="char-desc">
           <div v-for="f in displayFields" :key="f.key" v-show="c[f.key]" class="desc-row">
             <span class="desc-label">{{ f.label }}</span>
-            <span class="desc-value">{{ c[f.key] }}</span>
+            <span v-if="f.key === 'sub_occupations'" class="desc-value">
+              <a-tag v-for="so in subOccupationTags(c[f.key])" :key="so" color="cyan" size="small">{{ so }}</a-tag>
+            </span>
+            <span v-else class="desc-value">{{ c[f.key] }}</span>
           </div>
           <!-- 主职业阶段（#19） -->
           <div v-if="c.main_career_id || (c.sub_careers && c.sub_careers.length)" class="desc-row career-row">
@@ -189,7 +196,8 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
           <a-col :span="8"><a-form-item label="年龄"><a-input v-model:value="editForm.age" /></a-form-item></a-col>
         </a-row>
         <a-row :gutter="12">
-          <a-col :span="8"><a-form-item label="职业"><a-auto-complete v-model:value="editForm.occupation" :options="occupationOptions.map(o=>({value:o}))" :filter-option="(input:string, option:any)=>option.value.toLowerCase().includes(input.toLowerCase())" allow-clear :placeholder="occupationOptions.length?'选择或输入职业':'可直接输入'" /></a-form-item></a-col>
+          <a-col :span="8"><a-form-item label="主职业"><a-auto-complete v-model:value="editForm.occupation" :options="occupationOptions.map(o=>({value:o}))" :filter-option="(input:string, option:any)=>option.value.toLowerCase().includes(input.toLowerCase())" allow-clear :placeholder="occupationOptions.length?'选择或输入主职业':'可直接输入'" /></a-form-item></a-col>
+          <a-col :span="16"><a-form-item label="副职业"><a-input v-model:value="editForm.sub_occupations" placeholder="多个副职业用分号 ; 分隔，如：炼丹师;阵法师" /></a-form-item></a-col>
         </a-row>
         <a-form-item label="身份"><a-input v-model:value="editForm.identity" /></a-form-item>
         <a-divider orientation="left" plain>外貌与性格</a-divider>
@@ -203,12 +211,12 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
         <a-form-item label="故事目标"><a-textarea v-model:value="editForm.story_goal" :rows="2" /></a-form-item>
         <a-form-item label="内在动机"><a-textarea v-model:value="editForm.motivation" :rows="2" /></a-form-item>
         <a-form-item label="弱点"><a-textarea v-model:value="editForm.weakness" :rows="2" /></a-form-item>
-        <a-divider orientation="left" plain>人物变化</a-divider>
+        <a-divider orientation="left" plain>人物变化 <span style="font-size:11px;color:#999;font-weight:normal;">（变化类型/轨迹随章节自动累积更新）</span></a-divider>
         <a-row :gutter="12">
           <a-col :span="12"><a-form-item label="变化类型"><a-select v-model:value="editForm.arc_type" allowClear><a-select-option v-for="a in arcOptions" :key="a" :label="a||'未设定'" :value="a" /></a-select></a-form-item></a-col>
           <a-col :span="12"><a-form-item label="当前心理"><a-input v-model:value="editForm.mental_state" /></a-form-item></a-col>
         </a-row>
-        <a-form-item label="人物变化轨迹"><a-textarea v-model:value="editForm.character_change" :rows="2" /></a-form-item>
+        <a-form-item label="人物变化轨迹"><a-textarea v-model:value="editForm.character_change" :rows="3" placeholder="随章节自动累积（第N章：xxx），也可手动补充" /></a-form-item>
         <a-form-item label="说话风格"><a-input v-model:value="editForm.speech_style" /></a-form-item>
       </a-form>
       <div style="text-align:right;margin-top:12px;">

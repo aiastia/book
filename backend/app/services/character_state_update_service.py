@@ -30,9 +30,9 @@ class CharacterStateUpdateService:
         chapter_id: Optional[int] = None,
         chapter_number: Optional[int] = None,
     ):
-        """主入口：依次更新生死/心理/关系/组织。"""
+        """主入口：依次更新生死/心理/关系/组织/角色弧线。"""
         if not character_states:
-            return {"survival": 0, "psychological": 0, "relationships": 0, "org": 0}
+            return {"survival": 0, "psychological": 0, "relationships": 0, "org": 0, "arc": 0}
 
         chars = (await self.db.execute(
             select(Character).where(Character.project_id == self.project_id)
@@ -44,6 +44,7 @@ class CharacterStateUpdateService:
             "psychological": await self._update_psychological(character_states, char_by_name, chapter_number),
             "relationships": await self._update_relationships(character_states, chars, chapter_number),
             "org": await self._update_org_memberships(character_states, chars, chapter_number),
+            "arc": await self._update_arc(character_states, char_by_name, chapter_number),
         }
         if any(results.values()):
             await self.db.commit()
@@ -211,6 +212,47 @@ class CharacterStateUpdateService:
                     if chapter_number:
                         m.left_at = f"第{chapter_number}章"
                     updated += 1
+        return updated
+
+    async def _update_arc(self, character_states: list, name_map: dict, chapter_number: Optional[int]) -> int:
+        """更新角色弧线：arc_type（变化类型）+ character_change（变化轨迹，随章节累积）。
+
+        AI 返回字段（character_states[]）：
+          - arc_progress: 本章节该角色的弧线进展描述
+          - arc_type_change: 弧线类型是否转变（如"成长→顿悟"），有则更新 arc_type
+        """
+        updated = 0
+        for state in character_states:
+            if not isinstance(state, dict):
+                continue
+            name = state.get("name") or state.get("character")
+            char = self._match_char(name, name_map) if name else None
+            if not char:
+                continue
+            chg = False
+            # 1) 弧线类型转变 → 更新 arc_type
+            arc_type_change = state.get("arc_type_change") or state.get("arc_change")
+            if arc_type_change and str(arc_type_change).strip():
+                new_arc = str(arc_type_change).strip()[:50]
+                if char.arc_type != new_arc:
+                    char.arc_type = new_arc
+                    chg = True
+            # 2) 弧线进展 → 累积到 character_change（追加"第N章：xxx"，去重防溢出）
+            arc_progress = state.get("arc_progress") or state.get("character_progress")
+            if arc_progress and str(arc_progress).strip():
+                snippet = str(arc_progress).strip()[:200]
+                prefix = f"第{chapter_number}章：" if chapter_number else "•"
+                entry = f"{prefix}{snippet}"
+                existing = (char.character_change or "").strip()
+                # 去重：本条已记录过则不重复追加
+                if entry not in existing:
+                    parts = [p.strip() for p in existing.split("\n") if p.strip()]
+                    parts.append(entry)
+                    # 保留最近 30 条，避免无限增长
+                    char.character_change = "\n".join(parts[-30:])
+                    chg = True
+            if chg:
+                updated += 1
         return updated
 
     def _match_char(self, name: str, char_by_name: dict) -> Optional[Character]:

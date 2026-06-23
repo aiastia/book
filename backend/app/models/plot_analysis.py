@@ -27,7 +27,8 @@ class PlotAnalysis(Base):
     dialogue_ratio = Column(Float, default=0)  # 对话占比 0-1
     description_ratio = Column(Float, default=0)  # 描写占比 0-1
     pacing = Column(String(20), default="")  # 节奏 fast/medium/slow
-    quality_scores = Column(JSON, default=dict)  # {pacing, engagement, coherence, writing_quality, character_depth, dialogue_quality, world_consistency, plot_logic, overall}
+    quality_scores = Column(JSON, default=dict)  # {overall, pacing, engagement, coherence, writing_quality, character_depth, dialogue_quality, world_consistency, plot_logic, attraction, retention, bookmark_ratio, score_justification}
+    analysis_report = Column(Text, default="")  # 标准格式分析报告文本（=== 章节分析报告 ===）
     consistency_issues = Column(JSON, default=list)  # 一致性问题列表
     suggestions = Column(JSON, default=list)  # 改进建议
     raw_response = Column(Text, default="")
@@ -54,6 +55,7 @@ class PlotAnalysis(Base):
             "description_ratio": self.description_ratio or 0,
             "pacing": self.pacing or "",
             "quality_scores": self.quality_scores or {},
+            "analysis_report": self.analysis_report or "",
             "suggestions": self.suggestions or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

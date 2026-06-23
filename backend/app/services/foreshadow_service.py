@@ -159,8 +159,12 @@ class ForeshadowService:
         for fs_data in foreshadows_data:
             fs_type = fs_data.get("type", "")
             title = fs_data.get("title", "")
-            detail = fs_data.get("detail", "")
+            # 字段兼容：detail / content / description 都接受
+            detail = fs_data.get("detail") or fs_data.get("content") or fs_data.get("description") or ""
             ref_id = fs_data.get("reference_foreshadow_id")
+            fs_subtype = fs_data.get("foreshadow_type", "")
+            importance = fs_data.get("importance") or fs_data.get("priority") or 5
+            target_resolve = fs_data.get("target_resolve_chapter_number")
 
             if fs_type == "planted":
                 if ref_id:
@@ -180,15 +184,29 @@ class ForeshadowService:
                     if matched:
                         matched.status = "planted"
                         matched.actual_plant_chapter = chapter_number
+                        # 补全缺失字段（之前创建时遗漏的）
+                        if detail and not matched.content:
+                            matched.content = detail
+                        if fs_subtype and not matched.foreshadow_type:
+                            matched.foreshadow_type = fs_subtype
+                        if target_resolve and not matched.target_resolve_chapter_number:
+                            matched.target_resolve_chapter_number = target_resolve
                     else:
-                        # 创建新的分析发现伏笔
-                        await self.create({
-                            "title": title,
+                        # 创建新的分析发现伏笔（补全所有字段，避免空内容）
+                        create_data = {
+                            "title": title or "（未命名伏笔）",
                             "content": detail,
                             "status": "planted",
                             "source_type": "analysis",
                             "actual_plant_chapter": chapter_number,
-                        })
+                            "plant_chapter_number": chapter_number,
+                            "priority": importance,
+                        }
+                        if fs_subtype:
+                            create_data["foreshadow_type"] = fs_subtype
+                        if target_resolve:
+                            create_data["target_resolve_chapter_number"] = target_resolve
+                        await self.create(create_data)
 
             elif fs_type == "resolved":
                 if ref_id:

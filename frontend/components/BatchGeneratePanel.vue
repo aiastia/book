@@ -22,7 +22,7 @@ const submitting = ref(false)
 // 表单
 const startChapterNumber = ref<number>(1)
 const count = ref(5)
-const countOptions = [1, 2, 3, 5, 10, 20, 40]
+const countOptions = [5, 10, 20, 40]
 const targetWords = ref(3000)
 const styleId = ref<number | null>(null)
 const narrativePerspective = ref<string>('')  // 空 = 按小说设定
@@ -57,19 +57,9 @@ const availableCount = computed(() => {
   const start = startChapterNumber.value || 1
   return emptyChapters.value.filter((c: any) => c.chapter_number >= start).length
 })
-// 可选数量列表：不超过可用空章节数
-const filteredCountOptions = computed(() => {
-  const max = availableCount.value
-  if (max <= 0) return [1]
-  return countOptions.filter(n => n <= max)
-})
-
-// 起始章变化时，自动修正 count
-watch(startChapterNumber, () => {
-  const max = availableCount.value
-  if (max > 0 && count.value > max) {
-    count.value = filteredCountOptions.value[filteredCountOptions.value.length - 1] || max
-  }
+// 实际生成数量 = 取用户选择和可用数的较小值
+const actualCount = computed(() => {
+  return Math.min(count.value, availableCount.value || 0)
 })
 
 // 项目默认叙事视角（用于 placeholder / 「按小说设定」展示）
@@ -81,7 +71,7 @@ let pollTimer: any = null
 
 function openPanel() {
   startChapterNumber.value = defaultStartChapter.value
-  count.value = Math.min(5, availableCount.value || 1)
+  count.value = 5
   aiModel.value = ''
   narrativePerspective.value = ''
   loadWritingStyles()
@@ -137,19 +127,23 @@ async function onSubmit() {
     msg.warning('请选择起始章节')
     return
   }
+  if (actualCount.value <= 0) {
+    msg.warning('没有可用的空章节')
+    return
+  }
   submitting.value = true
   try {
     if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
     const r = await api.batchGenerate({
       start_chapter_number: startChapterNumber.value,
-      count: count.value,
+      count: actualCount.value,
       enable_analysis: enableAnalysis.value,
       target_word_count: targetWords.value,
       model_override: aiModel.value || undefined,
       style_id: styleId.value || undefined,
       narrative_perspective: narrativePerspective.value || undefined,
     })
-    msg.success(`已提交批量生成任务，从第${startChapterNumber.value}章起共 ${count.value} 章`)
+    msg.success(`已提交批量生成任务，从第${startChapterNumber.value}章起共 ${actualCount.value} 章`)
     currentTask.value = await api.getBatchStatus(r.task_id)
     startPolling(r.task_id)
   } catch (e: any) {
@@ -268,9 +262,13 @@ const statusMeta = (s: string) => {
           <div class="form-col">
             <label class="form-label">生成数量</label>
             <a-radio-group v-model:value="count" button-style="solid" style="width:100%">
-              <a-radio-button v-for="n in filteredCountOptions" :key="n" :value="n" :style="{ width: (100 / filteredCountOptions.length) + '%' }">{{ n }} 章</a-radio-button>
+              <a-radio-button v-for="n in countOptions" :key="n" :value="n" :style="{ width: (100 / countOptions.length) + '%' }">{{ n }} 章</a-radio-button>
             </a-radio-group>
-            <div class="field-hint">可用空章节 {{ availableCount }} 章，将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + count - 1 }} 章</div>
+            <div class="field-hint">
+              可用空章节 {{ availableCount }} 章
+              <template v-if="actualCount < count">，实际将生成 {{ actualCount }} 章</template>
+              <template v-else>，将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + actualCount - 1 }} 章</template>
+            </div>
           </div>
         </div>
 
@@ -321,8 +319,8 @@ const statusMeta = (s: string) => {
         </div>
 
         <div class="submit-bar">
-          <a-button type="primary" :loading="submitting" @click="onSubmit">
-            开始批量生成（{{ count }} 章）
+          <a-button type="primary" :loading="submitting" :disabled="actualCount <= 0" @click="onSubmit">
+            开始批量生成（{{ actualCount }} 章）
           </a-button>
           <span class="hint">提示：按章节顺序逐个生成，前一章完成后才生成下一章</span>
         </div>

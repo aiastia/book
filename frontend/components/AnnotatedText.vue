@@ -26,6 +26,17 @@ const typeColor: Record<string, { bg: string; border: string; text: string; labe
   character_event: { bg: '#FFF7E6', border: '#FFD591', text: '#D49A4E', label: '角色' },
 }
 
+// 生成标注唯一 ID
+function annId(a: Annotation, idx: number) {
+  return `${a.type}-${a.position}`
+}
+
+// 判断标注是否激活
+function isActive(anns: Annotation[]): boolean {
+  if (!props.activeId || !anns.length) return false
+  return anns.some(a => annId(a, 0) === props.activeId)
+}
+
 // 把内容切成段（处理重叠标注）
 interface Segment {
   text: string
@@ -67,12 +78,14 @@ const segments = computed<Segment[]>(() => {
 
 function segStyle(anns: Annotation[]) {
   if (!anns.length) return {}
-  // 取第一个标注的颜色
   const c = typeColor[anns[0].type] || typeColor.plot_point
+  const active = isActive(anns)
   return {
-    background: c.bg,
+    background: active ? c.border : c.bg,
     borderBottom: `2px solid ${c.border}`,
     color: c.text,
+    boxShadow: active ? `0 0 0 2px ${c.border}` : 'none',
+    transform: active ? 'scale(1.02)' : 'none',
   }
 }
 function onSegClick(anns: Annotation[]) {
@@ -99,7 +112,7 @@ function annKey(a: Annotation, idx: number) {
 
 <style scoped>
 .annotated-text { font-size: 15px; line-height: 2; color: #2B2B2B; white-space: pre-wrap; word-break: break-word; }
-.seg { transition: background .15s; }
-.seg.annotated { padding: 1px 2px; border-radius: 2px; cursor: pointer; }
+.seg { transition: all .2s ease; }
+.seg.annotated { padding: 1px 2px; border-radius: 3px; cursor: pointer; }
 .seg.clickable:hover { filter: brightness(0.96); }
 </style>

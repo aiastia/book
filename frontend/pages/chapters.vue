@@ -202,14 +202,19 @@ const batchAnalyzableCount = computed(() => {
 const statusText = (s: string) => ({ draft: '草稿', generating: '创作中', completed: '已完成' }[s] || s)
 const statusColor = (s: string) => ({ draft: 'default', generating: 'processing', completed: 'success' }[s] || 'default')
 
-// ===== 一键分析 =====
+// ===== 一键分析（异步后台任务）=====
+const { trackTask: trackBgTask } = useBackgroundTasks()
 const batchAnalyzing = ref(false)
 async function onBatchAnalyze() {
   batchAnalyzing.value = true
   try {
     const res = await api.analyzeAllUnanalyzed()
-    msg.success(`一键分析完成：已分析 ${res.analyzed} 章，共 ${res.total_chapters} 章`)
-    await refreshList()
+    if (res?.task_id) {
+      trackBgTask({ id: res.task_id, task_type: 'chapter_batch_analyze', title: '批量剧情分析', status: 'pending' })
+      msg.success('批量分析任务已提交，可在右下角查看进度')
+    } else {
+      msg.info('没有需要分析的章节')
+    }
   } catch (e: any) {
     msg.error('批量分析失败：' + formatError(e))
   } finally {
@@ -549,18 +554,85 @@ const readerAnalyzing = ref(false)
 async function readerAnalyze() {
   if (!readerChapter.value) return
   readerAnalyzing.value = true
-  msg.info('正在分析，请等待…')
   try {
-    await api.triggerAnalysis(readerChapter.value.id)
-    const r = await api.getAnnotations(readerChapter.value.id)
-    readerAnnotations.value = r.annotations || []
-    readerSummary.value = r.summary || {}
-    msg.success('分析完成，标注已更新')
+    const r = await api.triggerAnalysisAsync(readerChapter.value.id)
+    if (r?.task_id) {
+      trackBgTask({ id: r.task_id, task_type: 'chapter_analyze', title: `分析第${readerChapter.value.chapter_number}章`, status: 'pending' })
+      msg.success('分析任务已提交，可在右下角查看进度')
+      // 后台轮询，完成后刷新阅读器标注
+      pollReaderAnalysis(r.task_id)
+    } else {
+      msg.info('该章节已在分析中或无需分析')
+    }
   } catch (e: any) {
-    msg.error('分析失败：' + formatError(e))
+    msg.error('提交分析失败：' + formatError(e))
   } finally {
     readerAnalyzing.value = false
   }
+}
+
+async function pollReaderAnalysis(taskId: number) {
+  const maxAttempts = 300
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 2000))
+    try {
+      const t = await apiGet<any>(`/api/tasks/${taskId}`)
+      if (t.status === 'completed') {
+        if (readerChapter.value) {
+          const r = await api.getAnnotations(readerChapter.value.id)
+          readerAnnotations.value = r.annotations || []
+          readerSummary.value = r.summary || {}
+        }
+        msg.success('分析完成，标注已更新')
+        await refreshList()
+        return
+      }
+      if (t.status === 'failed' || t.status === 'cancelled') {
+        msg.error('分析失败：' + (t.error || ''))
+        return
+      }
+    } catch { /* 忽略单次轮询错误 */ }
+  }
+}
+
+// ===== 章节规划（ExpansionPlan）=====
+const planEditorOpen = ref(false)
+const planViewOpen = ref(false)
+const planEditingChapter = ref<any>(null)
+const planCurrent = ref<any>(null)        // 当前规划数据（编辑/查看用）
+const planSummary = ref<string>('')        // 章节摘要
+
+// 打开规划编辑（先拉取单章详情拿完整 expansion_plan）
+async function openPlanEditor(c: any) {
+  planEditingChapter.value = c
+  try {
+    const detail = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`)
+    planCurrent.value = detail?.expansion_plan || null
+    planSummary.value = detail?.summary || ''
+  } catch {
+    planCurrent.value = null
+    planSummary.value = ''
+  }
+  planEditorOpen.value = true
+}
+
+// 打开规划查看
+async function openPlanView(c: any) {
+  planEditingChapter.value = c
+  try {
+    const detail = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`)
+    planCurrent.value = detail?.expansion_plan || null
+    planSummary.value = detail?.summary || ''
+  } catch {
+    planCurrent.value = null
+    planSummary.value = ''
+  }
+  planViewOpen.value = true
+}
+
+// 规划保存成功后刷新列表（更新 has_expansion_plan 标记）
+async function onPlanSaved() {
+  await refreshList()
 }
 </script>
 
@@ -645,6 +717,7 @@ async function readerAnalyze() {
                   <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title || '无标题' }}</span>
                   <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
                   <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
+                  <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
                   <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small">🔒 需前置章节</a-tag>
                 </div>
                 <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
@@ -652,6 +725,8 @@ async function readerAnalyze() {
               <div class="ch-row-actions" @click.stop>
                 <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
                 <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
+                <a-button v-if="c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
+                <a-button type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
                   <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
                 <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
                 <a-popconfirm title="确认删除该章节？" @confirm="onDelete(c.id)">
@@ -672,6 +747,7 @@ async function readerAnalyze() {
               <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title || '无标题' }}</span>
               <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
               <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
+              <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
               <a-tag v-if="c.quality_alert?.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
               <a-tag v-if="c.quality_alert?.includes('low_score')" color="orange" size="small">低分</a-tag>
               <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
@@ -683,6 +759,8 @@ async function readerAnalyze() {
           <div class="ch-row-actions" @click.stop>
             <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
             <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
+            <a-button v-if="c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
+            <a-button type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
             <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
             <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
           </div>
@@ -867,7 +945,7 @@ async function readerAnalyze() {
               {{ readerShowSidebar ? '隐藏标注' : '显示标注' }}
             </a-button>
             <a-button size="small" :loading="readerAnalyzing" @click="readerAnalyze">
-              🤖 {{ readerAnalyzing ? '分析中…' : (readerSummary.has_analysis ? '重新分析' : '分析此章') }}
+              🤖 {{ readerAnalyzing ? '提交中…' : (readerSummary.has_analysis ? '重新分析' : '分析此章') }}
             </a-button>
             <a-button size="small" :disabled="!readerNavInfo().hasNext" style="margin-left: auto" @click="readerNavigate(1)">
               下一章 →
@@ -923,6 +1001,28 @@ async function readerAnalyze() {
       :chapter-id="analysisPanelChapter.id"
       :chapter-number="analysisPanelChapter.chapter_number"
       :quality-score="analysisPanelChapter.quality_score"
+    />
+
+    <!-- ===== 章节规划编辑器 ===== -->
+    <ExpansionPlanEditor
+      v-if="planEditingChapter"
+      v-model:open="planEditorOpen"
+      :chapter-id="planEditingChapter.id"
+      :chapter-number="planEditingChapter.chapter_number"
+      :chapter-title="planEditingChapter.title"
+      :plan-data="planCurrent"
+      :chapter-summary="planSummary"
+      @saved="onPlanSaved"
+    />
+
+    <!-- ===== 章节规划查看 ===== -->
+    <ExpansionPlanView
+      v-if="planEditingChapter"
+      v-model:open="planViewOpen"
+      :chapter-number="planEditingChapter.chapter_number"
+      :chapter-title="planEditingChapter.title"
+      :plan="planCurrent"
+      :chapter-summary="planSummary"
     />
   </div>
 </template>

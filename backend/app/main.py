@@ -136,6 +136,8 @@ async def _auto_migrate():
         ("writing_styles", "ADD COLUMN custom_prompt TEXT DEFAULT ''"),
         # 第10批：角色副职业
         ("characters", "ADD COLUMN sub_occupations TEXT DEFAULT ''"),
+        # 第11批：剧情分析标准报告文本（=== 章节分析报告 ===）
+        ("plot_analyses", "ADD COLUMN analysis_report TEXT DEFAULT ''"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

@@ -1,7 +1,12 @@
 """章节：CRUD / 生成 / 流式生成 / 重写 / 局部重写 / 清空"""
+import asyncio
 import json
+from datetime import datetime, timedelta
 from app.api.routes.projects_pkg.base import *
 from app.core.database import async_session
+from app.models.background_task import BackgroundTask
+from app.services import background_task_service as bg_service
+from app.services.async_ai_service import submit_async_task
 
 
 router = make_router()
@@ -30,6 +35,7 @@ async def list_chapters(project_id: int, db: AsyncSession = Depends(get_db), use
         "summary": c.summary[:100] if c.summary else "",
         "outline_id": c.outline_id, "sub_index": c.sub_index or 1,
         "generation_mode": c.generation_mode or "one_to_one",
+        "has_expansion_plan": bool(c.expansion_plan),
     } for c in result.scalars().all()]
 
 
@@ -182,15 +188,86 @@ async def clear_chapter(project_id: int, chapter_id: int, db: AsyncSession = Dep
     return {"ok": True, "chapter_id": chapter.id}
 
 
-# ===== 手动触发剧情分析（对标 MuMu POST /chapters/{id}/analyze）=====
+# ===== 章节剧情分析（异步后台任务，对标 MuMu POST /chapters/{id}/analyze）=====
+
+# 分析任务卡死自恢复阈值
+_ANALYZE_RUNNING_TIMEOUT = timedelta(minutes=3)
+_ANALYZE_PENDING_TIMEOUT = timedelta(minutes=3)
+
+
+async def _get_latest_analyze_task(db: AsyncSession, chapter_id: int) -> Optional[BackgroundTask]:
+    """查该章节最新的 chapter_analyze 类型任务。
+
+    SQLite 下 JSON 路径查询不可靠，改为取最近若干条同类型任务后在 Python 层匹配 payload.chapter_id。
+    """
+    rows = (await db.execute(
+        select(BackgroundTask).where(BackgroundTask.task_type == "chapter_analyze")
+        .order_by(BackgroundTask.id.desc()).limit(20)
+    )).scalars().all()
+    for t in rows:
+        if (t.payload or {}).get("chapter_id") == chapter_id:
+            return t
+    return None
+
+
+async def _run_chapter_analysis(task_id: int, payload: dict):
+    """分析任务后台执行协程（独立 session）。
+
+    复用 ChapterService._auto_analyze，通过 on_progress 回调上报进度到 BackgroundTask。
+    """
+    tracker = bg_service.TaskProgressTracker(task_id)
+
+    async def on_progress(progress: int, message: str):
+        await tracker.update(progress=progress, message=message)
+
+    async with async_session() as task_db:
+        chapter_id = payload["chapter_id"]
+        project_id = payload["project_id"]
+        user_id = payload["user_id"]
+        # 重新校验权限（后台独立 session）
+        proj = (await task_db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if not proj or proj.user_id != user_id:
+            await tracker.fail("项目不存在或无权访问")
+            return
+
+        c = (await task_db.execute(
+            select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+        )).scalar_one_or_none()
+        if not c:
+            await tracker.fail("章节不存在")
+            return
+        if not c.content or len(c.content.strip()) < 50:
+            await tracker.fail("章节内容过少，无法分析")
+            return
+
+        # 删除旧分析（避免重复）
+        old_analyses = (await task_db.execute(
+            select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
+        )).scalars().all()
+        for old in old_analyses:
+            await task_db.delete(old)
+        await task_db.commit()
+
+        await tracker.update(stage="analyzing", progress=3, message=f"正在分析第{c.chapter_number}章...")
+
+        service = ChapterService(task_db, project_id, user_id)
+        try:
+            await service._auto_analyze(c, on_progress=on_progress)
+            await tracker.complete(result={"chapter_id": chapter_id, "chapter_number": c.chapter_number},
+                                   message=f"第{c.chapter_number}章分析完成")
+        except Exception as e:
+            await tracker.fail(f"分析失败: {str(e)[:500]}")
+
+
 @router.post("/{project_id}/chapters/{chapter_id}/analyze")
 async def trigger_analysis(
     project_id: int, chapter_id: int,
     db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
 ):
-    """手动触发章节剧情分析。复用 ChapterService._auto_analyze 逻辑。
+    """异步触发章节剧情分析。
 
-    适用场景：自动分析失败、老章节未分析、想重新分析。
+    立即创建后台任务返回 task_id，前端通过右下角任务面板或 status 接口轮询进度。
+    幂等：若该章节已有 pending/running 的分析任务，直接返回旧 task_id，不重复创建。
     """
     await get_user_project(db, project_id, user)
     c = (await db.execute(
@@ -201,47 +278,113 @@ async def trigger_analysis(
     if not c.content or len(c.content.strip()) < 50:
         raise HTTPException(400, "章节内容过少，无法分析")
 
-    # 删除旧分析（避免重复）
-    old_analyses = (await db.execute(
-        select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
-    )).scalars().all()
-    for old in old_analyses:
-        await db.delete(old)
-    await db.commit()
+    # 幂等去重：已有 pending/running 任务则复用
+    existing = await _get_latest_analyze_task(db, chapter_id)
+    if existing and existing.status in ("pending", "running"):
+        return {"task_id": existing.id, "chapter_id": chapter_id, "status": existing.status,
+                "message": "该章节已有分析任务在进行中"}
 
-    service = ChapterService(db, project_id, user.id)
-    try:
-        await service._auto_analyze(c)
-    except Exception as e:
-        raise HTTPException(500, f"分析失败: {str(e)}")
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="chapter_analyze",
+        title=f"分析第{c.chapter_number}章",
+        payload={"chapter_id": chapter_id, "project_id": project_id, "user_id": user.id,
+                 "chapter_number": c.chapter_number},
+        runner=_run_chapter_analysis,
+    )
+    return {"task_id": task_id, "chapter_id": chapter_id, "status": "pending",
+            "message": "分析任务已提交"}
 
-    # 返回新分析
-    analysis = (await db.execute(
-        select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id).order_by(PlotAnalysis.id.desc())
-    )).scalars().first()
-    if not analysis:
-        raise HTTPException(500, "分析未产生结果（AI 可能返回了非 JSON 格式），请重试")
+
+@router.get("/{project_id}/chapters/{chapter_id}/analyze/status")
+async def get_analysis_status(
+    project_id: int, chapter_id: int,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """查询章节分析任务状态（前端轮询用，对标 MuMu analysis/status）。
+
+    含卡死自恢复：running 超 3 分钟 / pending 超 3 分钟自动标记 failed。
+    返回字段对齐 MuMu：{has_task, task_id, status, progress, error_message, auto_recovered, ...}
+    """
+    await get_user_project(db, project_id, user)
+    task = await _get_latest_analyze_task(db, chapter_id)
+    if not task:
+        return {"has_task": False, "task_id": None, "chapter_id": chapter_id, "status": "none",
+                "progress": 0, "error_message": None, "auto_recovered": False,
+                "created_at": None, "started_at": None, "completed_at": None}
+
+    auto_recovered = False
+    now = datetime.utcnow()
+    # 卡死自恢复（懒触发）
+    if task.status == "running" and task.started_at and now - task.started_at > _ANALYZE_RUNNING_TIMEOUT:
+        task.status = "failed"
+        task.error_message = "分析任务超时（运行超过3分钟未完成），已自动恢复"
+        task.completed_at = now
+        task.updated_at = now
+        auto_recovered = True
+        await db.commit()
+    elif task.status == "pending" and task.created_at and now - task.created_at > _ANALYZE_PENDING_TIMEOUT:
+        task.status = "failed"
+        task.error_message = "分析任务排队超时（超过3分钟未启动），已自动恢复"
+        task.completed_at = now
+        task.updated_at = now
+        auto_recovered = True
+        await db.commit()
+
     return {
-        "ok": True,
-        "analysis": {
-            "id": analysis.id,
-            "chapter_number": analysis.chapter_number,
-            "plot_stage": analysis.plot_stage or "",
-            "hooks": analysis.hooks,
-            "foreshadows": analysis.foreshadows,
-            "conflicts": analysis.conflicts,
-            "conflict_types": analysis.conflict_types or [],
-            "emotional_curve": analysis.emotional_curve or {},
-            "character_states": analysis.character_states,
-            "organization_states": analysis.organization_states or [],
-            "key_plot_points": analysis.key_plot_points,
-            "pacing": analysis.pacing or "",
-            "dialogue_ratio": analysis.dialogue_ratio or 0,
-            "description_ratio": analysis.description_ratio or 0,
-            "quality_scores": analysis.quality_scores,
-            "suggestions": analysis.suggestions,
-        },
+        "has_task": True,
+        "task_id": task.id,
+        "chapter_id": chapter_id,
+        "status": task.status,
+        "progress": task.progress or 0,
+        "error_message": task.error,
+        "auto_recovered": auto_recovered,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
+
+
+async def _run_batch_analysis(task_id: int, payload: dict):
+    """批量分析后台执行协程：逐章串行分析，逐章上报进度。"""
+    tracker = bg_service.TaskProgressTracker(task_id)
+    project_id = payload["project_id"]
+    user_id = payload["user_id"]
+    chapter_ids: list[int] = payload.get("chapter_ids", [])
+
+    async with async_session() as task_db:
+        service = ChapterService(task_db, project_id, user_id)
+        total = len(chapter_ids)
+        completed = 0
+        failed = []
+        for i, chapter_id in enumerate(chapter_ids):
+            if await tracker.is_cancelled():
+                await tracker.update(message="批量分析已取消")
+                return
+            c = (await task_db.execute(
+                select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+            )).scalar_one_or_none()
+            if not c:
+                continue
+            await tracker.update(progress=int(5 + (i / max(total, 1)) * 90),
+                                 message=f"正在分析第{c.chapter_number}章（{i + 1}/{total}）...")
+            try:
+                # 删除旧分析
+                olds = (await task_db.execute(
+                    select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
+                )).scalars().all()
+                for o in olds:
+                    await task_db.delete(o)
+                await task_db.commit()
+                await service._auto_analyze(c)
+                completed += 1
+            except Exception as e:
+                failed.append({"chapter_number": c.chapter_number, "error": str(e)[:200]})
+
+        await tracker.complete(
+            result={"analyzed": completed, "failed": failed, "total": total},
+            message=f"批量分析完成：成功 {completed} 章" + (f"，失败 {len(failed)} 章" if failed else ""),
+        )
 
 
 @router.post("/{project_id}/chapters/analyze-all")
@@ -249,28 +392,74 @@ async def analyze_all_unanalyzed(
     project_id: int,
     db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
 ):
-    """批量分析所有未分析的章节（对标 MuMu 一键分析）。"""
+    """异步批量分析所有未分析的章节（对标 MuMu 一键分析）。
+
+    立即创建后台任务返回 task_id，逐章串行分析并上报进度。
+    """
     await get_user_project(db, project_id, user)
     chapters = (await db.execute(
         select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
     )).scalars().all()
-    service = ChapterService(db, project_id, user.id)
-    analyzed = 0
-    failed = []
+    # 筛选「有内容 + 未分析」的章节
+    candidate_ids = []
     for c in chapters:
         if not c.content or len(c.content.strip()) < 50:
             continue
         existing = (await db.execute(
             select(PlotAnalysis).where(PlotAnalysis.chapter_id == c.id)
         )).scalars().first()
-        if existing:
-            continue
-        try:
-            await service._auto_analyze(c)
-            analyzed += 1
-        except Exception as e:
-            failed.append({"chapter_number": c.chapter_number, "error": str(e)[:200]})
-    return {"analyzed": analyzed, "failed": failed, "total_chapters": len(chapters)}
+        if not existing:
+            candidate_ids.append(c.id)
+
+    if not candidate_ids:
+        return {"task_id": None, "analyzed": 0, "failed": [], "total_chapters": len(chapters),
+                "message": "没有需要分析的章节"}
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="chapter_batch_analyze",
+        title=f"批量分析 {len(candidate_ids)} 章",
+        payload={"project_id": project_id, "user_id": user.id, "chapter_ids": candidate_ids,
+                 "total": len(candidate_ids)},
+        runner=_run_batch_analysis,
+    )
+    return {"task_id": task_id, "total": len(candidate_ids), "total_chapters": len(chapters),
+            "status": "pending", "message": "批量分析任务已提交"}
+
+
+# ===== 章节导航（对标 MuMu /chapters/{id}/navigation）=====
+@router.get("/{project_id}/chapters/{chapter_id}/navigation")
+async def get_chapter_navigation(
+    project_id: int, chapter_id: int,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """章节导航：返回当前章及前后章（按 chapter_number 升序）。"""
+    await get_user_project(db, project_id, user)
+    current = (await db.execute(
+        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+    )).scalar_one_or_none()
+    if not current:
+        raise HTTPException(404, "章节不存在")
+
+    def _mini(ch: Optional[Chapter]):
+        if not ch:
+            return None
+        return {"id": ch.id, "chapter_number": ch.chapter_number, "title": ch.title or ""}
+
+    prev = (await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number < current.chapter_number,
+        ).order_by(Chapter.chapter_number.desc()).limit(1)
+    )).scalars().first()
+    nxt = (await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number > current.chapter_number,
+        ).order_by(Chapter.chapter_number.asc()).limit(1)
+    )).scalars().first()
+
+    return {"current": _mini(current), "previous": _mini(prev), "next": _mini(nxt)}
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/regenerate")

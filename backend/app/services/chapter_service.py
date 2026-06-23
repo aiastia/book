@@ -16,6 +16,118 @@ from app.core.ai_client import AIClient
 from app.core.config import settings
 
 
+# 分析报告评分维度展示顺序（含番茄平台维度，自动支持任意维度）
+_SCORE_ORDER = [
+    ("overall", "整体质量"),
+    ("pacing", "节奏把控"),
+    ("engagement", "吸引力"),
+    ("coherence", "连贯性"),
+    ("writing_quality", "文笔质量"),
+    ("character_depth", "角色塑造"),
+    ("dialogue_quality", "对话质量"),
+    ("world_consistency", "世界观一致性"),
+    ("plot_logic", "剧情逻辑"),
+    ("attraction", "番茄吸量力"),
+    ("retention", "番茄留存力"),
+    ("bookmark_ratio", "番茄追更比潜力"),
+]
+
+
+def generate_analysis_summary(analysis_data: dict) -> str:
+    """根据分析结果生成标准格式的分析报告文本（对标 MuMu generate_analysis_summary）。
+
+    输出格式（带【整体评分】【剧情阶段】等标题），存入 PlotAnalysis.analysis_report，
+    前端用正则解析该文本渲染评分卡片 + 整段展示为「分析摘要」。
+    """
+    try:
+        lines = ["=== 章节分析报告 ===\n"]
+
+        # ===== 整体评分（动态遍历，支持任意维度数） =====
+        scores = analysis_data.get("quality_scores") or analysis_data.get("scores") or {}
+        lines.append("【整体评分】")
+        shown = False
+        for key, label in _SCORE_ORDER:
+            val = scores.get(key)
+            if val is not None and val != "":
+                try:
+                    lines.append(f"  {label}: {float(val):.1f}/10")
+                    shown = True
+                except (ValueError, TypeError):
+                    pass
+        if not shown:
+            lines.append(f"  整体质量: {scores.get('overall', 'N/A')}/10")
+
+        # 评分理由（AI 必填的逐维度说明）
+        justification = scores.get("score_justification") or scores.get("justification")
+        if justification:
+            lines.append(f"  评分理由: {justification}")
+        lines.append("")
+
+        # ===== 剧情阶段 =====
+        lines.append(f"【剧情阶段】{analysis_data.get('plot_stage', '未知')}\n")
+
+        # ===== 钩子分析（兼容 dict / list 格式） =====
+        hooks_raw = analysis_data.get("hooks", [])
+        hook_items = []
+        if isinstance(hooks_raw, list):
+            hook_items = hooks_raw
+        elif isinstance(hooks_raw, dict):
+            hook_items = [
+                {"type": k, "content": v, "strength": 8}
+                for k, v in hooks_raw.items() if v
+            ]
+        if hook_items:
+            lines.append(f"【钩子分析】共{len(hook_items)}个")
+            for h in hook_items[:3]:
+                htype = h.get("type", "钩子") if isinstance(h, dict) else "钩子"
+                hcontent = (h.get("content") or h.get("text") or "") if isinstance(h, dict) else str(h)
+                hstrength = h.get("strength", 0) if isinstance(h, dict) else 0
+                lines.append(f"  • [{htype}] {hcontent[:60]}... (强度:{hstrength})")
+            lines.append("")
+
+        # ===== 伏笔分析 =====
+        foreshadows = analysis_data.get("foreshadows", [])
+        if foreshadows:
+            planted = sum(1 for f in foreshadows if isinstance(f, dict) and f.get("type") == "planted")
+            resolved = sum(1 for f in foreshadows if isinstance(f, dict) and f.get("type") == "resolved")
+            lines.append(f"【伏笔分析】埋下{planted}个, 回收{resolved}个\n")
+
+        # ===== 冲突分析 =====
+        conflicts = analysis_data.get("conflicts", [])
+        conflict_types = analysis_data.get("conflict_types", [])
+        if conflicts or conflict_types:
+            lines.append("【冲突分析】")
+            if conflict_types:
+                lines.append(f"  类型: {', '.join(conflict_types)}")
+            if conflicts and isinstance(conflicts[0], dict):
+                c0 = conflicts[0]
+                intensity = c0.get("intensity") or c0.get("level") or 0
+                try:
+                    intensity = int(float(intensity))
+                except (ValueError, TypeError):
+                    intensity = 0
+                progress = c0.get("progress", "")
+                lines.append(f"  强度: {intensity}/10")
+                if progress:
+                    lines.append(f"  进度: {progress}")
+            lines.append("")
+
+        # ===== 改进建议 =====
+        suggestions = analysis_data.get("suggestions", [])
+        if suggestions:
+            lines.append("【改进建议】")
+            for i, sug in enumerate(suggestions, 1):
+                text = sug if isinstance(sug, str) else (
+                    sug.get("suggestion") or sug.get("content") or str(sug)
+                )
+                lines.append(f"  {i}. {text}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[generate_analysis_summary] 生成摘要失败: {e}", flush=True)
+        return "分析摘要生成失败"
+
+
 class ChapterService:
     def __init__(self, db: AsyncSession, project_id: int, user_id: int = None):
         self.db = db
@@ -341,10 +453,24 @@ class ChapterService:
             chapter.summary = data.get("summary", "")
             await self.db.commit()
 
-    async def _auto_analyze(self, chapter: Chapter):
-        """自动剧情分析"""
+    async def _auto_analyze(self, chapter: Chapter, on_progress=None):
+        """自动剧情分析。
+
+        on_progress: 可选进度回调 async def on_progress(progress: int, message: str)。
+        传入后会在各步骤间上报进度（0-100），用于异步后台任务的进度追踪。
+        不传时保持原有同步行为，完全向后兼容。
+        """
+
+        async def _report(progress: int, message: str):
+            if on_progress:
+                try:
+                    await on_progress(progress, message)
+                except Exception:
+                    pass
+
         # 获取角色信息
         from app.models.character import Character
+        await _report(5, "准备分析上下文...")
         result = await self.db.execute(
             select(Character).where(Character.project_id == self.project_id)
         )
@@ -366,6 +492,7 @@ class ChapterService:
         fs_layered = "【本章必须回收】\n" + ("\n".join(must_resolve) if must_resolve else "无") +                      "\n【即将到期】\n" + ("\n".join(upcoming) if upcoming else "无") +                      "\n【其他伏笔】\n" + ("\n".join(others[:10]) if others else "无")
 
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
+        await _report(10, "AI 正在分析章节剧情...")
         result = await self.skill_engine.execute_skill(
             "plot_analysis", ai_client,
             {
@@ -392,6 +519,7 @@ class ChapterService:
 
         if result.get("json"):
             analysis_data = result["json"]
+            await _report(55, "分析完成，正在保存结果...")
 
             # 字段兼容层：统一 DB 提示词字段名 → 代码期望的字段名
             # hooks：DB 返回 list[{type,content,strength}]，兼容 dict 格式
@@ -446,9 +574,11 @@ class ChapterService:
                 quality_scores=quality_scores_data,
                 consistency_issues=analysis_data.get("consistency_issues", []),
                 suggestions=analysis_data.get("suggestions", []),
+                analysis_report=generate_analysis_summary(analysis_data),
                 raw_response=result.get("content", ""),
             )
             self.db.add(analysis)
+            await _report(62, "正在更新章节质量评分...")
 
             # 更新章节质量评分
             chapter.quality_score = quality_scores_data.get("overall")
@@ -468,14 +598,17 @@ class ChapterService:
             chapter.quality_alert = ",".join(alert_parts) if alert_parts else ""
 
             await self.db.commit()
+            await _report(70, "正在同步伏笔状态...")
 
             # 更新伏笔状态
             await self.foreshadow_service.auto_update_from_analysis(
                 analysis_data, chapter.chapter_number
             )
+            await _report(78, "正在提取记忆片段...")
 
             # 提取记忆
             await self._extract_memories(chapter, analysis_data)
+            await _report(86, "正在更新角色心理状态...")
 
             # 回写角色心理状态（让 mental_state 随章节自动更新）
             await self._update_character_states(analysis_data)
@@ -491,12 +624,14 @@ class ChapterService:
                 )
             except Exception:
                 pass
+            await _report(92, "正在更新角色关系...")
 
             # 增量更新角色关系（分析结果里若提到关系变化）
             try:
                 await self._update_relations_from_analysis(analysis_data)
             except Exception:
                 pass
+            await _report(96, "正在更新角色职业阶段...")
 
             # 更新角色职业阶段（#19，对标 MuMu career_update_service）
             try:
@@ -509,6 +644,7 @@ class ChapterService:
                 )
             except Exception:
                 pass
+            await _report(99, "分析完成")
 
         else:
             # JSON 解析失败（AI 返回了非 JSON 文本）→ 仍保存 raw_response 便于调试和重试
