@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// 批量生成面板（#12）：章节多选 + 提交 + 进度轮询 + 取消
+// 批量生成面板（连续模式，对标 MuMuAINovel）：
+// 选「起始章 + 数量(5/10/20/40) + 风格 + 字数 + 模型 + 视角」→ 提交 → 进度轮询 + 取消
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 import { useBackgroundTasks } from '~/composables/useBackgroundTasks'
+import { apiGet } from '~/composables/useApi'
 
 const props = defineProps<{
   chapters: any[]
@@ -12,42 +14,92 @@ const emit = defineEmits<{ (e: 'done'): void }>()
 const api = useProjectApi()
 const msg = useMessage()
 const { trackTask } = useBackgroundTasks()
+const { currentProjectId } = useProject()
 
 const open = ref(false)
-const selectedIds = ref<number[]>([])
-const enableAnalysis = ref(true)
 const submitting = ref(false)
+
+// 表单
+const startChapterNumber = ref<number>(1)
+const count = ref(5)
+const countOptions = [5, 10, 20, 40]
+const targetWords = ref(3000)
+const styleId = ref<number | null>(null)
+const narrativePerspective = ref<string>('')  // 空 = 按小说设定
+const aiModel = ref<string>('')               // 空 = 使用默认模型
+const enableAnalysis = ref(true)
+
+if (import.meta.client) {
+  const s = localStorage.getItem('moyu_chapter_words')
+  if (s) targetWords.value = Number(s)
+}
+
+// 写作风格列表 + 项目默认风格
+const writingStyles = ref<any[]>([])
+const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
+const defaultModelName = ref('')
+const loadingModels = ref(false)
+const projectDefaultStyleName = ref('')
+
+// 可选起始章（空章节，优先）
+const emptyChapters = computed(() => {
+  return (props.chapters || []).filter((c: any) => !c.content || c.content.trim().length < 100)
+})
+// 默认起始章 = 第一个空章节
+const defaultStartChapter = computed(() => {
+  if (emptyChapters.value.length) return emptyChapters.value[0].chapter_number
+  const list = props.chapters || []
+  return list.length ? list[list.length - 1].chapter_number + 1 : 1
+})
+
+// 项目默认叙事视角（用于 placeholder / 「按小说设定」展示）
+const projectDefaultPov = ref('第三人称')
 
 // 当前任务状态
 const currentTask = ref<any>(null)
-const polling = ref(false)
 let pollTimer: any = null
 
-const total = computed(() => props.chapters?.length || 0)
-
-// 可批量生成的章节（未生成内容 + 状态为 draft）
-const generatableChapters = computed(() => {
-  return (props.chapters || []).filter((c: any) => {
-    return !c.content || c.content.trim().length < 100
-  })
-})
-
-function toggleSelect(id: number) {
-  const idx = selectedIds.value.indexOf(id)
-  if (idx >= 0) selectedIds.value.splice(idx, 1)
-  else selectedIds.value.push(id)
-}
-function selectAll() {
-  selectedIds.value = generatableChapters.value.map((c: any) => c.id)
-}
-function selectNone() {
-  selectedIds.value = []
-}
-
 function openPanel() {
-  // 启动时检查是否有进行中的任务
+  startChapterNumber.value = defaultStartChapter.value
+  count.value = 5
+  aiModel.value = ''
+  narrativePerspective.value = ''
+  loadWritingStyles()
+  loadRemoteModels()
+  loadProjectDefault()
   checkActiveTask()
   open.value = true
+}
+
+async function loadWritingStyles() {
+  try {
+    writingStyles.value = await apiGet<any[]>('/api/writing-styles') || []
+  } catch {}
+}
+
+async function loadRemoteModels() {
+  if (remoteModels.value.length) return
+  loadingModels.value = true
+  try {
+    const r = await api.fetchDefaultRemoteModels()
+    remoteModels.value = r.models || []
+    defaultModelName.value = r.default_model || ''
+  } catch (e: any) {
+    console.warn('拉取模型列表失败', e)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+async function loadProjectDefault() {
+  if (!currentProjectId.value) return
+  try {
+    const p = await apiGet<any>(`/api/projects/${currentProjectId.value}`)
+    if (p) {
+      projectDefaultPov.value = p.narrative_pov || '第三人称'
+      projectDefaultStyleName.value = p.writing_style?.name || ''
+    }
+  } catch {}
 }
 
 async function checkActiveTask() {
@@ -61,21 +113,25 @@ async function checkActiveTask() {
 }
 
 async function onSubmit() {
-  if (!selectedIds.value.length) {
-    msg.warning('请选择至少一个章节')
+  if (!startChapterNumber.value || startChapterNumber.value < 1) {
+    msg.warning('请选择起始章节')
     return
   }
   submitting.value = true
   try {
+    if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
     const r = await api.batchGenerate({
-      chapter_ids: selectedIds.value,
+      start_chapter_number: startChapterNumber.value,
+      count: count.value,
       enable_analysis: enableAnalysis.value,
+      target_word_count: targetWords.value,
+      model_override: aiModel.value || undefined,
+      style_id: styleId.value || undefined,
+      narrative_perspective: narrativePerspective.value || undefined,
     })
-    msg.success(`已提交批量生成任务，共 ${r.total} 章`)
-    // 立即查询任务状态
+    msg.success(`已提交批量生成任务，从第${startChapterNumber.value}章起共 ${count.value} 章`)
     currentTask.value = await api.getBatchStatus(r.task_id)
     startPolling(r.task_id)
-    selectedIds.value = []
   } catch (e: any) {
     msg.error('提交失败：' + formatError(e))
   } finally {
@@ -85,7 +141,6 @@ async function onSubmit() {
 
 function startPolling(taskId: number) {
   stopPolling()
-  polling.value = true
   const poll = async () => {
     try {
       const t = await api.getBatchStatus(taskId)
@@ -106,7 +161,6 @@ function startPolling(taskId: number) {
 }
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-  polling.value = false
 }
 
 async function onCancel() {
@@ -176,26 +230,69 @@ const statusMeta = (s: string) => {
         </template>
       </a-alert>
 
-      <!-- 选择章节 -->
-      <div v-if="!currentTask || ['completed', 'failed', 'cancelled'].includes(currentTask.status)" class="select-section">
-        <div class="select-header">
-          <span class="select-title">选择要生成的章节（{{ selectedIds.length }}/{{ generatableChapters.length }}）</span>
-          <div>
-            <a-button type="link" size="small" @click="selectAll">全选</a-button>
-            <a-button type="link" size="small" @click="selectNone">清空</a-button>
+      <!-- 配置表单 -->
+      <div v-if="!currentTask || ['completed', 'failed', 'cancelled'].includes(currentTask.status)" class="config-section">
+        <a-alert type="info" show-icon style="margin-bottom:16px;" message="严格按序生成 | 从起始章起连续生成 N 章 | 任一失败则终止" />
+
+        <!-- 起始章 + 数量 -->
+        <div class="form-row-2">
+          <div class="form-col">
+            <label class="form-label">起始章节</label>
+            <a-select v-model:value="startChapterNumber" style="width:100%" placeholder="选择起始章">
+              <a-select-option v-for="c in emptyChapters" :key="c.id" :value="c.chapter_number">
+                第{{ c.chapter_number }}章：{{ c.title || '无标题' }}
+              </a-select-option>
+            </a-select>
+            <div class="field-hint">从该章起连续生成（只列出空章节）</div>
+          </div>
+          <div class="form-col">
+            <label class="form-label">生成数量</label>
+            <a-radio-group v-model:value="count" button-style="solid" style="width:100%">
+              <a-radio-button v-for="n in countOptions" :key="n" :value="n" style="width:25%">{{ n }} 章</a-radio-button>
+            </a-radio-group>
+            <div class="field-hint">将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + count - 1 }} 章</div>
           </div>
         </div>
-        <div class="chap-select-list">
-          <div v-if="!generatableChapters.length" class="empty-hint">没有待生成的章节（所有章节已有内容）</div>
-          <div
-            v-for="c in generatableChapters" :key="c.id"
-            class="chap-select-item"
-            :class="{ selected: selectedIds.includes(c.id) }"
-            @click="toggleSelect(c.id)"
-          >
-            <span class="check">{{ selectedIds.includes(c.id) ? '☑' : '☐' }}</span>
-            <span class="chap-num">第{{ c.chapter_number }}章</span>
-            <span class="chap-title">{{ c.title }}</span>
+
+        <!-- 风格 + 字数 -->
+        <div class="form-row-2">
+          <div class="form-col">
+            <label class="form-label">写作风格</label>
+            <a-select v-model:value="styleId" style="width:100%" placeholder="项目默认风格" allow-clear show-search option-filter-prop="label">
+              <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id" :label="s.name + (projectDefaultStyleName === s.name ? ' (默认)' : '')">
+                {{ s.name }}{{ projectDefaultStyleName === s.name ? ' (项目默认)' : '' }}
+              </a-select-option>
+            </a-select>
+          </div>
+          <div class="form-col">
+            <label class="form-label">目标字数</label>
+            <a-input-number v-model:value="targetWords" :min="500" :max="10000" :step="100" style="width:100%" />
+          </div>
+        </div>
+
+        <!-- 模型 + 视角 -->
+        <div class="form-row-2">
+          <div class="form-col">
+            <label class="form-label">AI 模型</label>
+            <a-select
+              v-model:value="aiModel"
+              style="width:100%"
+              :placeholder="defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型'"
+              allow-clear show-search option-filter-prop="label"
+              :loading="loadingModels"
+            >
+              <a-select-option value="">使用默认模型</a-select-option>
+              <a-select-option v-for="m in remoteModels" :key="m.id" :value="m.id" :label="m.id">{{ m.id }}</a-select-option>
+            </a-select>
+          </div>
+          <div class="form-col">
+            <label class="form-label">叙事视角</label>
+            <a-select v-model:value="narrativePerspective" style="width:100%" :placeholder="`按小说设定（${projectDefaultPov}）`" allow-clear>
+              <a-select-option value="">按小说设定</a-select-option>
+              <a-select-option value="第三人称">第三人称（他/她）</a-select-option>
+              <a-select-option value="第一人称">第一人称（我）</a-select-option>
+              <a-select-option value="全知视角">全知视角</a-select-option>
+            </a-select>
           </div>
         </div>
 
@@ -204,10 +301,10 @@ const statusMeta = (s: string) => {
         </div>
 
         <div class="submit-bar">
-          <a-button type="primary" :loading="submitting" :disabled="!selectedIds.length" @click="onSubmit">
-            开始批量生成（{{ selectedIds.length }} 章）
+          <a-button type="primary" :loading="submitting" @click="onSubmit">
+            开始批量生成（{{ count }} 章）
           </a-button>
-          <span class="hint">提示：将按章节顺序逐个生成，前一章完成后才生成下一章</span>
+          <span class="hint">提示：按章节顺序逐个生成，前一章完成后才生成下一章</span>
         </div>
       </div>
     </a-modal>
@@ -224,18 +321,13 @@ const statusMeta = (s: string) => {
 .task-message { font-size: 13px; color: #595959; }
 .current-chap { font-size: 12px; color: #4D8088; margin-top: 6px; font-weight: 500; }
 .retry-badge { background: #FFF7E6; color: #D49A4E; padding: 1px 6px; border-radius: 4px; font-size: 11px; margin-left: 6px; }
-.select-section { }
-.select-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.select-title { font-size: 13px; font-weight: 600; color: #2B2B2B; }
-.chap-select-list { max-height: 280px; overflow-y: auto; border: 1px solid #E8E4DC; border-radius: 8px; padding: 8px; margin-bottom: 12px; }
-.empty-hint { text-align: center; color: #8C8C8C; padding: 24px 0; font-size: 13px; }
-.chap-select-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; cursor: pointer; transition: background .15s; }
-.chap-select-item:hover { background: #F8F6F1; }
-.chap-select-item.selected { background: #EAF0F1; }
-.check { font-size: 16px; color: #4D8088; }
-.chap-num { font-size: 12px; color: #8C8C8C; min-width: 60px; }
-.chap-title { font-size: 13px; color: #2B2B2B; }
+.config-section { }
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.form-col { display: flex; flex-direction: column; gap: 4px; }
+.form-label { font-size: 13px; color: #595959; font-weight: 500; }
+.field-hint { font-size: 11px; color: #999; }
 .options { margin-bottom: 14px; }
-.submit-bar { display: flex; align-items: center; gap: 12px; }
+.submit-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .hint { font-size: 12px; color: #8C8C8C; }
+@media(max-width: 600px) { .form-row-2 { grid-template-columns: 1fr; } }
 </style>

@@ -186,13 +186,29 @@ async function readerAnalyze() {
 const statusText=(s:string)=>({draft:'草稿',generating:'创作中',completed:'已完成'}[s]||s)
 const statusColor=(s:string)=>({draft:'default',generating:'processing',completed:'success'}[s]||'default')
 const createdChapterNos = computed(() => new Set((chapters.value||[]).map(c=>c.chapter_number)))
+
+// ===== 分页（客户端切片，几百章不卡）=====
+const pageSize = ref(20)
+const currentPage = ref(1)
+const pageSizeOptions = ['20', '50', '100']
+const pagedChapters = computed(() => {
+  const list = chapters.value || []
+  const start = (currentPage.value - 1) * pageSize.value
+  return list.slice(start, start + pageSize.value)
+})
+// 章节列表变化（删除/新增/刷新）时，修正越界页码
+watch([() => chapters.value?.length, pageSize], () => {
+  const total = chapters.value?.length || 0
+  const maxPage = Math.max(1, Math.ceil(total / pageSize.value))
+  if (currentPage.value > maxPage) currentPage.value = maxPage
+})
 </script>
 
 <template>
   <div class="ch-page">
     <div class="page-actions">
       <a-button @click="createNewChapter">+ 空白章</a-button>
-      <BatchGeneratePanel :chapters="chapters || []" @done="refresh" />
+      <BatchGeneratePanel :chapters="chapters || []" @done="refreshList" />
     </div>
     <!-- 从大纲创建（未创建的大纲） -->
     <a-card v-if="outlines && outlines.filter(o=>!createdChapterNos.has(o.chapter_number)).length" size="small" title="从大纲创建章节" style="margin-bottom:12px">
@@ -204,7 +220,7 @@ const createdChapterNos = computed(() => new Set((chapters.value||[]).map(c=>c.c
     </a-card>
 
     <div v-if="chapters && chapters.length" class="ch-list">
-      <div v-for="c in chapters" :key="c.id" class="ch-row" @click="openEditor(c)">
+      <div v-for="c in pagedChapters" :key="c.id" class="ch-row" @click="openEditor(c)">
         <div class="ch-row-icon">📄</div>
         <div class="ch-row-main">
           <div class="ch-row-head">
@@ -225,6 +241,19 @@ const createdChapterNos = computed(() => new Set((chapters.value||[]).map(c=>c.c
       </div>
     </div>
     <a-empty v-else description="暂无章节" />
+
+    <!-- 分页 -->
+    <div v-if="chapters && chapters.length > pageSize" class="pagination-bar">
+      <a-pagination
+        v-model:current="currentPage"
+        v-model:page-size="pageSize"
+        :total="chapters.length"
+        :page-size-options="pageSizeOptions"
+        show-size-changer
+        :show-total="(t:number) => `共 ${t} 章`"
+        size="small"
+      />
+    </div>
 
     <!-- 编辑器 -->
     <a-modal v-model:open="editorOpen" :title="`编辑：第${editing?.chapter_number}章`" width="90%" :style="{top:'20px'}" :footer="null" :destroyOnClose="true">
@@ -297,6 +326,7 @@ const createdChapterNos = computed(() => new Set((chapters.value||[]).map(c=>c.c
 <style scoped>
 .ch-page { display:flex; flex-direction:column; gap:12px; }
 .page-actions { display:flex; gap:8px; }
+.pagination-bar { display:flex; justify-content:center; padding:8px 0; }
 .outline-chips { display:flex; flex-wrap:wrap; gap:6px; }
 .ch-list { display:flex; flex-direction:column; gap:8px; }
 .ch-row { display:flex; align-items:flex-start; gap:10px; padding:14px 16px; background:#fff; border:1px solid #E8E4DC; border-radius:8px; cursor:pointer; transition:all .2s; }

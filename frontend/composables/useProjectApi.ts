@@ -362,6 +362,11 @@ export function useProjectApi() {
     return apiPost<{ models: Array<{ id: string; owned_by: string }> }>('/api/ai-models/fetch-remote', { base_url: baseUrl, api_key: apiKey, provider }, { timeout: 15000 })
   }
 
+  /** 用默认 AI 模型配置的凭据实时拉取远端模型列表（无需重复填 key） */
+  function fetchDefaultRemoteModels() {
+    return apiGet<{ models: Array<{ id: string; owned_by: string }>; default_model: string; config_name: string }>('/api/ai-models/default/remote-models', {}, { timeout: 15000 })
+  }
+
   /** 测试 embedding 接口连通性（用于记忆向量检索） */
   function testEmbedding(baseUrl: string, apiKey: string, embeddingModel: string) {
     return apiPost<{ ok: boolean; dim: number; model: string }>('/api/ai-models/test-embedding', { base_url: baseUrl, api_key: apiKey, embedding_model: embeddingModel }, { timeout: 30000 })
@@ -529,7 +534,18 @@ export function useProjectApi() {
   }
 
   // ============ 批量章节生成（#12）============
-  function batchGenerate(body: { chapter_ids: number[]; enable_analysis?: boolean; max_retries?: number }) {
+  // 连续模式：start_chapter_number + count（推荐）；手动模式：chapter_ids（兼容）
+  function batchGenerate(body: {
+    start_chapter_number?: number
+    count?: number
+    chapter_ids?: number[]
+    enable_analysis?: boolean
+    max_retries?: number
+    target_word_count?: number
+    model_override?: string
+    style_id?: number
+    narrative_perspective?: string
+  }) {
     return apiPost<{ task_id: number; total: number; status: string }>(`/api/projects/${pid()}/chapters/batch-generate`, body)
   }
   function getActiveBatchTask() {
@@ -778,6 +794,7 @@ export function useProjectApi() {
     deleteAiModel,
     testAiModel,
     fetchRemoteModels,
+    fetchDefaultRemoteModels,
     testEmbedding,
     // Skill
     listSkills,

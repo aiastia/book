@@ -30,6 +30,12 @@ class BatchGenerationTask(Base):
     # 配置
     enable_analysis = Column(Boolean, default=True)  # 生成后是否自动分析
     target_word_count = Column(Integer, default=3000)
+    # 批量生成覆盖项（连续模式 + 风格/模型/视角可选覆盖）
+    start_chapter_number = Column(Integer, nullable=True)  # 连续模式起始章号
+    batch_count = Column(Integer, nullable=True)           # 连续模式生成数量
+    model_override = Column(String(100), default="")        # 指定模型id（空=默认）
+    style_id = Column(Integer, nullable=True)              # 写作风格id（空=项目默认）
+    narrative_perspective = Column(String(50), default="") # 叙事视角（空=按小说设定）
     # 状态：pending/running/completed/failed/cancelled
     status = Column(String(20), default="pending", index=True)
     progress = Column(Integer, default=0)  # 0-100
@@ -56,6 +62,11 @@ class BatchGenerationTask(Base):
             "max_retries": self.max_retries,
             "enable_analysis": self.enable_analysis,
             "target_word_count": self.target_word_count,
+            "start_chapter_number": self.start_chapter_number,
+            "batch_count": self.batch_count,
+            "model_override": self.model_override,
+            "style_id": self.style_id,
+            "narrative_perspective": self.narrative_perspective,
             "status": self.status,
             "progress": self.progress,
             "status_message": self.status_message,

@@ -214,7 +214,7 @@ export function useBackgroundTasks() {
 
   const isActive = computed(() =>
     legacyTaskId.value !== null ||
-    tasks.value.some(t => t.status === 'pending' || t.status === 'running'),
+    allTasks.value.some(t => t.status === 'pending' || t.status === 'running'),
   )
 
   return {

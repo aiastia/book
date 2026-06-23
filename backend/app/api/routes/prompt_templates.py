@@ -54,10 +54,13 @@ class PromptTemplateBatchImport(BaseModel):
 # ---- 辅助函数 ----
 def _template_to_dict(t: PromptTemplate, active_version: PromptVersion = None) -> dict:
     """将 PromptTemplate ORM 对象序列化为字典"""
+    # display_name：优先用描述（更友好），回退到 name（name 为大写 skill 名，如 WORLD_CORE_GENERATE）
+    display_name = t.description or t.name
     result = {
         "id": t.id,
         "user_id": t.user_id,
         "name": t.name,
+        "display_name": display_name,
         "category": t.category,
         "description": t.description,
         "is_system": t.is_system,
@@ -112,6 +115,24 @@ async def list_templates(
                 select(PromptVersion).where(PromptVersion.id == t.current_version_id)
             )
             active_version = ver_result.scalar_one_or_none()
+        # 兜底：若没有激活版本或 system_prompt 为空，从 Skill 表回填（系统模板可能未同步 PromptVersion）
+        if not active_version or not (active_version.system_prompt or "").strip():
+            from app.models.skill import Skill
+            skill = (await db.execute(
+                select(Skill).where(Skill.name == t.name)
+            )).scalar_one_or_none()
+            if skill and (skill.system_prompt or "").strip():
+                # 用一个轻量占位 version 对象回填，不改库
+                if not active_version:
+                    active_version = PromptVersion(
+                        template_id=t.id, version=1,
+                        system_prompt=skill.system_prompt,
+                        user_prompt="", variables=skill.parameters or {},
+                        config={}, is_active=True,
+                    )
+                else:
+                    if not (active_version.system_prompt or "").strip():
+                        active_version.system_prompt = skill.system_prompt
         items.append(_template_to_dict(t, active_version))
     return items
 

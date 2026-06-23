@@ -7,6 +7,7 @@ useHead({ title: '灵感模式 — 墨语' })
 const api = useProjectApi()
 const msg = useMessage()
 const { currentProjectId } = useProject()
+const { startLegacy } = useBackgroundTasks()
 
 const mode = ref<'step' | 'quick'>('step')
 const idea = ref('')
@@ -152,9 +153,8 @@ async function onCreateProject() {
     try {
       const task = await apiPost<any>(`/api/projects/${pid}/init-task`,
         { protagonist_name: protagonistName, chapter_count: 3 }, { timeout: 10000 })
-      // 启动全局进度追踪（可在任意页面查看）
-      const { start } = useInitTask()
-      start(task.task_id)
+      // 使用统一的后台任务管理，确保浮窗立即显示
+      startLegacy(task.task_id)
     } catch (e: any) {
       console.warn('后台任务提交失败，将尝试同步生成', e)
       // 兜底：同步生成

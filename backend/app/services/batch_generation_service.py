@@ -26,6 +26,12 @@ async def create_batch_task(
     chapter_ids: list[int],
     enable_analysis: bool = True,
     max_retries: int = 2,
+    target_word_count: int = 3000,
+    model_override: str = "",
+    style_id: int = None,
+    narrative_perspective: str = "",
+    start_chapter_number: int = None,
+    batch_count: int = None,
     db: Optional[AsyncSession] = None,
 ) -> BatchGenerationTask:
     """创建批量生成任务（在请求 session 内调用）。"""
@@ -37,6 +43,12 @@ async def create_batch_task(
             total_chapters=len(chapter_ids),
             enable_analysis=enable_analysis,
             max_retries=max_retries,
+            target_word_count=target_word_count,
+            model_override=model_override,
+            style_id=style_id,
+            narrative_perspective=narrative_perspective,
+            start_chapter_number=start_chapter_number,
+            batch_count=batch_count,
             status="pending",
             status_message="等待开始",
         )
@@ -69,6 +81,29 @@ async def get_batch_task(task_id: int) -> Optional[dict]:
             select(BatchGenerationTask).where(BatchGenerationTask.id == task_id)
         )).scalar_one_or_none()
         return task.to_dict() if task else None
+
+
+async def _build_client_with_model(db: AsyncSession, user_id: int, model: str) -> Optional[AIClient]:
+    """用用户默认配置的 base_url/key 但替换为指定 model 构建 AIClient。"""
+    try:
+        from app.models.ai_model import AIModelConfig
+        cfg = (await db.execute(
+            select(AIModelConfig).where(
+                AIModelConfig.user_id == user_id,
+                AIModelConfig.is_default == True,
+            )
+        )).scalar_one_or_none()
+        if cfg:
+            return AIClient(
+                base_url=cfg.base_url,
+                api_key=cfg.api_key,
+                model=model,
+                provider=cfg.provider or cfg.backend_type or "openai",
+                embedding_model=cfg.embedding_model or "",
+            )
+    except Exception as e:
+        logger.warning(f"[batch] 构建指定模型客户端失败: {e}")
+    return None
 
 
 async def cancel_batch_task(task_id: int, user_id: int) -> bool:
@@ -130,6 +165,40 @@ async def run_batch_generation(task_id: int):
         chapter_ids = task.chapter_ids or []
         enable_analysis = task.enable_analysis
         max_retries = task.max_retries
+        # 批量覆盖项
+        model_override = task.model_override or ""
+        target_word_count = task.target_word_count or 3000
+        narrative_perspective = task.narrative_perspective or ""
+        style_id = task.style_id
+
+        # 预加载写作风格配置（一次性，避免每章重复查询）
+        style_config = None
+        style_name = ""
+        style_custom_prompt = ""
+        if style_id:
+            try:
+                from app.models.writing_style import WritingStyle
+                ws = (await db.execute(
+                    select(WritingStyle).where(WritingStyle.id == style_id)
+                )).scalar_one_or_none()
+                if ws:
+                    style_config = ws.config or {}
+                    style_name = ws.name
+                    style_custom_prompt = (ws.custom_prompt or "").strip()
+            except Exception as e:
+                logger.warning(f"[batch] 加载写作风格 {style_id} 失败: {e}")
+
+        # 构造覆盖项 dict（每章通用）
+        overrides = {
+            "target_word_count": target_word_count,
+        }
+        if narrative_perspective:
+            overrides["narrative_perspective"] = narrative_perspective
+        if style_config:
+            overrides["style_config"] = style_config
+            overrides["style_name"] = style_name
+        if style_custom_prompt:
+            overrides["style_custom_prompt"] = style_custom_prompt
 
         # 标记开始
         task.status = "running"
@@ -179,13 +248,16 @@ async def run_batch_generation(task_id: int):
                         success = True
                         break
 
-                    # 获取 AI 客户端（首次创建后复用）
+                    # 获取 AI 客户端（首次创建后复用；支持 model 覆盖）
                     if ai_client is None:
-                        ai_client = await AIClient.from_user_config(chap_db, user_id)
+                        if model_override:
+                            ai_client = await _build_client_with_model(chap_db, user_id, model_override)
+                        if ai_client is None:
+                            ai_client = await AIClient.from_user_config(chap_db, user_id)
 
-                    # 调章节服务生成
+                    # 调章节服务生成（传入覆盖项）
                     svc = ChapterService(chap_db, project_id, user_id)
-                    result = await svc.generate_chapter(chapter_id, ai_client)
+                    result = await svc.generate_chapter(chapter_id, ai_client, overrides=overrides)
                     if result.get("error"):
                         last_err = result["error"]
                         logger.warning(f"[batch] 第{ch_num}章生成失败（尝试 {attempt+1}）: {last_err}")

@@ -126,6 +126,14 @@ async def _auto_migrate():
         # 第7批：评分系统增强（8维 + 一致性 + 告警）
         ("plot_analyses", "ADD COLUMN consistency_issues JSON"),
         ("chapters", "ADD COLUMN quality_alert VARCHAR(50) DEFAULT ''"),
+        # 第8批：批量章节生成连续模式 + 覆盖项（风格/模型/视角/字数）
+        ("batch_generation_tasks", "ADD COLUMN start_chapter_number INTEGER"),
+        ("batch_generation_tasks", "ADD COLUMN batch_count INTEGER"),
+        ("batch_generation_tasks", "ADD COLUMN model_override VARCHAR(100) DEFAULT ''"),
+        ("batch_generation_tasks", "ADD COLUMN style_id INTEGER"),
+        ("batch_generation_tasks", "ADD COLUMN narrative_perspective VARCHAR(50) DEFAULT ''"),
+        # 第9批：写作风格自定义提示词
+        ("writing_styles", "ADD COLUMN custom_prompt TEXT DEFAULT ''"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

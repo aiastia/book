@@ -275,7 +275,20 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     current_count = max((o.chapter_number for o in outlines), default=0)
     start_chapter, end_chapter = current_count + 1, current_count + req.chapter_count
 
-    engine, ai_client = await make_engine_and_client(db, user.id)
+    # 叙事视角：前端留空 = 按小说设定（取项目默认）
+    effective_pov = req.narrative_pov or proj.narrative_pov or "第三人称"
+
+    engine, ai_client = await make_engine_and_client(db, user.id, model_override=(req.ai_model or None))
+    # 拼装用户额外要求（故事方向/情节阶段/其他要求）
+    extra_req_parts = []
+    if req.story_direction:
+        extra_req_parts.append(f"故事发展方向：{req.story_direction}")
+    if req.plot_stage:
+        extra_req_parts.append(f"当前情节阶段：{req.plot_stage}")
+    if req.other_requirements:
+        extra_req_parts.append(f"其他要求：{req.other_requirements}")
+    extra_req_text = ("\n".join(extra_req_parts) + "\n") if extra_req_parts else ""
+
     result = await engine.execute_skill("outline_continue", ai_client, {
         "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无简介",
         "chapter_count": str(req.chapter_count), "current_chapter_count": str(current_count),
@@ -285,8 +298,8 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
         "foreshadow_context": foreshadow_context,
         "foreshadow_reminders": foreshadow_context,  # 兼容模板中的变量名
-        "narrative_pov": proj.narrative_pov or "第三人称", "narrative_perspective": proj.narrative_pov or "第三人称",
-        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。",
+        "narrative_pov": effective_pov, "narrative_perspective": effective_pov,
+        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
     })
     check_skill_error(result)
     outlines_data = result.get("json") or []
@@ -389,7 +402,18 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             foreshadows_list = (await task_db.execute(select(Foreshadow).where(Foreshadow.project_id == payload["project_id"], Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
             foreshadow_context = "\n".join([f"- {f.title}({f.status}): {f.content[:100]}" for f in foreshadows_list]) or "暂无"
             start_chapter, end_chapter = current_count + 1, current_count + payload["chapter_count"]
-            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+            # 叙事视角：前端留空 = 按小说设定
+            effective_pov = payload.get("narrative_pov") or proj.narrative_pov or "第三人称"
+            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"], model_override=(payload.get("ai_model") or None))
+            # 拼装用户额外要求
+            extra_req_parts = []
+            if payload.get("story_direction"):
+                extra_req_parts.append(f"故事发展方向：{payload['story_direction']}")
+            if payload.get("plot_stage"):
+                extra_req_parts.append(f"当前情节阶段：{payload['plot_stage']}")
+            if payload.get("other_requirements"):
+                extra_req_parts.append(f"其他要求：{payload['other_requirements']}")
+            extra_req_text = ("\n".join(extra_req_parts) + "\n") if extra_req_parts else ""
             result = await engine.execute_skill("outline_continue", ai_client, {
                 "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无简介",
                 "chapter_count": str(payload["chapter_count"]), "current_chapter_count": str(current_count),
@@ -399,8 +423,8 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
                 "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
                 "foreshadow_context": foreshadow_context,
                 "foreshadow_reminders": foreshadow_context,
-                "narrative_pov": proj.narrative_pov or "第三人称", "narrative_perspective": proj.narrative_pov or "第三人称",
-                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。",
+                "narrative_pov": effective_pov, "narrative_perspective": effective_pov,
+                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
             })
             if result.get("error"):
                 await tracker.fail(result["error"])
@@ -417,7 +441,16 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
         user_id=user.id, project_id=project_id,
         task_type="outline_continue",
         title="续写大纲",
-        payload={"chapter_count": req.chapter_count, "project_id": project_id, "user_id": user.id},
+        payload={
+            "chapter_count": req.chapter_count,
+            "project_id": project_id,
+            "user_id": user.id,
+            "story_direction": req.story_direction,
+            "plot_stage": req.plot_stage,
+            "narrative_pov": req.narrative_pov,
+            "other_requirements": req.other_requirements,
+            "ai_model": req.ai_model,
+        },
         runner=_run_continue,
     )
     return {"task_id": task_id}

@@ -22,6 +22,8 @@ class WritingStyle(Base):
     #           description_focus(描写侧重 动作/心理/环境)、dialogue_ratio(对话占比)、
     #           vocabulary(用词偏好)、pov(视角)
     config = Column(JSON, default=dict)
+    # 用户自定义提示词（高级）：直接写给 AI 的写作风格指令，优先级高于维度配置
+    custom_prompt = Column(Text, default="")
 
     is_preset = Column(Boolean, default=False)  # 系统内置预设
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -30,6 +32,7 @@ class WritingStyle(Base):
     def to_dict(self):
         return {
             "id": self.id, "name": self.name, "description": self.description,
-            "config": self.config, "is_preset": self.is_preset,
+            "config": self.config, "custom_prompt": self.custom_prompt or "",
+            "is_preset": self.is_preset,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

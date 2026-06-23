@@ -95,6 +95,14 @@
 .sidebar.collapsed .sidebar-group-title { text-align: center; padding: 16px 0 6px; font-size: 0; }
 .sidebar.collapsed .sidebar-group-title::first-letter { font-size: 11px; }
 
+/* 分组间分隔线（置顶区与板块之间） */
+.sidebar-group-divider { margin: 8px 16px; border-top: 1px solid var(--color-border-light); }
+
+/* 「返回书架」置顶项视觉突出 */
+.sidebar-nav-item.nav-back-shelf {
+  font-weight: 600; color: var(--color-fg);
+}
+
 /* 当前项目上下文 */
 .sidebar-project {
   margin: 8px 12px; padding: 10px 12px;

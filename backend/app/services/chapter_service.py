@@ -93,9 +93,17 @@ class ChapterService:
         return AIClient()
 
     async def generate_chapter(
-        self, chapter_id: int, ai_client: AIClient = None
+        self, chapter_id: int, ai_client: AIClient = None,
+        overrides: dict = None,
     ) -> dict:
-        """非流式生成章节"""
+        """非流式生成章节
+
+        overrides: 批量生成等场景的可选覆盖项，支持键：
+            - narrative_pov / narrative_perspective: 叙事视角
+            - target_word_count: 目标字数（int）
+            - style_config: 写作风格配置 dict（从 WritingStyle.config 取）
+            - style_name: 风格名（展示用）
+        """
         chapter, project = await self._get_chapter_and_project(chapter_id)
         await self._validate_generation(chapter)
 
@@ -109,6 +117,25 @@ class ChapterService:
         try:
             # 构建上下文
             context = await self.context_service.build_chapter_context(chapter, project)
+            # 应用批量覆盖项（narrative_pov / target_word_count / writing_style）
+            if overrides:
+                if overrides.get("narrative_pov"):
+                    context["narrative_pov"] = overrides["narrative_pov"]
+                    context["narrative_perspective"] = overrides["narrative_pov"]
+                if overrides.get("narrative_perspective") and not overrides.get("narrative_pov"):
+                    context["narrative_pov"] = overrides["narrative_perspective"]
+                    context["narrative_perspective"] = overrides["narrative_perspective"]
+                if overrides.get("target_word_count"):
+                    twc = overrides["target_word_count"]
+                    context["target_word_count"] = twc
+                    context["word_count_requirement"] = f"目标{twc}字，不少于{int(twc*0.8)}字"
+                if overrides.get("style_config"):
+                    import json as _json
+                    context["writing_style"] = _json.dumps(overrides["style_config"], ensure_ascii=False)
+                if overrides.get("style_name"):
+                    context["style_name"] = overrides["style_name"]
+                if overrides.get("style_custom_prompt"):
+                    context["style_custom_prompt"] = overrides["style_custom_prompt"]
             context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。"
             # 将新增的关键事件信息合并到模板已有字段，确保 AI 能用到
             prev_events = context.get("prev_key_events", "")

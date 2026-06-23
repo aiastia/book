@@ -1,10 +1,92 @@
 <script setup lang="ts">
 // 全局浮动任务面板：对标 MuMuAINovel FloatingTaskPanel
 // 展示所有后台任务（通用队列 + 旧项目初始化）
+import { apiGet, apiPost } from '~/composables/useApi'
+
 const { tasks, isActive, cancelTask, dismissTask } = useBackgroundTasks()
+const msg = useMessage()
 const collapsed = ref(false)
 const resuming = ref(false)
+const failedTasks = ref<any[]>([])
+const ignoredTaskIds = ref<Set<number>>(new Set())
+
 watch(isActive, (v) => { if (v) collapsed.value = false })
+
+// 加载失败的任务
+async function loadFailedTasks() {
+  try {
+    const data = await apiGet<any[]>('/api/projects/init-tasks/failed', { timeout: 5000 })
+    failedTasks.value = (data || []).filter(t => !ignoredTaskIds.value.has(t.id))
+  } catch (e) {
+    console.warn('加载失败任务失败', e)
+  }
+}
+
+// 忽略失败任务
+function ignoreTask(taskId: number) {
+  ignoredTaskIds.value.add(taskId)
+  // 保存到 localStorage
+  if (import.meta.client) {
+    const ignored = Array.from(ignoredTaskIds.value)
+    localStorage.setItem('moyu_ignored_tasks', JSON.stringify(ignored))
+  }
+  // 从列表中移除
+  failedTasks.value = failedTasks.value.filter(t => t.id !== taskId)
+}
+
+// 恢复失败任务
+async function onResume(taskId: number | string) {
+  resuming.value = true
+  try {
+    const numericId = typeof taskId === 'string' ? parseInt(taskId.replace('legacy-', '')) : taskId
+    console.log('[InitTaskFloat] Resuming task:', numericId)
+    const result = await apiPost<any>(`/api/projects/init-task/${numericId}/resume`, {}, { timeout: 10000 })
+    console.log('[InitTaskFloat] Resume result:', result)
+    msg.success('任务已恢复执行')
+    // 从失败列表中移除
+    failedTasks.value = failedTasks.value.filter(t => t.id !== numericId)
+    // 启动轮询以显示进度
+    startPollingForTask(numericId)
+  } catch (e: any) {
+    console.error('resume failed', e)
+    msg.error('重试失败：' + (e.message || '未知错误'))
+  } finally {
+    resuming.value = false
+  }
+}
+
+// 为恢复的任务启动轮询
+function startPollingForTask(taskId: number) {
+  // 添加到 tasks 列表中显示进度
+  const existing = tasks.value.find(t => t.id === `legacy-${taskId}`)
+  if (!existing) {
+    tasks.value.push({
+      id: `legacy-${taskId}`,
+      task_type: 'init',
+      title: '项目初始化',
+      status: 'running',
+      progress: 0,
+      status_message: '正在恢复...',
+      _source: 'legacy',
+      _isLegacy: true,
+      _taskId: taskId,
+    })
+  }
+}
+
+// 页面加载时检查失败任务
+onMounted(() => {
+  // 恢复忽略的任务列表
+  if (import.meta.client) {
+    const saved = localStorage.getItem('moyu_ignored_tasks')
+    if (saved) {
+      try {
+        ignoredTaskIds.value = new Set(JSON.parse(saved))
+      } catch {}
+    }
+  }
+  loadFailedTasks()
+})
 
 const statusMeta = (s: string) => {
   if (s === 'completed') return { text: '已完成', color: '#52A569', icon: '\u2713' }
@@ -44,30 +126,41 @@ function tagStyle(status: string) {
   return { background: m.color + '20', color: m.color, borderColor: m.color + '40' }
 }
 
-async function onResume(taskId: number | string) {
-  const api = useProjectApi()
-  resuming.value = true
-  try {
-    // legacy task 的 id 是数字
-    const numericId = typeof taskId === 'string' ? parseInt(taskId.replace('legacy-', '')) : taskId
-    await api.resumeInitTask(numericId)
-  } catch (e: any) {
-    console.error('resume failed', e)
-  } finally {
-    resuming.value = false
-  }
-}
 </script>
 
 <template>
-  <div v-if="isActive || tasks.length" class="float-panel" :class="{ collapsed }">
+  <!-- 始终显示浮窗，即使没有活跃任务 -->
+  <div class="float-panel" :class="{ collapsed }">
     <div class="float-head" @click="collapsed = !collapsed">
       <span class="float-title-icon">&#x2699;&#xFE0F;</span>
       <span class="float-title">后台任务</span>
-      <span v-if="isActive" class="float-badge">{{ tasks.length }} 个</span>
+      <span v-if="failedTasks.length" class="float-badge warning">{{ failedTasks.length }} 个失败</span>
+      <span v-else-if="isActive" class="float-badge">{{ tasks.length }} 个</span>
       <span class="float-toggle">{{ collapsed ? '&#9650;' : '&#9660;' }}</span>
     </div>
     <div v-show="!collapsed" class="float-body">
+      <!-- 失败任务提示 -->
+      <div v-if="failedTasks.length" class="failed-section">
+        <div class="failed-section-title">
+          <span>&#x26A0;&#xFE0F; 有 {{ failedTasks.length }} 个任务需要处理</span>
+        </div>
+        <div v-for="task in failedTasks" :key="task.id" class="failed-task-item">
+          <div class="failed-task-info">
+            <div class="failed-task-title">项目 #{{ task.project_id }}</div>
+            <div class="failed-task-msg">{{ task.status_message }}</div>
+          </div>
+          <div class="failed-task-actions">
+            <a-button type="primary" size="small" :loading="resuming" @click.stop="onResume(task.id)">
+              重试
+            </a-button>
+            <a-button size="small" @click.stop="ignoreTask(task.id)">
+              忽略
+            </a-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 活跃任务列表 -->
       <div v-for="t in tasks" :key="t.id" class="task-row">
         <div class="task-status">
           <span class="task-tag" :style="tagStyle(t.status)">
@@ -110,7 +203,11 @@ async function onResume(taskId: number | string) {
           >关闭</a-button>
         </div>
       </div>
-      <div v-if="!tasks.length" class="empty-hint">暂无后台任务</div>
+
+      <!-- 空状态提示 -->
+      <div v-if="!tasks.length && !failedTasks.length" class="empty-hint">
+        暂无后台任务
+      </div>
     </div>
   </div>
 </template>
@@ -123,9 +220,21 @@ async function onResume(taskId: number | string) {
 .float-title-icon { font-size: 14px; }
 .float-title { font-size: 13px; font-weight: 600; color: #2B2B2B; }
 .float-badge { margin-left: auto; background: #4D8088; color: #fff; font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600; }
+.float-badge.warning { background: #D49A4E; }
 .float-toggle { margin-left: auto; color: #8C8C8C; font-size: 11px; }
 .float-panel:not(.collapsed) .float-toggle { margin-left: 0; }
 .float-body { padding: 8px 14px 12px; max-height: 360px; overflow-y: auto; }
+
+/* 失败任务区域 */
+.failed-section { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #F0EDE6; }
+.failed-section-title { font-size: 12px; font-weight: 600; color: #D49A4E; margin-bottom: 8px; }
+.failed-task-item { background: #FFF8F0; border: 1px solid #FFE0B2; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+.failed-task-info { margin-bottom: 8px; }
+.failed-task-title { font-size: 13px; font-weight: 600; color: #2B2B2B; margin-bottom: 4px; }
+.failed-task-msg { font-size: 12px; color: #666; }
+.failed-task-actions { display: flex; gap: 8px; }
+
+/* 任务行 */
 .task-row { padding: 10px 0; border-bottom: 1px solid #F5F2EB; }
 .task-row:last-child { border-bottom: none; }
 .task-status { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }

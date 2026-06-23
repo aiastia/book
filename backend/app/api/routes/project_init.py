@@ -316,8 +316,66 @@ async def _link_org_memberships(db, pid, raw_chars):
                 break  # 一个角色只关联第一个匹配的组织
 
 
+def _extract_rel_endpoint(rel, is_from):
+    """从 AI 返回的关系对象中提取端点（角色名或ID）。
+
+    AI 返回字段名多变，兼容 from/from_character/character_a/source/name_a 等，
+    以及 from_id/to_id 数字ID。返回 (id_or_None, name_or_None)。
+    """
+    id_keys = ["from_id", "to_id"] if is_from else ["to_id", "from_id"]
+    name_keys = (["from", "from_character", "character_a", "source", "name_a", "char_a", "a"]
+                 if is_from else
+                 ["to", "to_character", "character_b", "target", "name_b", "char_b", "b"])
+    # 优先数字ID
+    for k in id_keys:
+        v = rel.get(k)
+        if isinstance(v, int) or (isinstance(v, str) and v.strip().isdigit()):
+            return int(v), None
+    # 再取名字
+    for k in name_keys:
+        v = rel.get(k)
+        if isinstance(v, str) and v.strip():
+            return None, v.strip()
+        if isinstance(v, dict):  # 嵌套 {name:...}
+            inner = v.get("name") or v.get("character") or v.get("id")
+            if inner:
+                return (None, str(inner).strip()) if not (isinstance(inner, int) or str(inner).strip().isdigit()) else (int(inner), None)
+    return None, None
+
+
+def _match_character(name, id_val, chars, name_to_id):
+    """精确匹配 → 模糊匹配（包含），返回 character_id 或 None。"""
+    # 1) 数字ID直配
+    if id_val is not None:
+        for c in chars:
+            if c.id == id_val:
+                return c.id
+    if not name:
+        return None
+    # 2) 精确匹配
+    if name in name_to_id:
+        return name_to_id[name]
+    # 3) 去除常见后缀/空格后再精确匹配
+    clean = name.replace("（主角）", "").replace("(主角)", "").strip()
+    if clean in name_to_id:
+        return name_to_id[clean]
+    # 4) 模糊匹配（互相包含）—— 优先长名（避免"明"匹配"天明"这类误配，要求至少2字）
+    if len(clean) >= 2:
+        candidates = [c for c in chars if clean in c.name or c.name in clean]
+        if len(candidates) == 1:
+            return candidates[0].id
+    return None
+
+
 async def _step_relations(db, task, pid, proj, engine, ai_client):
-    """步骤4：角色关系图谱"""
+    """步骤：角色关系图谱
+
+    修复历史 bug：旧逻辑用 rel.get("from")/rel.get("to") 精确匹配，
+    AI 返回字段变体或名称不精确时静默丢失，导致任务显示成功但图谱为空。
+    现在对齐 relations.py:auto_rebuild_relations 的健壮字段处理。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
     from app.models.character import Character, CharacterRelation
 
     task.status_message = "生成角色关系..."
@@ -328,37 +386,72 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
         task.relations_done = 1
         return None
 
-    char_list = "、".join(f"{c.name}（{c.role or '角色'}）" for c in chars[:10])
+    name_to_id = {c.name: c.id for c in chars}
+    id_set = {c.id for c in chars}
+
+    # 给 AI 更明确的上下文：带 ID，要求返回 from_id/to_id
+    char_list = "、".join(f"{c.name}(ID:{c.id}，{c.role or '角色'})" for c in chars[:12])
     rel_result, rerr = await _safe_skill_call(engine, ai_client, "character_relations_generate", {
-        "title": proj.title, "characters_info": char_list,
+        "title": proj.title,
+        "characters_info": char_list,
+        "user_prompt": (
+            f"请分析《{proj.title}》中以下角色之间的关系，生成 5-10 条主要关系：\n{char_list}\n\n"
+            "要求：每条关系用 from_id 和 to_id（上面给出的真实ID）指明两端，"
+            "并给出 relation_type(如师徒/恋人/宿敌/父子)、category(family/romantic/hostile/professional/social)、"
+            "intimacy(-100到100整数)。只返回纯 JSON 数组。"
+        ),
     }, "关系图谱")
     if rerr:
         return rerr
 
-    rels = rel_result.get("json") or []
+    raw = rel_result.get("json")
+    # 兼容裸数组 / {"relations": [...]} 两种结构
+    rels = []
+    if isinstance(raw, list):
+        rels = raw
+    elif isinstance(raw, dict):
+        rels = raw.get("relations", []) or raw.get("data", [])
+        if not rels and (raw.get("from_id") or raw.get("from")):
+            rels = [raw]
+
+    added_rels = 0
+    skipped = 0
+    seen = set()  # 去重
     if isinstance(rels, list):
-        name_to_id = {c.name: c.id for c in chars}
-        added_rels = 0
         for rel in rels:
             if not isinstance(rel, dict):
                 continue
-            from_name = rel.get("from", "")
-            to_name = rel.get("to", "")
-            from_id = name_to_id.get(from_name)
-            to_id = name_to_id.get(to_name)
-            if from_id and to_id and from_id != to_id:
-                db.add(CharacterRelation(
-                    project_id=pid,
-                    from_character_id=from_id,
-                    to_character_id=to_id,
-                    relation_type=str(rel.get("relation_type", "关系"))[:100],
-                    category=str(rel.get("category", "social"))[:50],
-                    intimacy=int(rel.get("intimacy", 50)) if str(rel.get("intimacy", "50")).lstrip("-").isdigit() else 50,
-                    description=str(rel.get("description", ""))[:500],
-                ))
-                added_rels += 1
+            from_id_raw, from_name = _extract_rel_endpoint(rel, is_from=True)
+            to_id_raw, to_name = _extract_rel_endpoint(rel, is_from=False)
+            fid = _match_character(from_name, from_id_raw, chars, name_to_id)
+            tid = _match_character(to_name, to_id_raw, chars, name_to_id)
+            if not fid or not tid or fid == tid:
+                skipped += 1
+                continue
+            rtype = str(rel.get("relation_type", "关系"))[:100]
+            key = (fid, tid, rtype)
+            if key in seen:
+                continue
+            seen.add(key)
+            db.add(CharacterRelation(
+                project_id=pid,
+                from_character_id=fid,
+                to_character_id=tid,
+                relation_type=rtype,
+                category=str(rel.get("category", "social"))[:50],
+                intimacy=int(rel.get("intimacy", 50)) if str(rel.get("intimacy", "50")).lstrip("-").isdigit() else 50,
+                description=str(rel.get("description", ""))[:500],
+            ))
+            added_rels += 1
         if added_rels:
             await db.commit()
+
+    # 不再静默成功：0 条关系要明确告知
+    if added_rels == 0:
+        logger.warning(f"[init] 项目{pid} 角色关系生成0条（AI返回{len(rels)}条，{skipped}条无法匹配）")
+        task.status_message = f"角色关系：AI返回{len(rels)}条但均无法匹配到角色，请到「关系图谱」页手动重建"
+    else:
+        task.status_message = f"已生成 {added_rels} 条角色关系"
     task.relations_done = 1
     return None
 
@@ -657,6 +750,19 @@ async def create_init_task(project_id: int, req: dict, db: AsyncSession = Depend
     return {"task_id": task.id, "project_id": project_id, "status": "pending"}
 
 
+@router.get("/init-tasks/failed")
+async def get_failed_init_tasks(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取当前用户的失败初始化任务列表。"""
+    result = await db.execute(
+        select(ProjectInitTask)
+        .where(ProjectInitTask.user_id == user.id, ProjectInitTask.status == "failed")
+        .order_by(ProjectInitTask.created_at.desc())
+        .limit(10)
+    )
+    tasks = result.scalars().all()
+    return [task.to_dict() for task in tasks]
+
+
 @router.get("/init-task/{task_id}/status")
 async def get_init_task_status(task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """查询初始化任务进度。"""
@@ -669,17 +775,31 @@ async def get_init_task_status(task_id: int, db: AsyncSession = Depends(get_db),
 @router.post("/init-task/{task_id}/resume")
 async def resume_init_task(task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """从失败的步骤继续执行初始化任务。"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"[resume] 收到恢复请求: task_id={task_id}, user_id={user.id}")
+
     task = (await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))).scalar_one_or_none()
     if not task:
+        logger.warning(f"[resume] 任务不存在: task_id={task_id}")
         raise HTTPException(404, "任务不存在")
+
+    logger.info(f"[resume] 任务状态: status={task.status}, failed_step={task.failed_step}, project_id={task.project_id}")
+
     if task.status not in ("failed", "completed"):
+        logger.warning(f"[resume] 任务状态不允许恢复: status={task.status}")
         raise HTTPException(400, f"任务当前状态为 {task.status}，无需恢复")
+
     resume_from = task.failed_step or None
     task.status = "running"
     task.error = ""
     task.failed_step = ""
     await db.commit()
+
+    logger.info(f"[resume] 启动后台任务: task_id={task_id}, resume_from={resume_from}")
     asyncio.create_task(_run_init_task(task_id, resume_from=resume_from))
+
     return {"task_id": task_id, "status": "running", "resume_from": resume_from}
 
 

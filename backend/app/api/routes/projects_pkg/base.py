@@ -147,6 +147,11 @@ class OutlineGenerateRequest(BaseModel):
 
 class OutlineContinueRequest(BaseModel):
     chapter_count: int = 10
+    story_direction: str = ""        # 故事发展方向（可选）
+    plot_stage: str = ""             # 情节阶段：开端/发展/高潮/转折/结局（可选）
+    narrative_pov: str = ""          # 叙事视角（空=按小说设定）
+    other_requirements: str = ""     # 其他要求（可选）
+    ai_model: str = ""               # 指定模型id（空=使用默认模型）
 
 
 class OutlineExpandRequest(BaseModel):
@@ -239,9 +244,35 @@ async def get_user_project(db: AsyncSession, project_id: int, user) -> Project:
     return proj
 
 
-async def make_engine_and_client(db: AsyncSession, user_id: int):
-    """快速创建 SkillEngine + AIClient（用户配置优先）。各模块复用。"""
+async def make_engine_and_client(db: AsyncSession, user_id: int, model_override: str = None):
+    """快速创建 SkillEngine + AIClient（用户配置优先）。各模块复用。
+
+    model_override: 若指定，则用用户默认配置的 base_url/key 但替换为指定 model
+    （供续写/批量生成等弹窗动态选择模型，空则用默认模型）。
+    """
     engine = SkillEngine(db, user_id)
+    if model_override:
+        # 用默认配置的连接信息 + 指定模型
+        try:
+            from app.models.ai_model import AIModelConfig
+            result = await db.execute(
+                select(AIModelConfig).where(
+                    AIModelConfig.user_id == user_id,
+                    AIModelConfig.is_default == True,
+                )
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                ai_client = AIClient(
+                    base_url=cfg.base_url,
+                    api_key=cfg.api_key,
+                    model=model_override,
+                    provider=cfg.provider or cfg.backend_type or "openai",
+                    embedding_model=cfg.embedding_model or "",
+                )
+                return engine, ai_client
+        except Exception:
+            pass
     ai_client = await AIClient.from_user_config(db, user_id)
     return engine, ai_client
 

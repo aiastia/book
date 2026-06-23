@@ -164,30 +164,26 @@ class FetchModelsReq(BaseModel):
     provider: str = "openai"
 
 
-@router.post("/ai-models/fetch-remote")
-async def fetch_remote_models(req: FetchModelsReq, user=Depends(get_current_user)):
-    """根据 base_url/api_key/provider 获取远程可用模型列表。
+async def _fetch_remote_model_list(base_url: str, api_key: str, provider: str = "openai"):
+    """根据 base_url/api_key/provider 获取远程可用模型列表（可复用）。
 
-    - openai（兼容）: GET {base}/v1/models 或 {base}/models
-    - gemini: GET {base}/models?key={api_key}
-    - anthropic: 官方无公开列表接口，返回提示
+    返回 {"models": [...]}；失败抛 HTTPException(400)。
     """
     import httpx
 
-    base = req.base_url.rstrip("/")
-    provider = (req.provider or "openai").lower()
+    base = base_url.rstrip("/")
+    provider = (provider or "openai").lower()
 
     # 确定 URL
     if provider == "gemini":
-        url = f"{base}/models?key={req.api_key}"
+        url = f"{base}/models?key={api_key}"
     else:
         # openai 兼容：兼容 {base}/v1 和 {base} 两种
         if base.endswith("/v1"):
             url = f"{base}/models"
         else:
             url = f"{base}/v1/models" if "/v1" not in base else f"{base}/models"
-        # 兜底：若 /v1/models 失败再试 /models
-    headers = {"Authorization": f"Bearer {req.api_key}"} if provider != "gemini" else {}
+    headers = {"Authorization": f"Bearer {api_key}"} if provider != "gemini" else {}
 
     urls_to_try = [url]
     # openai 兼容做兜底
@@ -225,6 +221,53 @@ async def fetch_remote_models(req: FetchModelsReq, user=Depends(get_current_user
             except Exception as e:
                 last_err = str(e)
     raise HTTPException(400, last_err or "获取模型列表失败")
+
+
+@router.post("/ai-models/fetch-remote")
+async def fetch_remote_models(req: FetchModelsReq, user=Depends(get_current_user)):
+    """根据 base_url/api_key/provider 获取远程可用模型列表。
+
+    - openai（兼容）: GET {base}/v1/models 或 {base}/models
+    - gemini: GET {base}/models?key={api_key}
+    - anthropic: 官方无公开列表接口，返回提示
+    """
+    return await _fetch_remote_model_list(req.base_url, req.api_key, req.provider)
+
+
+@router.get("/ai-models/default/remote-models")
+async def get_default_remote_models(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """用当前用户【默认 AI 模型配置】的凭据实时拉取远端可用模型列表。
+
+    供续写/批量生成等弹窗动态填充「AI 模型」下拉，无需用户重复填 key。
+    返回 {models, default_model} —— default_model 为默认配置里已存的 model id。
+    """
+    from app.models.ai_model import AIModelConfig
+
+    result = await db.execute(
+        select(AIModelConfig).where(
+            AIModelConfig.user_id == user.id, AIModelConfig.is_default == True
+        )
+    )
+    cfg = result.scalar_one_or_none()
+    if not cfg:
+        raise HTTPException(400, "尚未配置默认 AI 模型，请先到「AI 设置」添加并设为默认")
+
+    # api_key 在 DB 中加密存储，需解密；若无 decrypt 方法则按明文处理
+    api_key = cfg.api_key or ""
+    try:
+        if hasattr(cfg, "decrypt_api_key"):
+            api_key = cfg.decrypt_api_key() or api_key
+    except Exception:
+        pass
+
+    if not api_key:
+        raise HTTPException(400, "默认模型未保存 API Key，请到「AI 设置」补填")
+
+    provider = cfg.provider or cfg.backend_type or "openai"
+    res = await _fetch_remote_model_list(cfg.base_url, api_key, provider)
+    res["default_model"] = cfg.model
+    res["config_name"] = cfg.name
+    return res
 
 
 class TestEmbeddingReq(BaseModel):

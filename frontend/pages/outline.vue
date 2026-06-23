@@ -15,6 +15,26 @@ const showGen = ref(false)
 const editing = ref<any>(null)
 const editForm = reactive({ title: '', summary: '', emotion: '', goal: '', key_points_text: '', characters_text: '' })
 
+// 续写弹窗
+const showContinue = ref(false)
+const continueForm = reactive({
+  chapter_count: 5,
+  story_direction: '',
+  plot_stage: '',
+  narrative_pov: '',  // 空 = 按小说设定（项目默认）
+  other_requirements: '',
+  ai_model: '',       // 空 = 使用默认模型
+})
+// 续写章节数固定选项
+const chapterCountOptions = [5, 10, 20, 40]
+// 远程模型列表（动态拉取）
+const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
+const defaultModelName = ref('')
+const loadingModels = ref(false)
+
+// 项目默认叙事视角（用于「按小说设定」placeholder 显示）
+const projectDefaultPov = computed(() => project.value?.narrative_pov || '第三人称')
+
 // 新角色检测（大纲续写后）
 const showNewChars = ref(false)
 const newCharNames = ref<string[]>([])
@@ -79,12 +99,55 @@ async function onGenerate() {
   catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { generating.value = false }
 }
+
+function openContinue() {
+  // 检查是否已有大纲
+  if (!outlines.value || outlines.value.length === 0) {
+    // 没有大纲，打开生成弹窗
+    showGen.value = true
+  } else {
+    // 有大纲，打开续写弹窗
+    continueForm.chapter_count = 5
+    continueForm.story_direction = ''
+    continueForm.plot_stage = ''
+    continueForm.narrative_pov = ''   // 空表示按小说设定
+    continueForm.other_requirements = ''
+    continueForm.ai_model = ''        // 空表示使用默认模型
+    showContinue.value = true
+    // 动态拉取远程模型列表（异步，不阻塞弹窗）
+    loadRemoteModels()
+  }
+}
+
+async function loadRemoteModels() {
+  if (remoteModels.value.length) return  // 已加载过
+  loadingModels.value = true
+  try {
+    const r = await api.fetchDefaultRemoteModels()
+    remoteModels.value = r.models || []
+    defaultModelName.value = r.default_model || ''
+  } catch (e: any) {
+    // 拉取失败不阻塞，用户可仍用默认模型
+    console.warn('拉取模型列表失败', e)
+  } finally {
+    loadingModels.value = false
+  }
+}
+
 async function onContinue() {
   generating.value = true
   try {
-    const { task_id } = await api.continueOutlinesAsync({ chapter_count: genCount.value })
+    const params: any = { chapter_count: continueForm.chapter_count }
+    if (continueForm.story_direction) params.story_direction = continueForm.story_direction
+    if (continueForm.plot_stage) params.plot_stage = continueForm.plot_stage
+    if (continueForm.narrative_pov) params.narrative_pov = continueForm.narrative_pov
+    if (continueForm.other_requirements) params.other_requirements = continueForm.other_requirements
+    if (continueForm.ai_model) params.ai_model = continueForm.ai_model
+
+    const { task_id } = await api.continueOutlinesAsync(params)
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'outline_continue', `续写${genCount.value}章大纲`)
+    trackTask(task_id, 'outline_continue', `续写${continueForm.chapter_count}章大纲`)
+    showContinue.value = false
     msg.success('大纲续写任务已提交，可在右下角查看进度')
     setTimeout(() => refresh(), 5000)
   }
@@ -172,8 +235,9 @@ async function deleteExpansion() {
   <div class="outline-page">
     <div class="page-actions">
       <a-tag :color="isOneToMany ? 'green' : 'blue'" style="font-size:13px;padding:2px 12px;">{{ modeLabel }}</a-tag>
-      <a-button type="primary" :loading="generating" @click="showGen = true">AI 生成大纲</a-button>
-      <a-button :loading="generating" @click="onContinue">续写大纲</a-button>
+      <a-button type="primary" :loading="generating" @click="openContinue">
+        {{ outlines && outlines.length ? '续写大纲' : 'AI 生成大纲' }}
+      </a-button>
     </div>
 
     <div v-if="outlines && outlines.length" class="outline-list">
@@ -182,7 +246,6 @@ async function deleteExpansion() {
         <div class="item-head">
           <span class="item-no">第{{ o.chapter_number }}{{ unitLabel }}</span>
           <span class="item-title">{{ o.title || '无标题' }}</span>
-          <a-tag v-if="o.emotion" size="small" color="orange">{{ o.emotion }}</a-tag>
           <template v-if="isOneToMany">
             <a-tag v-if="o.has_chapters" color="success" size="small">✓ 展开{{ o.chapter_count }}章</a-tag>
             <a-tag v-else color="default" size="small">未展开</a-tag>
@@ -214,6 +277,9 @@ async function deleteExpansion() {
           <!-- 关键情节点 -->
           <div v-if="o.key_points && o.key_points.length" class="content-section">
             <div class="section-label">🔑 关键情节点（{{ o.key_points.length }}）</div>
+            <div v-if="o.emotion" class="emotion-tag">
+              <a-tag size="small" color="orange">情绪基调：{{ o.emotion }}</a-tag>
+            </div>
             <div class="key-points">
               <div v-for="(p, i) in o.key_points" :key="i" class="kp-item">
                 <span class="kp-dot">{{ i + 1 }}</span>
@@ -249,6 +315,65 @@ async function deleteExpansion() {
         <a-form-item :label="isOneToMany ? '卷数' : '章数'"><a-input-number v-model:value="genCount" :min="3" :max="30" /></a-form-item>
       </a-form>
       <template #footer><a-button @click="showGen = false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">生成</a-button></template>
+    </a-modal>
+
+    <!-- 续写弹窗 -->
+    <a-modal v-model:open="showContinue" title="续写大纲" width="560px">
+      <a-form layout="vertical">
+        <a-form-item label="续写章节数">
+          <a-radio-group v-model:value="continueForm.chapter_count" button-style="solid">
+            <a-radio-button v-for="n in chapterCountOptions" :key="n" :value="n">{{ n }} 章</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
+        <a-form-item label="故事发展方向">
+          <a-textarea v-model:value="continueForm.story_direction" :rows="3" placeholder="描述故事接下来的发展方向，例如：主角进入秘境修炼，遇到新的挑战..." />
+        </a-form-item>
+        <a-form-item label="情节阶段">
+          <a-select v-model:value="continueForm.plot_stage" placeholder="选择当前情节阶段" allow-clear>
+            <a-select-option value="开端">开端</a-select-option>
+            <a-select-option value="发展">发展</a-select-option>
+            <a-select-option value="高潮">高潮</a-select-option>
+            <a-select-option value="转折">转折</a-select-option>
+            <a-select-option value="结局">结局</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item :label="`叙事视角`">
+              <a-select v-model:value="continueForm.narrative_pov" :placeholder="`按小说设定（${projectDefaultPov}）`" allow-clear>
+                <a-select-option value="">按小说设定</a-select-option>
+                <a-select-option value="第三人称">第三人称（他/她）</a-select-option>
+                <a-select-option value="第一人称">第一人称（我）</a-select-option>
+                <a-select-option value="全知视角">全知视角</a-select-option>
+              </a-select>
+              <div class="field-hint">留空使用项目默认：{{ projectDefaultPov }}</div>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="AI 模型">
+              <a-select
+                v-model:value="continueForm.ai_model"
+                :placeholder="defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型'"
+                allow-clear
+                show-search
+                option-filter-prop="label"
+                :loading="loadingModels"
+              >
+                <a-select-option value="">使用默认模型</a-select-option>
+                <a-select-option v-for="m in remoteModels" :key="m.id" :value="m.id" :label="m.id">{{ m.id }}</a-select-option>
+              </a-select>
+              <div v-if="!remoteModels.length && !loadingModels" class="field-hint">未拉到模型列表，将使用默认模型</div>
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="其他要求">
+          <a-textarea v-model:value="continueForm.other_requirements" :rows="2" placeholder="其他特殊要求，例如：需要包含战斗场景、增加感情线..." />
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="showContinue = false">取消</a-button>
+        <a-button type="primary" :loading="generating" @click="onContinue">开始续写</a-button>
+      </template>
     </a-modal>
 
     <!-- 编辑弹窗（含关键点/角色编辑，不丢数据）-->
@@ -328,6 +453,8 @@ async function deleteExpansion() {
 .content-section.goal-sec { background: #F0F5F5; border-radius: 6px; padding: 10px 12px; }
 .char-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .key-points { display: flex; flex-direction: column; gap: 6px; }
+.emotion-tag { margin-bottom: 8px; }
+.field-hint { font-size: 11px; color: #999; margin-top: 4px; }
 .kp-item { display: flex; gap: 8px; font-size: 13px; color: #595959; align-items: flex-start; }
 .kp-dot { width: 18px; height: 18px; border-radius: 50%; background: #4D8088; color: #fff; font-size: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .scene-list { display: flex; flex-direction: column; gap: 6px; }

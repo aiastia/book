@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 侧边栏：主色 Logo 区 + 折叠 + 分组菜单 + 项目上下文 + 用户
-const { nav, currentPath, adminNav, showAdminEntry } = useNavigation()
+const { nav, groupedNav, currentPath, adminNav, showAdminEntry } = useNavigation()
 const { currentProjectInfo } = useProject()
 
 const collapsed = ref(false)
@@ -17,14 +17,18 @@ function toggleCollapse() {
   }
 }
 
-const groupedNav = computed(() => {
-  const groups = [{ title: '导航', items: nav.value }]
-  // 管理员入口（非管理页面时，在底部显示）
+// 管理员入口（全局菜单底部追加，仅管理员可见且非管理页时）
+const adminGroup = computed(() => {
   if (showAdminEntry.value && !currentPath.value.startsWith('/admin')) {
-    groups.push({ title: '管理', items: adminNav.value })
+    return { title: '管理', items: adminNav.value }
   }
-  return groups
+  return null
 })
+
+// 判断某个 item 是否为「返回书架」（第一个置顶项，视觉突出）
+function isBackToShelf(item: any, groupIndex: number) {
+  return groupIndex === 0 && item.to.startsWith('/books')
+}
 </script>
 
 <template>
@@ -49,10 +53,27 @@ const groupedNav = computed(() => {
     </div>
 
     <nav class="sidebar-nav">
-      <template v-for="group in groupedNav" :key="group.title">
-        <div class="sidebar-group-title">{{ group.title }}</div>
+      <template v-for="(group, gi) in groupedNav" :key="group.title + '-' + gi">
+        <!-- 分组标题（空标题不渲染，如返回书架/仪表盘的独立区） -->
+        <div v-if="group.title" class="sidebar-group-title">{{ collapsed ? '' : group.title }}</div>
+        <!-- 组间分隔线（置顶区与板块之间） -->
+        <div v-else-if="gi > 0 && !collapsed" class="sidebar-group-divider"></div>
         <SidebarNavItem
           v-for="item in group.items"
+          :key="item.to"
+          :to="item.to"
+          :icon="item.icon"
+          :active="currentPath === item.to.split('?')[0]"
+          :collapsed="collapsed"
+          :class="{ 'nav-back-shelf': isBackToShelf(item, gi) }"
+        >{{ collapsed ? '' : item.label }}</SidebarNavItem>
+      </template>
+
+      <!-- 管理员入口 -->
+      <template v-if="adminGroup">
+        <div class="sidebar-group-title">{{ collapsed ? '' : adminGroup.title }}</div>
+        <SidebarNavItem
+          v-for="item in adminGroup.items"
           :key="item.to"
           :to="item.to"
           :icon="item.icon"

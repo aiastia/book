@@ -73,6 +73,9 @@ const wizard = reactive({
 const creating = ref(false)
 const genStep = ref('')  // 生成进度提示
 
+// 使用统一的后台任务管理
+const { startLegacy } = useBackgroundTasks()
+
 async function onCreate() {
   if (!wizard.title.trim()) { msg.warning('请输入书名'); return }
   creating.value = true
@@ -92,8 +95,8 @@ async function onCreate() {
     try {
       const task = await apiPost<any>(`/api/projects/${pid}/init-task`,
         { protagonist_name: wizard.protagonist_name, chapter_count: wizard.chapter_count }, { timeout: 10000 })
-      const { start } = useInitTask()
-      start(task.task_id)
+      // 使用统一的后台任务管理，确保浮窗立即显示
+      startLegacy(task.task_id)
     } catch (e: any) {
       console.warn('后台任务失败，兜底同步生成', e)
       genStep.value = '生成世界观...'

@@ -162,13 +162,19 @@ async def auto_rebuild_relations(project_id: int, db: AsyncSession = Depends(get
     created = []
     for rel in valid_rels:
         rtype = str(rel.get("relation_type", "相识"))
+        # intimacy 容错：非数字时回退 0
+        raw_intimacy = rel.get("intimacy", 0)
+        try:
+            intimacy_val = int(raw_intimacy)
+        except (TypeError, ValueError):
+            intimacy_val = 0
         r = CharacterRelation(
             project_id=project_id,
             from_character_id=rel["from_id"],
             to_character_id=rel["to_id"],
             relation_type=rtype,
             category=_map_category(rtype),
-            intimacy=int(rel.get("intimacy", 0)),
+            intimacy=intimacy_val,
             description=str(rel.get("description", "")),
         )
         db.add(r)

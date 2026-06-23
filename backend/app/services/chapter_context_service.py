@@ -716,12 +716,17 @@ class ChapterContextService:
         # 写作风格
         proj = (await self.db.execute(select(Project).where(Project.id == self.project_id))).scalar_one_or_none()
         writing_style = ""
+        style_custom_prompt = ""
         if proj and proj.writing_style:
-            writing_style = json.dumps(proj.writing_style, ensure_ascii=False)
+            ws = proj.writing_style
+            # 提取用户自定义提示词（高级），单独注入让 AI 明确遵循
+            style_custom_prompt = (ws.get("custom_prompt") or "").strip()
+            writing_style = json.dumps(ws, ensure_ascii=False)
 
         return {
             "characters_info": characters_info,
             "writing_style": writing_style or "默认网文风格，节奏明快",
+            "style_custom_prompt": style_custom_prompt,
         }
 
     async def _get_reference_context(self, chapter: Chapter) -> dict:

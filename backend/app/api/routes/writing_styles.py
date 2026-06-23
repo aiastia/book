@@ -20,12 +20,14 @@ class StyleCreate(BaseModel):
     name: str
     description: str = ""
     config: dict = {}
+    custom_prompt: str = ""
 
 
 class StyleUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     config: Optional[dict] = None
+    custom_prompt: Optional[str] = None
 
 
 # 内置风格预设（对标原项目的 init-defaults）
@@ -58,7 +60,8 @@ async def list_styles(db: AsyncSession = Depends(get_db), user=Depends(get_curre
 
 @router.post("")
 async def create_style(req: StyleCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    style = WritingStyle(user_id=user.id, name=req.name, description=req.description, config=req.config)
+    style = WritingStyle(user_id=user.id, name=req.name, description=req.description,
+                         config=req.config, custom_prompt=req.custom_prompt)
     db.add(style)
     await db.commit()
     await db.refresh(style)
@@ -97,6 +100,10 @@ async def apply_to_project(style_id: int, project_id: int, db: AsyncSession = De
     proj = (await db.execute(select(Project).where(Project.id == project_id, Project.user_id == user.id))).scalar_one_or_none()
     if not proj:
         raise HTTPException(404, "项目不存在")
-    proj.writing_style = {"name": style.name, "description": style.description, **(style.config or {})}
+    proj.writing_style = {
+        "name": style.name, "description": style.description,
+        "custom_prompt": style.custom_prompt or "",
+        **(style.config or {}),
+    }
     await db.commit()
     return {"ok": True, "project_id": project_id, "style_name": style.name}
