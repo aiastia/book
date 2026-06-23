@@ -62,6 +62,8 @@ const groupedNav = computed(() => {
       </template>
     </nav>
 
-    <SidebarUser />
+    <ClientOnly>
+      <SidebarUser />
+    </ClientOnly>
   </aside>
 </template>
