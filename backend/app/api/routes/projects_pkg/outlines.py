@@ -103,6 +103,14 @@ def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
     raw_orgs = item.get("organizations", []) if isinstance(item.get("organizations"), list) else []
     final_chars, final_orgs = _separate_chars_orgs(raw_chars, raw_orgs, char_names or set(), org_names or set())
 
+    # 安全网：如果 AI 明确返回了角色但被过滤光了，保留 AI 原始值
+    if not final_chars and raw_chars:
+        raw_names = [c if isinstance(c, str) else c.get("name", "") for c in raw_chars if isinstance(c, (str, dict))]
+        raw_names = [n.strip() for n in raw_names if n.strip()]
+        if raw_names:
+            logger.warning(f"[outline] 第{ch_num}章角色被过滤为空，保留AI原始值: {raw_names}")
+            final_chars = raw_names
+
     # 规范化场景：过滤掉只有标题没有描述的空场景
     raw_scenes = item.get("scenes", []) if isinstance(item.get("scenes"), list) else []
     clean_scenes = [c for c in (_clean_scene(sc) for sc in raw_scenes) if c]
