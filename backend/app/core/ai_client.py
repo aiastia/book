@@ -1,8 +1,43 @@
 """AI 客户端 - 自定义 OpenAI 兼容接口"""
 import json
+import re
 import time
 import asyncio
 from typing import AsyncGenerator, Optional
+
+
+def _try_parse_inline_tool_calls(content: str) -> list | None:
+    """尝试从文本内容中解析内联工具调用（兼容不同模型的返回格式）。
+
+    支持格式：
+    - Kimi: <|tool_calls_section_begin|>...<|tool_calls_section_end|>
+    - 通用: 任何包含 function name + arguments 的结构化文本
+    返回标准 tool_calls 列表或 None。
+    """
+    if not content:
+        return None
+    # Kimi 原生格式
+    if "<|tool_call_begin|>" in content:
+        tool_calls = []
+        for match in re.finditer(
+            r"<\|tool_call_begin\|>(.+?)<\|tool_call_argument_begin\|>(.+?)<\|tool_call_end\|>",
+            content, re.DOTALL
+        ):
+            name = match.group(1).strip()
+            args_str = match.group(2).strip()
+            try:
+                args = json.loads(args_str)
+            except Exception:
+                args = {}
+            # 去掉 functions. 前缀（如 functions.query_location → query_location）
+            clean_name = name.replace("functions.", "").split(":")[0]
+            tool_calls.append({
+                "id": f"inline_{clean_name}",
+                "type": "function",
+                "function": {"name": clean_name, "arguments": json.dumps(args, ensure_ascii=False)},
+            })
+        return tool_calls if tool_calls else None
+    return None
 from openai import AsyncOpenAI
 from app.core.config import settings
 
@@ -245,7 +280,7 @@ class AIClient:
         model: str = None,
         temperature: float = 0.85,
         max_tokens: int = 16384,
-        max_rounds: int = 3,
+        max_rounds: int = 5,
     ) -> dict:
         """带工具调用的聊天循环（对标 MuMu _handle_tool_calls）。
 
@@ -259,13 +294,24 @@ class AIClient:
             messages: 初始消息列表（system + user）
             tools: OpenAI function calling 格式的工具定义
             tool_executor: async def(tool_name, arguments_dict) -> str
-            max_rounds: 最大工具调用轮数（默认3）
+            max_rounds: 最大工具调用轮数（默认5，含最后一轮强制输出）
         """
         import json
         import logging
         logger = logging.getLogger(__name__)
 
-        current_messages = list(messages)
+        # 注入工具调用预算提示，让 AI 合理规划查询
+        tool_rounds = max_rounds - 1
+        budget_hint = {
+            "role": "system",
+            "content": (
+                f"【工具调用预算】你最多有 {tool_rounds} 轮工具调用机会（每轮可同时调多个工具）。"
+                f"第 {max_rounds} 轮你必须直接输出最终结果，不能再调用工具。"
+                f"如果你已获得足够信息，可以提前输出，不必用完所有轮次。"
+                f"建议：第一轮批量查询所有明确需要的信息，后续轮次根据初步结果做补充查询。"
+            ),
+        }
+        current_messages = [budget_hint] + list(messages)
 
         for round_num in range(max_rounds):
             is_last_round = (round_num == max_rounds - 1)
@@ -286,6 +332,13 @@ class AIClient:
 
             tool_calls = result.get("tool_calls") or []
             content = result.get("content") or ""
+
+            # 兼容各模型返回工具调用的不同格式
+            if not tool_calls and content:
+                parsed = _try_parse_inline_tool_calls(content)
+                if parsed:
+                    tool_calls = parsed
+                    content = ""
 
             # 没有工具调用 → 返回正文
             if not tool_calls:
@@ -317,14 +370,14 @@ class AIClient:
                     "content": tool_result,
                 })
 
-            # 最后一轮强制输出（tool_choice=none 已设，下一轮循环不会进来了）
+            # 最后一轮：模型无视 tool_choice=none 仍调了工具，再给它一次机会强制输出
             if is_last_round:
-                # 再调一次拿正文（不带 tools）
                 final = await self.chat(
                     messages=current_messages,
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    tool_choice="none",  # 防止模型再次调用工具
                 )
                 return final
 

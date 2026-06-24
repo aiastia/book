@@ -79,7 +79,7 @@ async def ws_tasks(ws: WebSocket, token: str = Query(None)):
     # 验证 JWT
     try:
         payload = decode_token(token)
-        user_id = payload.get("user_id")
+        user_id = payload.get("sub")
         if not user_id:
             await ws.close(code=4003, reason="Invalid token: missing user_id")
             return
