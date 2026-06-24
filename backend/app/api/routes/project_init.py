@@ -17,7 +17,7 @@ import asyncio
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 
 # 角色英文 role → 中文映射
@@ -47,7 +47,7 @@ STEP_ORDER = [s[0] for s in INIT_STEPS]
 
 async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=3):
     """带重试的 skill 调用。
-
+    
     每次调用内部含 execute_skill 的 JSON 重试（3次），
     这里额外重试 max_retries 次，处理连接级错误。
     """
@@ -60,12 +60,15 @@ async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤
             if not result.get("error"):
                 return result, None
             last_err = result.get("error")
+            logger.warning(f"[init] {label} 第{attempt+1}次失败: {last_err[:200]}")
         except Exception as e:
             last_err = str(e)
+            logger.warning(f"[init] {label} 第{attempt+1}次异常: {last_err[:200]}")
         if attempt < max_retries - 1:
             delay = min(2 * (attempt + 1), 10)
             logger.info(f"[init] {label}第{attempt+1}次重试，等待{delay}秒...")
             await asyncio.sleep(delay)
+    logger.error(f"[init] {label} 全部{max_retries}次尝试失败，最后错误: {last_err[:300]}")
     return None, f"{label}失败（已重试{max_retries}次）: {last_err}"
 
 
@@ -161,7 +164,7 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
     career_result, cerr = await _safe_skill_call(engine, ai_client, "career_system_generation", {
         "title": proj.title, "genre": proj.genre or "网文",
         "world_info": f"规则：{proj.world_rules or ''}",
-        "user_prompt": f"请为《{proj.title}》生成职业体系：精确 2 个主职业 + 3 个副职业。主职业需有完整的进阶境界体系。",
+        "user_prompt": f"请为《{proj.title}》生成职业体系：精确 5 个主职业（career_type=\"main\") + 8 个副职业（career_type=\"sub\")。主职业需有完整的进阶境界体系（stages 数组，每个阶段含 name/level/requirement/ability/power_level）。",
     }, "职业")
     if cerr:
         return cerr
@@ -179,7 +182,7 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
         if not careers_list and careers_data.get("name"):
             careers_list = [careers_data]
 
-    for item in careers_list[:8]:
+    for item in careers_list[:15]:
         if isinstance(item, dict) and item.get("name"):
             db.add(Career(project_id=pid,
                 name=str(item.get("name", ""))[:100],
@@ -196,8 +199,21 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
 
 async def _step_characters(db, task, pid, proj, engine, ai_client):
     """步骤4：角色批量生成（含主角/配角/反派，关联已有组织）"""
+    import logging
+    logger = logging.getLogger(__name__)
     from app.models.character import Character
     from app.models.organization import Organization
+
+    # 检查是否已有角色（可能上次重试已部分成功）
+    existing_count = (await db.execute(
+        select(func.count(Character.id)).where(Character.project_id == pid)
+    )).scalar() or 0
+    if existing_count >= 3:
+        logger.info(f"[init] 已有{existing_count}个角色，跳过生成")
+        task.characters_done = 1
+        task.status_message = f"已有 {existing_count} 个角色"
+        await db.commit()
+        return None
 
     task.status_message = "生成角色..."
     await db.commit()
@@ -216,8 +232,16 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         "existing_characters": "暂无",
         "world_info": f"{proj.world_location or ''} {proj.world_rules or ''}",
         "user_prompt": f"""请生成5个角色（必须包含1个主角、1个反派、其余配角）。
-已有组织：{org_info}。角色如果属于某个组织，请在 organization_memberships 中填写组织名。
-已有职业体系：{career_info}。角色职业应参考已有职业体系。""",
+
+【重要：职业必须从以下已有职业体系中选择主职业和副职业，不要编造】
+已有职业体系：{career_info}
+- 每个角色的 occupation（主职业）必须从上述职业中选一个
+- sub_occupations（副职业数组）也必须从上述职业中选择
+
+【重要：组织必须从以下已有组织中选择】
+已有组织：{org_info}
+- 角色如果属于某个组织，必须在 organization_memberships 中填写准确的已有组织名
+- 无所属组织的角色 organization_memberships 返回空数组 []""",
     }, "角色")
     if cerr:
         return cerr
@@ -225,6 +249,7 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
     chars_data = result.get("json") or []
     added = 0
     if not isinstance(chars_data, list):
+        logger.error(f"[init] 角色生成返回非数组格式: {type(chars_data)}")
         return "角色生成返回格式错误"
 
     existing_names = set()
@@ -281,6 +306,61 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         added += 1
 
     if added:
+        # 匹配职业体系：将 AI 返回的 occupation/sub_occupations 文本映射到已有 career
+        all_careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
+        main_career_map = {c.name: c.id for c in all_careers if c.career_type == 'main'}
+        sub_career_map = {c.name: c.id for c in all_careers if c.career_type == 'sub'}
+        all_career_map = {c.name: c.id for c in all_careers}
+        matched_career = 0
+        matched_sub = 0
+        
+        for char, item in raw_chars:
+            # 主职业匹配：只从 main 类型职业中选，支持 occupation 含多个职业名用 / 或 、 分隔
+            occ_raw = str(item.get("occupation", ""))
+            occ_parts = [p.strip() for p in occ_raw.replace("/", ",").replace("、", ",").split(",") if p.strip()]
+            for occ in occ_parts:
+                if not char.main_career_id:
+                    if occ in main_career_map:
+                        char.main_career_id = main_career_map[occ]
+                        matched_career += 1
+                    else:
+                        for cname, cid in main_career_map.items():
+                            if occ in cname or cname in occ:
+                                char.main_career_id = cid
+                                matched_career += 1
+                                break
+            
+            # 副职业匹配
+            sub_names = set()
+            subs_raw = item.get("sub_occupations") or []
+            if isinstance(subs_raw, str):
+                subs_raw = [s.strip() for s in subs_raw.replace("，", ",").replace("/", ",").split(",") if s.strip()]
+            for sn in subs_raw:
+                sub_names.add(str(sn).strip())
+            for occ in occ_parts:
+                if not char.main_career_id or all_career_map.get(occ) != char.main_career_id:
+                    sub_names.add(occ)
+            sub_list = []
+            for sn in sub_names:
+                cid = None
+                cname = sn
+                if sn in sub_career_map:
+                    cid = sub_career_map[sn]
+                elif sn in all_career_map:
+                    cid = all_career_map[sn]
+                else:
+                    for cn, ci in all_career_map.items():
+                        if sn in cn or cn in sn:
+                            cid = ci
+                            cname = cn
+                            break
+                if cid and cid != char.main_career_id:
+                    sub_list.append({"career_id": cid, "name": cname, "stage_desc": ""})
+                    matched_sub += 1
+            char.sub_careers = sub_list
+        
+        logger.info(f"[init] 职业匹配完成：主职业{matched_career}个，副职业{matched_sub}条")
+
         await db.flush()  # 拿到 char.id
         # 处理角色-组织关联（organization_memberships）
         await _link_org_memberships(db, pid, raw_chars)
@@ -288,6 +368,7 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         task.characters_done = 1
         task.status_message = f"已生成 {added} 个角色"
     else:
+        logger.error(f"[init] 角色生成失败：AI返回了{len(chars_data)}条数据但没有有效角色（可能名字重复或为空）")
         return "角色生成失败：没有有效角色"
     return None
 

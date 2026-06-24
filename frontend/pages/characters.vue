@@ -23,6 +23,24 @@ const careerNameById = (id: number) => {
   const c = (careers.value || []).find((x: any) => x.id === id)
   return c?.name || `职业#${id}`
 }
+// 主职业可选列表（career_type === "main"）
+const mainCareers = computed(() => (careers.value || []).filter((c: any) => c.career_type === 'main'))
+// 副职业可选列表（career_type === "sub"）
+const subCareers = computed(() => (careers.value || []).filter((c: any) => c.career_type === 'sub'))
+// 获取职业的阶段列表 [{name, level, ...}]
+const careerStages = (careerId: number | null) => {
+  if (!careerId) return []
+  const c = (careers.value || []).find((x: any) => x.id === careerId)
+  return (c?.stages || []).sort((a: any, b: any) => (a.level || 0) - (b.level || 0))
+}
+// 副职业可选列表：只显示 career_type=sub，排除已在其他行选中的
+const availableSubCareers = (currentIdx: number) => {
+  const excludeIds = new Set<number | null>()
+  editForm.sub_careers.forEach((sc, i) => {
+    if (i !== currentIdx && sc.career_id) excludeIds.add(sc.career_id)
+  })
+  return subCareers.value.filter(cr => !excludeIds.has(cr.id))
+}
 // 组织名映射
 const orgNameById = (id: number | null) => {
   if (!id) return ''
@@ -37,7 +55,11 @@ const genCount = ref(1)
 const genOrgId = ref<number | null>(null)
 const generating = ref(false)
 const showBatch = ref(false)
-const batchCount = ref(5)
+const batchRoles = ref<Array<{ role: string; count: number }>>([
+  { role: '主角', count: 1 },
+  { role: '配角', count: 3 },
+  { role: '反派', count: 1 },
+])
 const batchReq = ref('')
 const batchLoading = ref(false)
 
@@ -47,7 +69,8 @@ const editForm = reactive({
   appearance:'', personality:'', background:'', growth_experience:'', ability:'',
   story_goal:'', motivation:'', weakness:'', arc_type:'', character_change:'', speech_style:'',
   status:'alive', mental_state:'', organization_id: null as number | null,
-  main_career_id: null as number | null, main_career_stage: 1,
+  main_career_id: null as number | null, main_career_stage_desc: '',
+  sub_careers: [] as Array<{ career_id: number | null; name: string; stage_desc: string }>,
 })
 const roleOptions = ['主角','配角','反派','路人']
 const arcOptions = ['成长','堕落','救赎','顿悟','平淡','']
@@ -57,8 +80,6 @@ const displayFields = [
   { key:'identity', label:'身份' },
   { key:'age', label:'年龄' },
   { key:'gender', label:'性别' },
-  { key:'occupation', label:'主职业' },
-  { key:'sub_occupations', label:'副职业' },
   { key:'appearance', label:'外貌' },
   { key:'personality', label:'性格' },
   { key:'background', label:'背景' },
@@ -102,9 +123,14 @@ async function onGenerate() {
 async function onBatch() {
   batchLoading.value = true
   try {
-    const { task_id } = await api.batchGenerateCharactersAsync({ count: batchCount.value, requirements: batchReq.value })
+    const roleList = batchRoles.value.filter(r => r.count > 0)
+    const totalCount = roleList.reduce((sum, r) => sum + r.count, 0)
+    if (totalCount === 0) { msg.warning('请至少设置一种角色数量'); return }
+    const roleDesc = roleList.map(r => `${r.role}${r.count}个`).join('、')
+    const reqText = `请生成${roleDesc}。${batchReq.value}`
+    const { task_id } = await api.batchGenerateCharactersAsync({ count: totalCount, requirements: reqText })
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'characters', `批量生成${batchCount.value}个角色`)
+    trackTask(task_id, 'characters', `批量生成${totalCount}个角色（${roleDesc}）`)
     showBatch.value = false
     msg.success('批量生成任务已提交，可在右下角查看进度')
     setTimeout(() => refresh(), 5000)
@@ -114,10 +140,36 @@ async function onBatch() {
 }
 function openEdit(c:any) {
   editing.value = c
-  Object.keys(editForm).forEach(k => { (editForm as any)[k] = c[k] ?? (editForm as any)[k] })
+  Object.keys(editForm).forEach(k => {
+    if (k === 'main_career_stage_desc') {
+      (editForm as any)[k] = c.main_career_stage_desc || c.main_career_stage || ''
+    } else if (k === 'sub_careers') {
+      (editForm as any)[k] = (c.sub_careers || []).map((sc: any) => ({
+        career_id: sc.career_id || null,
+        name: sc.name || '',
+        stage_desc: sc.stage_desc || sc.stage || '',
+      }))
+    } else {
+      (editForm as any)[k] = c[k] ?? (editForm as any)[k]
+    }
+  })
 }
 async function onSave() {
-  try { await api.updateCharacter(editing.value.id, { ...editForm }); await refresh(); editing.value=null; msg.success('已保存') }
+  try {
+    // 副职业：根据 career_id 补全 name
+    const subs = (editForm.sub_careers || [])
+      .filter(sc => sc.career_id)
+      .map(sc => ({
+        career_id: sc.career_id,
+        name: careerNameById(sc.career_id!),
+        stage_desc: sc.stage_desc || '',
+      }))
+    const payload = { ...editForm, sub_careers: subs }
+    await api.updateCharacter(editing.value.id, payload)
+    await refresh()
+    editing.value = null
+    msg.success('已保存')
+  }
   catch (e:any) { msg.error('保存失败：'+formatError(e)) }
 }
 async function onDelete(id:number) {
@@ -158,24 +210,33 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
             </span>
             <span v-else class="desc-value">{{ c[f.key] }}</span>
           </div>
-          <!-- 主职业阶段（#19） -->
+          <!-- 主职业阶段 -->
           <div v-if="c.main_career_id || (c.sub_careers && c.sub_careers.length)" class="desc-row career-row">
             <span class="desc-label">修炼</span>
             <span class="desc-value">
               <a-tag v-if="c.main_career_id" color="gold" size="small">
-                {{ careerNameById(c.main_career_id) }} Lv.{{ c.main_career_stage || 1 }}
+                {{ careerNameById(c.main_career_id) }}
+                <span v-if="c.main_career_stage_desc">{{ c.main_career_stage_desc }}</span>
+                <span v-else-if="c.main_career_stage && c.main_career_stage !== '0'">Lv.{{ c.main_career_stage }}</span>
               </a-tag>
-              <a-tag v-for="sc in (c.sub_careers || [])" :key="sc.career_id" color="cyan" size="small">
-                {{ sc.name }} Lv.{{ sc.stage || 1 }}
+              <a-tag v-for="(sc, i) in (c.sub_careers || [])" :key="i" color="cyan" size="small">
+                {{ sc.name || careerNameById(sc.career_id) }}
+                <span v-if="sc.stage_desc">{{ sc.stage_desc }}</span>
+                <span v-else-if="sc.stage && sc.stage !== '0'">Lv.{{ sc.stage }}</span>
               </a-tag>
             </span>
           </div>
-          <!-- 所属组织 -->
-          <div v-if="c.organization_id && orgNameById(c.organization_id)" class="desc-row">
+          <!-- 所属组织（支持多个） -->
+          <div v-if="c.organization_id || (c.organization_members && c.organization_members.length)" class="desc-row">
             <span class="desc-label">组织</span>
-            <span class="desc-value"><a-tag color="blue" size="small">{{ orgNameById(c.organization_id) }}</a-tag></span>
+            <span class="desc-value">
+              <a-tag v-if="c.organization_id" color="blue" size="small">{{ orgNameById(c.organization_id) }}</a-tag>
+              <a-tag v-for="(om, i) in (c.organization_members || [])" :key="i" color="blue" size="small">
+                {{ om.organization_name || orgNameById(om.organization_id) }}
+              </a-tag>
+            </span>
           </div>
-          <div v-if="!displayFields.some(f=>c[f.key]) && !c.main_career_id" class="desc-empty">暂无详细信息，点击编辑补充</div>
+          <div v-if="!displayFields.some(f=>c[f.key]) && !c.main_career_id && !(c.sub_careers||[]).length" class="desc-empty">暂无详细信息，点击编辑补充</div>
         </div>
       </a-card>
     </div>
@@ -197,12 +258,27 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
       <template #footer><a-button @click="showGen=false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">{{ generating?'生成中…':`生成 ${genCount} 个` }}</a-button></template>
     </a-modal>
     <!-- 批量 -->
-    <a-modal v-model:open="showBatch" title="批量生成角色" width="480px">
+    <a-modal v-model:open="showBatch" title="批量生成角色" width="500px">
       <a-form layout="vertical">
-        <a-form-item label="数量"><a-input-number v-model:value="batchCount" :min="2" :max="10" /></a-form-item>
-        <a-form-item label="需求"><a-textarea v-model:value="batchReq" :rows="3" /></a-form-item>
+        <a-form-item label="角色类型与数量">
+          <div v-for="(br, idx) in batchRoles" :key="idx" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+            <a-select v-model:value="br.role" style="width:100px" size="small">
+              <a-select-option v-for="r in roleOptions" :key="r" :value="r">{{ r }}</a-select-option>
+            </a-select>
+            <a-input-number v-model:value="br.count" :min="0" :max="10" size="small" style="width:80px" />
+            <span style="font-size:12px;color:#999;">个</span>
+            <a-button v-if="batchRoles.length > 1" size="small" danger type="link" @click="batchRoles.splice(idx, 1)">✕</a-button>
+          </div>
+          <a-button size="small" type="dashed" @click="batchRoles.push({ role: '配角', count: 1 })">+ 添加角色类型</a-button>
+        </a-form-item>
+        <a-form-item label="补充要求"><a-textarea v-model:value="batchReq" :rows="3" placeholder="可选：对角色生成的额外要求" /></a-form-item>
       </a-form>
-      <template #footer><a-button @click="showBatch=false">取消</a-button><a-button type="primary" :loading="batchLoading" @click="onBatch">{{ batchLoading?'生成中…':'生成' }}</a-button></template>
+      <template #footer>
+        <a-button @click="showBatch=false">取消</a-button>
+        <a-button type="primary" :loading="batchLoading" @click="onBatch">
+          {{ batchLoading ? '生成中…' : `生成 ${batchRoles.reduce((s,r)=>s+r.count,0)} 个` }}
+        </a-button>
+      </template>
     </a-modal>
     <!-- 编辑（弹窗，非抽屉）-->
     <a-modal :open="!!editing" @update:open="(v:any)=>{if(!v)editing=null}" title="编辑角色档案" width="680px" v-if="editing" :footer="null">
@@ -223,23 +299,64 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
           <a-col :span="8"><a-form-item label="性别"><a-input v-model:value="editForm.gender" /></a-form-item></a-col>
           <a-col :span="8"><a-form-item label="年龄"><a-input v-model:value="editForm.age" /></a-form-item></a-col>
         </a-row>
+        <!-- 主职业：修炼体系 + 境界 -->
         <a-row :gutter="12">
-          <a-col :span="8"><a-form-item label="主职业"><a-auto-complete v-model:value="editForm.occupation" :options="occupationOptions.map(o=>({value:o}))" :filter-option="(input:string, option:any)=>option.value.toLowerCase().includes(input.toLowerCase())" allow-clear :placeholder="occupationOptions.length?'选择或输入主职业':'可直接输入'" /></a-form-item></a-col>
-          <a-col :span="16"><a-form-item label="副职业"><a-input v-model:value="editForm.sub_occupations" placeholder="多个副职业用分号 ; 分隔，如：炼丹师;阵法师" /></a-form-item></a-col>
-        </a-row>
-        <a-row :gutter="12">
-          <a-col :span="12"><a-form-item label="修炼体系">
-            <a-select v-model:value="editForm.main_career_id" allow-clear placeholder="选择修炼体系（关联职业阶段）">
+          <a-col :span="14"><a-form-item label="主职业（修炼体系）">
+            <a-select v-model:value="editForm.main_career_id" allow-clear placeholder="选择修炼体系">
               <a-select-option :value="null">未设定</a-select-option>
-              <a-select-option v-for="cr in (careers || [])" :key="cr.id" :value="cr.id">{{ cr.name }}</a-select-option>
+              <a-select-option v-for="cr in mainCareers" :key="cr.id" :value="cr.id">{{ cr.name }}</a-select-option>
             </a-select>
           </a-form-item></a-col>
-          <a-col :span="12"><a-form-item label="修炼阶段">
-            <a-select v-model:value="editForm.main_career_stage" placeholder="选择阶段">
-              <a-select-option v-for="lv in 11" :key="lv-1" :value="lv-1">Lv.{{ lv-1 }}</a-select-option>
+          <a-col :span="10"><a-form-item label="境界">
+            <a-select
+              v-model:value="editForm.main_career_stage_desc"
+              allow-clear
+              placeholder="选择境界"
+              :disabled="!editForm.main_career_id"
+            >
+              <a-select-option
+                v-for="st in careerStages(editForm.main_career_id)"
+                :key="st.level"
+                :value="st.name"
+              >{{ st.name }}{{ st.level != null ? ' (Lv.' + st.level + ')' : '' }}</a-select-option>
             </a-select>
           </a-form-item></a-col>
         </a-row>
+
+        <!-- 副职业：多条修炼体系+境界（动态增删，排除主职业及已选副职业） -->
+        <a-form-item label="副职业">
+          <div v-for="(sc, idx) in editForm.sub_careers" :key="idx">
+            <a-row :gutter="12" style="margin-bottom:6px;align-items:center;">
+              <a-col :span="12"><a-select v-model:value="sc.career_id" allow-clear placeholder="修炼体系" size="small">
+                <a-select-option :value="null">未设定</a-select-option>
+                <a-select-option
+                  v-for="cr in availableSubCareers(idx)"
+                  :key="cr.id"
+                  :value="cr.id"
+                >{{ cr.name }}</a-select-option>
+              </a-select></a-col>
+              <a-col :span="10"><a-select
+                v-model:value="sc.stage_desc"
+                allow-clear
+                placeholder="境界"
+                size="small"
+                :disabled="!sc.career_id"
+              >
+                <a-select-option
+                  v-for="st in careerStages(sc.career_id)"
+                  :key="st.level"
+                  :value="st.name"
+                >{{ st.name }}</a-select-option>
+              </a-select></a-col>
+              <a-col :span="2" style="text-align:right;">
+                <a-button size="small" danger type="link" @click="editForm.sub_careers.splice(idx, 1)">✕</a-button>
+              </a-col>
+            </a-row>
+          </div>
+          <a-button size="small" type="dashed" @click="editForm.sub_careers.push({ career_id: null, name: '', stage_desc: '' })">
+            + 添加副职业
+          </a-button>
+        </a-form-item>
         <a-form-item label="身份"><a-input v-model:value="editForm.identity" /></a-form-item>
         <a-divider orientation="left" plain>外貌与性格</a-divider>
         <a-form-item label="外貌"><a-textarea v-model:value="editForm.appearance" :rows="2" /></a-form-item>

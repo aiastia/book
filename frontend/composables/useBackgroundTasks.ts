@@ -95,19 +95,24 @@ export function useBackgroundTasks() {
   }
 
   async function pollLegacy() {
-    if (!legacyTaskId.value) return
+    if (!legacyTaskId.value && !legacyTaskStatus.value) return
+    // 如果已有失败/完成状态且有 taskId，继续轮询状态（避免面板消失）
+    if (!legacyTaskId.value && legacyTaskStatus.value) return
     try {
       const res = await apiGet<any>(`/api/projects/init-task/${legacyTaskId.value}/status`)
       legacyTaskStatus.value = res
       if (import.meta.client) {
         localStorage.setItem('moyu_init_task', JSON.stringify({ id: legacyTaskId.value, ...res }))
       }
-      if (res.status === 'completed' || res.status === 'failed') {
+      if (res.status === 'completed') {
         legacyTaskId.value = null
         if (import.meta.client) setTimeout(() => {
           localStorage.removeItem('moyu_init_task')
           legacyTaskStatus.value = null
         }, 10000)
+      } else if (res.status === 'failed') {
+        // 失败后保留状态（面板继续显示），停止轮询但不清除
+        legacyTaskId.value = null
       }
     } catch (e) {
       console.warn('init-task 轮询失败', e)
@@ -215,6 +220,7 @@ export function useBackgroundTasks() {
 
   const isActive = computed(() =>
     legacyTaskId.value !== null ||
+    (legacyTaskStatus.value?.status === 'failed') ||
     allTasks.value.some(t => t.status === 'pending' || t.status === 'running'),
   )
 

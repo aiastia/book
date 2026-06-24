@@ -26,6 +26,16 @@ except ImportError:
 
 
 
+# json5 为主解析器，标准 json 为降级
+def _try_loads(text: str) -> Any:
+    """尝试解析 JSON 文本：json5 优先，标准 json 降级。返回解析结果，失败抛异常。"""
+    if HAS_JSON5:
+        try:
+            return json5.loads(text)
+        except Exception:
+            pass
+    return json.loads(text)
+
 # 中文引号/括号到ASCII的映射
 _QUOTE_MAP = {
     '\u201c': '"',  # " → "
@@ -443,6 +453,126 @@ def _fix_multiple_objects_as_value(text: str) -> str:
     return text
 
 
+def _fix_unquoted_keys(text: str) -> str:
+    """修复未加引号的 JSON key（AI 常见错误：{key: value} → {"key": value}）。
+    
+    也处理单引号 key/value: {'key': 'value'} → {"key": "value"}
+    """
+    if not text or '{' not in text:
+        return text
+    
+    # 策略：逐字符扫描，区分字符串内外，替换未引号 key 和单引号字符串
+    result = []
+    i = 0
+    n = len(text)
+    in_double = False
+    in_single = False
+    # 状态：0=正常, 1=在对象中刚看到{或,需要key
+    expect_key = False
+    depth = 0
+    
+    while i < n:
+        ch = text[i]
+        
+        if in_double:
+            result.append(ch)
+            if ch == '\\' and i + 1 < n:
+                i += 1
+                result.append(text[i])
+            elif ch == '"':
+                in_double = False
+            i += 1
+            continue
+        
+        if in_single:
+            # 单引号字符串 → 转为双引号
+            if ch == '\\' and i + 1 < n:
+                result.append('\\')
+                i += 1
+                result.append(text[i])
+            elif ch == "'":
+                result.append('"')
+                in_single = False
+            else:
+                result.append(ch)
+            i += 1
+            continue
+        
+        # 不在字符串内
+        if ch == '"':
+            result.append(ch)
+            in_double = True
+            i += 1
+            continue
+        
+        if ch == "'":
+            # 判断是否是 key 位置的单引号
+            if expect_key:
+                result.append('"')
+                in_single = True
+                i += 1
+                continue
+            else:
+                # 可能是单引号字符串值
+                result.append('"')
+                in_single = True
+                i += 1
+                continue
+        
+        if ch == '{':
+            result.append(ch)
+            depth += 1
+            expect_key = True
+            i += 1
+            continue
+        
+        if ch == '}':
+            result.append(ch)
+            depth -= 1
+            i += 1
+            continue
+        
+        if ch == ',':
+            result.append(ch)
+            if depth > 0:
+                expect_key = True
+            i += 1
+            continue
+        
+        if ch == ':':
+            result.append(ch)
+            expect_key = False
+            i += 1
+            continue
+        
+        # 空白字符
+        if ch in ' \t\n\r':
+            result.append(ch)
+            i += 1
+            continue
+        
+        # 如果在 expect_key 状态且遇到字母/数字/下划线/中文 → 未引号 key
+        if expect_key and (ch.isalpha() or ch == '_' or ch == '$' or ord(ch) > 127):
+            result.append('"')
+            while i < n and (text[i].isalnum() or text[i] in '_-$.' or ord(text[i]) > 127):
+                result.append(text[i])
+                i += 1
+            result.append('"')
+            expect_key = False
+            # 跳过冒号前的空白
+            while i < n and text[i] in ' \t\n\r':
+                i += 1
+            if i < n and text[i] == ':':
+                result.append(':')
+                i += 1
+            continue
+        
+        result.append(ch)
+        i += 1
+    
+    return ''.join(result)
+
+
 def clean_json_response(text: str) -> str:
     """清洗 AI 返回的 JSON（改进版 - 流式安全）"""
     try:
@@ -453,10 +583,6 @@ def clean_json_response(text: str) -> str:
         original_length = len(text)
         logger.debug(f"🔍 开始清洗JSON，原始长度: {original_length}")
         
-        # 上下文感知修复：中文引号/逗号/冒号、裸控制字符、未转义的内容引号
-        # （区分字符串内外：结构位置替换为ASCII，字符串内保留或转义）
-        text = _fix_json_string_values(text)
-        
         # 去除 markdown 代码块
         text = re.sub(r'^```json\s*\n?', '', text, flags=re.MULTILINE | re.IGNORECASE)
         text = re.sub(r'^```\s*\n?', '', text, flags=re.MULTILINE)
@@ -466,13 +592,19 @@ def clean_json_response(text: str) -> str:
         if len(text) != original_length:
             logger.debug(f"   移除markdown后长度: {len(text)}")
         
-        # 尝试直接解析（快速路径）
+        # 快速路径：原始文本用 json5 直接解析（json5 容错强，跳过清洗避免误伤）
         try:
-            json.loads(text)
-            logger.debug(f"✅ 直接解析成功，无需清洗")
+            _try_loads(text)
+            logger.debug(f"✅ json5直接解析成功，无需清洗")
             return text
         except Exception:
             pass
+        
+        # 上下文感知修复：中文引号/逗号/冒号、裸控制字符、未转义的内容引号
+        text = _fix_json_string_values(text)
+        
+        # 修复未引号 key 和单引号字符串（AI 常见错误）
+        text = _fix_unquoted_keys(text)
         
         # 找到第一个 { 或 [
         start = -1
@@ -571,18 +703,18 @@ def clean_json_response(text: str) -> str:
         
         # 验证清洗后的结果
         try:
-            json.loads(result)
+            _try_loads(result)
             logger.debug(f"✅ 清洗后JSON验证成功")
-        except json.JSONDecodeError as e:
+        except Exception as e:
             logger.warning(f"⚠️ 清洗后JSON仍然无效: {e}，尝试修复结构性问题...")
             
             # 修复1：合并多对象属性值（AI可能输出 "key": {a:1}, {b:2} ）
             result = _fix_multiple_objects_as_value(result)
             
             try:
-                json.loads(result)
+                _try_loads(result)
                 logger.info(f"✅ 修复多对象属性值后JSON验证成功")
-            except json.JSONDecodeError:
+            except Exception:
                 pass  # 继续尝试其他修复
             else:
                 return result
@@ -591,22 +723,22 @@ def clean_json_response(text: str) -> str:
             logger.warning(f"⚠️ 继续尝试兜底修复无效转义...")
             result = _fix_all_invalid_escapes(result)
             try:
-                json.loads(result)
+                _try_loads(result)
                 logger.info(f"✅ 兜底修复后JSON验证成功")
-            except json.JSONDecodeError as e2:
+            except Exception as e2:
                 # 修复3：再次尝试合并多对象属性值（转义修复后可能产生新的合并机会）
                 result = _fix_multiple_objects_as_value(result)
                 try:
-                    json.loads(result)
+                    _try_loads(result)
                     logger.info(f"✅ 二次修复后JSON验证成功")
-                except json.JSONDecodeError as e3:
+                except Exception as e3:
                     # 修复4：基于错误位置迭代修复未转义引号
                     logger.warning(f"⚠️ 继续尝试基于错误位置修复未转义引号...")
                     result = _fix_unescaped_quotes_by_error(result)
                     try:
-                        json.loads(result)
+                        _try_loads(result)
                         logger.info(f"✅ 基于错误位置修复后JSON验证成功")
-                    except json.JSONDecodeError as e4:
+                    except Exception as e4:
                         logger.error(f"❌ 所有修复后JSON仍然无效: {e4}")
                         logger.debug(f"   结果预览: {result[:500]}")
                         logger.debug(f"   结果结尾: ...{result[-200:]}")
@@ -621,40 +753,40 @@ def clean_json_response(text: str) -> str:
 
 
 def parse_json(text: str) -> Union[Dict, List]:
-    """解析 JSON，优先使用标准json，失败后用json5容错解析"""
+    """解析 JSON，json5 为主解析器（兼容无引号 key、单引号、尾逗号等 AI 常见格式）。"""
     cleaned = clean_json_response(text)
     
-    # 优先使用标准 json
-    try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, Exception):
-        pass
-    
-    # json5 容错解析（处理单引号、多余逗号、宽松格式等）
+    # json5 做主解析器（JSON 超集，兼容性更好）
     if HAS_JSON5:
         try:
-            logger.info("🔄 标准JSON解析失败，使用json5容错解析")
-            result = json5.loads(cleaned)
-            logger.info("✅ json5容错解析成功")
-            return result
+            return json5.loads(cleaned)
         except Exception as e5:
-            logger.error(f"❌ json5容错解析也失败: {e5}")
+            logger.warning(f"json5 解析失败: {e5}，降级到标准 json")
     
-    # 最终失败
-    logger.error(f"❌ parse_json 完全失败")
-    logger.error(f"   原始文本长度: {len(text) if text else 0}")
-    logger.error(f"   清洗后文本长度: {len(cleaned) if cleaned else 0}")
-    logger.debug(f"   清洗后文本预览: {safe_preview(cleaned, 500)}")
-    raise json.JSONDecodeError("JSON解析失败（标准和json5均失败）", cleaned, 0)
+    # 降级：标准 json（对合法 JSON 更高效）
+    try:
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.error(f"❌ parse_json 完全失败: {e}")
+        logger.error(f"   原始文本长度: {len(text) if text else 0}")
+        logger.error(f"   清洗后文本长度: {len(cleaned) if cleaned else 0}")
+        logger.debug(f"   清洗后文本预览: {safe_preview(cleaned, 500)}")
+        raise json.JSONDecodeError("JSON解析失败（json5和标准json均失败）", cleaned, 0)
 
 
 def loads_json(text: str) -> Any:
     """
     json.loads 的容错替代品，可直接替换 json.loads()。
-    优先用标准 json.loads，失败后自动降级到 json5。
-    适用于解析 AI 返回的、可能包含不规范格式的 JSON。
+    json5 为主解析器（兼容无引号 key、单引号、尾逗号等 AI 常见格式）。
     """
-    # 优先使用标准 json
+    # json5 做主解析器（JSON 超集，兼容性更好）
+    if HAS_JSON5:
+        try:
+            return json5.loads(text)
+        except Exception:
+            pass
+    
+    # 降级：标准 json
     try:
         return json.loads(text)
     except (json.JSONDecodeError, Exception):
@@ -663,30 +795,15 @@ def loads_json(text: str) -> Any:
     # 兜底修复无效转义序列后重试
     fixed_text = _fix_all_invalid_escapes(text)
     if fixed_text != text:
+        if HAS_JSON5:
+            try:
+                return json5.loads(fixed_text)
+            except Exception:
+                pass
         try:
-            result = json.loads(fixed_text)
-            logger.info("✅ 兜底修复无效转义后json.loads成功")
-            return result
+            return json.loads(fixed_text)
         except (json.JSONDecodeError, Exception):
             pass
     
-    # json5 容错解析
-    if HAS_JSON5:
-        try:
-            logger.info("🔄 json.loads失败，使用json5容错解析")
-            result = json5.loads(text)
-            logger.info("✅ json5容错解析成功")
-            return result
-        except Exception as e5:
-            # json5也失败，尝试对修复后的文本使用json5
-            if fixed_text != text:
-                try:
-                    result = json5.loads(fixed_text)
-                    logger.info("✅ 兜底修复无效转义后json5容错解析成功")
-                    return result
-                except Exception:
-                    pass
-            logger.error(f"❌ json5容错解析也失败: {e5}")
-    
     # 最终失败，抛出标准异常
-    raise json.JSONDecodeError("JSON解析失败（标准和json5均失败）", text, 0)
+    raise json.JSONDecodeError("JSON解析失败（json5和标准json均失败）", text, 0)

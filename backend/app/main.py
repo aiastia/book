@@ -131,6 +131,8 @@ async def _auto_migrate():
         ("batch_generation_tasks", "ADD COLUMN start_chapter_number INTEGER"),
         ("batch_generation_tasks", "ADD COLUMN batch_count INTEGER"),
         ("batch_generation_tasks", "ADD COLUMN model_override VARCHAR(100) DEFAULT ''"),
+        # 第9批：角色职业境界改为文字描述
+        ("characters", "ADD COLUMN main_career_stage_desc VARCHAR(200) DEFAULT ''"),
         ("batch_generation_tasks", "ADD COLUMN style_id INTEGER"),
         ("batch_generation_tasks", "ADD COLUMN narrative_perspective VARCHAR(50) DEFAULT ''"),
         # 第9批：写作风格自定义提示词

@@ -51,8 +51,9 @@ class Character(Base):
     structure = Column(JSON, default=dict)  # JSON 扩展数据
     # 职业关联（#19 增强，冗余字段便于展示）
     main_career_id = Column(Integer, nullable=True)  # 主职业 ID（关联 careers 表）
-    main_career_stage = Column(Integer, default=0)  # 主职业当前阶段
-    sub_careers = Column(JSON, default=list)  # [{career_id, name, stage}]
+    main_career_stage = Column(Integer, default=0)  # 主职业当前阶段（旧，保留兼容）
+    main_career_stage_desc = Column(String(200), default="")  # 主职业境界文字描述（如：已臻化境、初窥门径）
+    sub_careers = Column(JSON, default=list)  # [{career_id, name, stage_desc}]
     # 状态追踪章节号（#14 防回退保护）
     status_updated_chapter = Column(Integer, nullable=True)  # 生死状态最后更新的章节
     version = Column(Integer, default=1)

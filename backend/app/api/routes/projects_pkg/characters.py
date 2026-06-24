@@ -38,6 +38,7 @@ async def list_characters(project_id: int, db: AsyncSession = Depends(get_db), u
         "speech_style": c.speech_style, "status": c.status, "mental_state": c.mental_state,
         "tags": c.tags,
         "main_career_id": c.main_career_id, "main_career_stage": c.main_career_stage,
+        "main_career_stage_desc": c.main_career_stage_desc or "",
         "sub_careers": c.sub_careers or [],
         "organization_id": c.organization_id,
     } for c in result.scalars().all()]
@@ -154,10 +155,21 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
     world_info = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds]) or "暂无"
 
     engine, ai_client = await make_engine_and_client(db, user.id)
+    
+    # 获取已有职业体系和组织列表（传给 AI + 后续匹配）
+    from app.models.career import Career
+    from app.models.organization import Organization
+    all_careers = (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
+    career_info = "、".join(c.name for c in all_careers[:8]) if all_careers else "暂无"
+    orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
+    org_info = "、".join(o.name for o in orgs[:10]) if orgs else "暂无"
+    
     result = await engine.execute_skill("characters_batch_generation", ai_client, {
         "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无简介",
         "count": str(req.count), "existing_characters": existing_chars, "world_info": world_info,
-        "user_prompt": f"请为这部{proj.genre or '网文'}批量生成{req.count}个角色。{req.requirements}",
+        "user_prompt": f"""请生成{req.count}个角色。{req.requirements}
+【重要】主职业和副职业务必从已有职业体系中选择：{career_info}
+【重要】所属组织务必从已有组织中选择：{org_info}。无组织则 organization_memberships 返回空数组 []""",
     })
     check_skill_error(result)
     chars_data = result.get("json") or []
@@ -199,6 +211,91 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
             tags=item.get("traits", []) if isinstance(item.get("traits"), list) else [],
         ))
         created.append(item)
+    await db.flush()  # 拿到 char.id
+    
+    # 匹配职业体系和组织（复用 _step_characters 的逻辑）
+    if all_careers:
+        main_career_map = {c.name: c.id for c in all_careers if c.career_type == 'main'}
+        sub_career_map = {c.name: c.id for c in all_careers if c.career_type == 'sub'}
+        all_career_map = {c.name: c.id for c in all_careers}
+        for item in chars_data:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            char_name = str(item.get("name", "")).strip()
+            # 找对应的 Character 对象
+            char_obj = (await db.execute(
+                select(Character).where(Character.project_id == project_id, Character.name == char_name)
+            )).scalars().first()
+            if not char_obj:
+                continue
+            # 主职业匹配：只从 main 类型职业中选
+            occ_raw = str(item.get("occupation", ""))
+            occ_parts = [p.strip() for p in occ_raw.replace("/", ",").replace("、", ",").split(",") if p.strip()]
+            for occ in occ_parts:
+                if not char_obj.main_career_id:
+                    if occ in main_career_map:
+                        char_obj.main_career_id = main_career_map[occ]
+                    else:
+                        for cname, cid in main_career_map.items():
+                            if occ in cname or cname in occ:
+                                char_obj.main_career_id = cid
+                                break
+            # 副职业匹配
+            sub_names = set()
+            subs_raw = item.get("sub_occupations") or []
+            if isinstance(subs_raw, str):
+                subs_raw = [s.strip() for s in subs_raw.replace("，", ",").replace("/", ",").split(",") if s.strip()]
+            for sn in subs_raw:
+                sub_names.add(str(sn).strip())
+            # occupation 中非主职业部分也作为副职业候选
+            for occ in occ_parts:
+                if not char_obj.main_career_id or all_career_map.get(occ) != char_obj.main_career_id:
+                    sub_names.add(occ)
+            sub_list = []
+            for sn in sub_names:
+                cid = None
+                cname = sn
+                if sn in sub_career_map:
+                    cid = sub_career_map[sn]
+                elif sn in all_career_map:
+                    cid = all_career_map[sn]
+                else:
+                    for cn, ci in all_career_map.items():
+                        if sn in cn or cn in sn:
+                            cid = ci
+                            cname = cn
+                            break
+                if cid and cid != char_obj.main_career_id:
+                    sub_list.append({"career_id": cid, "name": cname, "stage_desc": ""})
+            char_obj.sub_careers = sub_list
+    
+    # 组织匹配
+    if orgs:
+        org_name_to_id = {o.name: o.id for o in orgs}
+        for item in chars_data:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            char_name = str(item.get("name", "")).strip()
+            char_obj = (await db.execute(
+                select(Character).where(Character.project_id == project_id, Character.name == char_name)
+            )).scalars().first()
+            if not char_obj:
+                continue
+            memberships = item.get("organization_memberships", [])
+            if isinstance(memberships, str):
+                memberships = [memberships]
+            for org_name in memberships:
+                org_name = str(org_name).strip()
+                org_id = org_name_to_id.get(org_name)
+                if not org_id:
+                    for on, oid in org_name_to_id.items():
+                        if org_name in on or on in org_name:
+                            org_id = oid
+                            break
+                if org_id:
+                    char_obj.organization_id = org_id
+                    break  # 只设第一个匹配的组织为主组织
+    
     await db.commit()
 
     # 批量生成后自动建立角色关系（≥2 个角色时）

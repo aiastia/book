@@ -87,16 +87,27 @@ async function onStepNext() {
   }
 }
 
-function selectOption(opt: string) {
-  if (step.value === 1) stepResults.title = opt
-  else if (step.value === 2) stepResults.description = opt
-  else if (step.value === 3) stepResults.theme = opt
+function selectOption(opt: any) {
+  const val = typeof opt === 'string' ? opt : opt.name || opt.title || String(opt)
+  if (step.value === 1) stepResults.title = val
+  else if (step.value === 2) stepResults.description = val
+  else if (step.value === 3) stepResults.theme = val
+  else if (step.value === 4) toggleGenre(val)
 }
 
 function toggleGenre(tag: string) {
   const idx = stepResults.genre.indexOf(tag)
   if (idx >= 0) stepResults.genre.splice(idx, 1)
   else stepResults.genre.push(tag)
+}
+
+function isSelected(opt: any): boolean {
+  const val = typeof opt === 'string' ? opt : opt.name || opt.title || String(opt)
+  if (step.value === 1) return stepResults.title === val
+  if (step.value === 2) return stepResults.description === val
+  if (step.value === 3) return stepResults.theme === val
+  if (step.value === 4) return stepResults.genre.includes(val)
+  return false
 }
 
 function onStepFinish() {
@@ -251,9 +262,7 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
               v-for="(opt, idx) in currentOptions"
               :key="idx"
               class="option-card"
-              :class="{
-                selected: step === 1 ? stepResults.title === opt : step === 2 ? stepResults.description === opt : step === 3 ? stepResults.theme === opt : false,
-              }"
+              :class="{ selected: isSelected(opt) }"
               @click="selectOption(opt)"
             >
               <div class="option-label">{{ typeof opt === 'string' ? opt : opt.name || opt.title || JSON.stringify(opt) }}</div>

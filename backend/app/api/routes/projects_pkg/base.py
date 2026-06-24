@@ -118,7 +118,11 @@ class CharacterCreate(BaseModel):
     status: str = "alive"
     mental_state: str = ""
     main_career_id: Optional[int] = None
-    main_career_stage: int = 0  # 主职业等级阶段 0-10
+    main_career_stage: int = 0  # 旧，保留兼容
+    main_career_stage_desc: str = ""  # 主职业境界描述
+    sub_careers: list = []
+    occupation_detail: dict = {}
+    organization_id: Optional[int] = None
 
 
 class ForeshadowCreate(BaseModel):

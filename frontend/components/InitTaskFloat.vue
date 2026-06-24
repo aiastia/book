@@ -3,7 +3,7 @@
 // 展示所有后台任务（通用队列 + 旧项目初始化）
 import { apiGet, apiPost } from '~/composables/useApi'
 
-const { tasks, isActive, cancelTask, dismissTask } = useBackgroundTasks()
+const { tasks, isActive, cancelTask, dismissTask, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
 const msg = useMessage()
 const collapsed = ref(true)
 const resuming = ref(false)
@@ -11,6 +11,11 @@ const failedTasks = ref<any[]>([])
 const ignoredTaskIds = ref<Set<number>>(new Set())
 
 watch(isActive, (v) => { if (v) collapsed.value = true })  // 新任务来时保持折叠（小条），避免遮挡操作区
+
+// 旧 init-task 失败时刷新失败列表
+watch(legacyTaskStatus, (s) => {
+  if (s?.status === 'failed') loadFailedTasks()
+})
 
 // 加载失败的任务
 async function loadFailedTasks() {
@@ -49,32 +54,13 @@ async function onResume(taskId: number | string) {
     msg.success('任务已恢复执行')
     // 从失败列表中移除
     failedTasks.value = failedTasks.value.filter(t => t.id !== numericId)
-    // 启动轮询以显示进度
-    startPollingForTask(numericId)
+    // 用 startLegacy 重新注册轮询（会设置 legacyTaskId 并启动 polling）
+    startLegacy(numericId)
   } catch (e: any) {
     console.error('resume failed', e)
     msg.error('重试失败：' + (e.message || '未知错误'))
   } finally {
     resuming.value = false
-  }
-}
-
-// 为恢复的任务启动轮询
-function startPollingForTask(taskId: number) {
-  // 添加到 tasks 列表中显示进度
-  const existing = tasks.value.find(t => t.id === `legacy-${taskId}`)
-  if (!existing) {
-    tasks.value.push({
-      id: `legacy-${taskId}`,
-      task_type: 'init',
-      title: '项目初始化',
-      status: 'running',
-      progress: 0,
-      status_message: '正在恢复...',
-      _source: 'legacy',
-      _isLegacy: true,
-      _taskId: taskId,
-    })
   }
 }
 
