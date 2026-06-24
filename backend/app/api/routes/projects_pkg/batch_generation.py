@@ -22,7 +22,7 @@ class BatchGenerateReq(BaseModel):
     # 通用配置
     enable_analysis: bool = True
     max_retries: int = 2
-    target_word_count: int = 3000
+    target_word_count: int = 4000
     model_override: str = ""       # 指定模型id（空=默认）
     style_id: int | None = None    # 写作风格id（空=项目默认）
     narrative_perspective: str = ""  # 叙事视角（空=按小说设定）

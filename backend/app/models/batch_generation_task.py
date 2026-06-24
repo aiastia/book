@@ -29,7 +29,7 @@ class BatchGenerationTask(Base):
     max_retries = Column(Integer, default=2)
     # 配置
     enable_analysis = Column(Boolean, default=True)  # 生成后是否自动分析
-    target_word_count = Column(Integer, default=3000)
+    target_word_count = Column(Integer, default=4000)
     # 批量生成覆盖项（连续模式 + 风格/模型/视角可选覆盖）
     start_chapter_number = Column(Integer, nullable=True)  # 连续模式起始章号
     batch_count = Column(Integer, nullable=True)           # 连续模式生成数量

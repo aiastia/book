@@ -23,12 +23,11 @@ class ProjectInitTask(Base):
     # 各步骤完成情况（8 步完整流程）
     world_done = Column(Integer, default=0)
     career_done = Column(Integer, default=0)
+    org_done = Column(Integer, default=0)
     characters_done = Column(Integer, default=0)
     assign_careers_done = Column(Integer, default=0)
     relations_done = Column(Integer, default=0)
-    org_done = Column(Integer, default=0)
-    locations_done = Column(Integer, default=0)
-    items_done = Column(Integer, default=0)
+    assign_org_members_done = Column(Integer, default=0)
     outline_done = Column(Integer, default=0)
     # 失败信息
     failed_step = Column(String(100), default="")  # 失败的步骤名（用于 resume）
@@ -47,12 +46,11 @@ class ProjectInitTask(Base):
             "status_message": self.status_message,
             "world_done": self.world_done,
             "career_done": self.career_done,
+            "org_done": self.org_done,
             "characters_done": self.characters_done,
             "assign_careers_done": self.assign_careers_done,
             "relations_done": self.relations_done,
-            "org_done": self.org_done,
-            "locations_done": self.locations_done,
-            "items_done": self.items_done,
+            "assign_org_members_done": self.assign_org_members_done,
             "outline_done": self.outline_done,
             "failed_step": self.failed_step,
             "error": self.error,

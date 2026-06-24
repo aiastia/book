@@ -29,18 +29,19 @@ ROLE_MAP = {
 }
 
 # 初始化步骤定义（名称, 进度, done 字段名）
-# 顺序优化（方案B）：世界观 → 职业 → 组织 → 角色 → 关系 → 地点 → 物品 → 大纲
+# 顺序优化：世界观 → 职业 → 组织 → 角色 → 职业分配 → 关系 → 组织成员分配 → 大纲
 # 组织提前到角色之前，这样角色生成时 AI 可指定所属组织，关联更可靠
+# 后置自动分配组织成员，确保所有角色都有组织归属
+# 地点/物品不纳入初始化管线，由用户在对应页面按需手动触发 AI 生成
 INIT_STEPS = [
-    ("world", "世界观", 8, "world_done"),
-    ("career", "职业体系", 16, "career_done"),
-    ("org", "组织势力", 26, "org_done"),
-    ("characters", "角色", 36, "characters_done"),
-    ("assign_careers", "职业分配", 42, "assign_careers_done"),
-    ("relations", "角色关系", 46, "relations_done"),
-    ("locations", "地点地图", 58, "locations_done"),
-    ("items", "物品道具", 68, "items_done"),
-    ("outline", "大纲", 82, "outline_done"),
+    ("world", "世界观", 10, "world_done"),
+    ("career", "职业体系", 20, "career_done"),
+    ("org", "组织势力", 30, "org_done"),
+    ("characters", "角色", 40, "characters_done"),
+    ("assign_careers", "职业分配", 46, "assign_careers_done"),
+    ("relations", "角色关系", 54, "relations_done"),
+    ("assign_org_members", "组织成员分配", 60, "assign_org_members_done"),
+    ("outline", "大纲", 80, "outline_done"),
 ]
 STEP_ORDER = [s[0] for s in INIT_STEPS]
 
@@ -692,7 +693,153 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
         task.status_message = f"角色关系：AI返回{len(rels)}条但均无法匹配到角色，请到「关系图谱」页手动重建"
     else:
         task.status_message = f"已生成 {added_rels} 条角色关系"
-    task.relations_done = 1
+	    task.relations_done = 1
+	    return None
+
+
+async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
+    """步骤：后置自动分配角色到组织（初始化阶段确保所有角色有组织归属）。
+
+    在角色和组织都生成完成后，通过 AI 调用将每个角色分配到最匹配的组织中，
+    补全 _link_org_memberships 中因 AI 未返回 organization_memberships 导致
+    成员数为 0 的问题。
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    from app.models.character import Character
+    from app.models.organization import Organization, OrganizationMember
+    from sqlalchemy import func
+
+    task.status_message = "分配角色到组织..."
+    await db.commit()
+
+    # 检查是否已有成员关联（可能 _link_org_memberships 已部分成功）
+    existing_members = (await db.execute(
+        select(func.count(OrganizationMember.id)).where(
+            OrganizationMember.organization_id.in_(
+                select(Organization.id).where(Organization.project_id == pid)
+            )
+        )
+    )).scalar() or 0
+
+    chars = (await db.execute(
+        select(Character).where(Character.project_id == pid)
+    )).scalars().all()
+    orgs = (await db.execute(
+        select(Organization).where(Organization.project_id == pid)
+    )).scalars().all()
+
+    if not chars or not orgs:
+        task.assign_org_members_done = 1
+        task.status_message = "无需分配（缺少角色或组织）"
+        await db.commit()
+        return None
+
+    # 找出尚未有任何组织归属的角色
+    chars_with_org = set()
+    for c in chars:
+        if c.organization_id:
+            chars_with_org.add(c.id)
+    # 也查 OrganizationMember 表
+    member_rows = (await db.execute(
+        select(OrganizationMember.character_id).where(
+            OrganizationMember.organization_id.in_([o.id for o in orgs])
+        )
+    )).scalars().all()
+    chars_with_org.update(member_rows)
+
+    unassigned = [c for c in chars if c.id not in chars_with_org]
+    if not unassigned:
+        logger.info(f"[init] 所有{len(chars)}个角色已有组织归属，跳过分配")
+        task.assign_org_members_done = 1
+        task.status_message = f"所有角色已有组织归属"
+        await db.commit()
+        return None
+
+    # 用 AI 为未分配角色匹配合适组织
+    org_list = "\n".join(
+        f"- ID:{o.id} {o.name}（{o.org_type or '势力'}，势力值:{o.power_value or 50}，{o.description or ''}）"
+        for o in orgs[:10]
+    )
+    char_list = "\n".join(
+        f"- ID:{c.id} {c.name}（{c.role or '角色'}，{(c.personality or '')[:80]}，{(c.background or '')[:100]}，职业:{c.occupation or '无'}）"
+        for c in unassigned[:20]
+    )
+
+    prompt = f"""请将以下角色分配到最合适的组织中。
+
+已有组织：
+{org_list}
+
+待分配角色：
+{char_list}
+
+要求：
+1. 每个角色分配1个最匹配的组织（根据角色性格、背景、职业匹配组织类型和定位）
+2. 返回 role 字段（角色在组织中的职位/身份，如"核心成员""外门弟子""长老""佣兵"等）
+3. 无所属组织的角色 organization_id 设为 null，role 设为空字符串
+
+返回纯JSON数组：[{{"character_id":0,"organization_id":0,"role":"核心成员"}}]"""
+
+    result = await ai_client.chat_json_retry(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=4096,
+    )
+    if result.get("error"):
+        logger.warning(f"[init] 组织成员分配 AI 调用失败: {result['error']}")
+        task.assign_org_members_done = 1
+        task.status_message = f"组织成员分配跳过（AI 调用失败）"
+        await db.commit()
+        return None
+
+    data = result.get("json") or []
+    if isinstance(data, dict):
+        data = data.get("assignments") or data.get("data") or []
+
+    char_id_set = {c.id for c in unassigned}
+    org_id_set = {o.id for o in orgs}
+    assigned = 0
+    for a in data:
+        if not isinstance(a, dict):
+            continue
+        cid = a.get("character_id")
+        oid = a.get("organization_id")
+        if cid not in char_id_set:
+            continue
+        if oid and oid not in org_id_set:
+            continue
+        role = str(a.get("role", "成员"))[:50]
+        try:
+            # 更新 Character.organization_id（主组织，取第一个匹配）
+            char = next((c for c in chars if c.id == cid), None)
+            if char and oid:
+                if not char.organization_id:
+                    char.organization_id = oid
+                # 写入 OrganizationMember（所有匹配）
+                existing = await db.scalar(
+                    select(func.count(OrganizationMember.id)).where(
+                        OrganizationMember.organization_id == oid,
+                        OrganizationMember.character_id == cid,
+                    )
+                )
+                if not existing:
+                    db.add(OrganizationMember(
+                        organization_id=oid,
+                        character_id=cid,
+                        role=role,
+                        status="active",
+                        source="ai",
+                    ))
+                    assigned += 1
+        except Exception as e:
+            logger.warning(f"[init] 分配角色 {cid} 到组织 {oid} 失败: {e}")
+            continue
+
+    await db.commit()
+    task.assign_org_members_done = 1
+    task.status_message = f"已为 {assigned} 个角色分配组织" if assigned else "组织成员分配完成"
+    logger.info(f"[init] 组织成员分配完成：{assigned}/{len(unassigned)} 个角色已分配")
     return None
 
 
@@ -716,20 +863,30 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
         orgs_data = [orgs_data] if isinstance(orgs_data, dict) else []
 
     for item in orgs_data[:6]:
-        if isinstance(item, dict) and item.get("name"):
-            pv = item.get("power_value", item.get("power_level", 50))
-            try:
-                pv = int(pv)
-            except Exception:
-                pv = 50
-            db.add(Organization(project_id=pid,
-                name=str(item.get("name", ""))[:100],
-                org_type=str(item.get("org_type", item.get("organization_type", item.get("type", ""))))[:50],
-                description=str(item.get("description", item.get("background", "")))[:2000],
-                power_value=pv,
-                location=str(item.get("location", ""))[:200],
-                motto=str(item.get("motto", ""))[:200],
-                color=str(item.get("color", ""))[:20]))
+	        if isinstance(item, dict) and item.get("name"):
+	            pv = item.get("power_value", item.get("power_level", 50))
+	            try:
+	                pv = int(pv)
+	            except Exception:
+	                pv = 50
+	            # 富字段存入 structure（prompt 新增 personality/background/purpose/traits 等）
+	            extra_fields = {}
+	            for k in ("personality", "background_story", "purpose", "traits"):
+	                v = item.get(k, "")
+	                if v:
+	                    extra_fields[k] = v
+	            db.add(Organization(project_id=pid,
+	                name=str(item.get("name", ""))[:100],
+	                org_type=str(item.get("org_type", item.get("organization_type", item.get("type", ""))))[:50],
+	                description=str(item.get("description", item.get("background", "")))[:2000],
+	                power_value=pv,
+	                location=str(item.get("location", ""))[:200],
+	                motto=str(item.get("motto", ""))[:200],
+	                color=str(item.get("color", ""))[:20],
+	                members=item.get("members", []) if isinstance(item.get("members"), list) else [],
+	                relations=item.get("relationships", []) if isinstance(item.get("relationships"), list) else [],
+	                structure=extra_fields if extra_fields else None,
+	            ))
     await db.commit()
     task.org_done = 1
     return None
@@ -884,8 +1041,7 @@ STEP_EXECUTORS = {
     "assign_careers": _step_assign_careers,
     "relations": _step_relations,
     "org": _step_org,
-    "locations": _step_locations,
-    "items": _step_items,
+    "assign_org_members": _step_assign_org_members,
     "outline": _step_outline,
 }
 

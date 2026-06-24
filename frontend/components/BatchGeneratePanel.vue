@@ -23,7 +23,7 @@ const submitting = ref(false)
 const startChapterNumber = ref<number>(1)
 const count = ref(5)
 const countOptions = [5, 10, 20, 40]
-const targetWords = ref(3000)
+const targetWords = ref(4000)
 const styleId = ref<number | null>(null)
 const narrativePerspective = ref<string>('')  // 空 = 按小说设定
 const aiModel = ref<string>('')               // 空 = 使用默认模型

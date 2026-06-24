@@ -8,6 +8,16 @@ const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useProjectApi()
 const msg = useMessage()
+const { onTaskCompleted } = useBackgroundTasks()
+
+// 当角色生成任务完成时自动刷新列表
+onTaskCompleted('characters', () => {
+  refresh()
+})
+onTaskCompleted('init', () => {
+  // 项目初始化完成后刷新（角色可能在初始化管线中生成）
+  setTimeout(() => refresh(), 2000)
+})
 const { data: characters, refresh } = await api.getCharacters()
 // 加载职业体系，供「职业」字段下拉使用
 const { data: careers } = await api.getCareers()
@@ -181,19 +191,17 @@ async function onGenerate() {
       // 数量>1 走批量生成
       const { task_id } = await api.batchGenerateCharactersAsync({ count: genCount.value, requirements: `${genRole.value}。${extra}` })
       const { trackTask } = useBackgroundTasks()
-      trackTask(task_id, 'characters', `批量生成${genCount.value}个角色`)
-      showGen.value = false
-      msg.success('批量生成任务已提交，可在右下角查看进度')
-      setTimeout(() => refresh(), 5000)
-    } else {
-      // 单个生成也走异步任务，避免前台阻塞
-      const { task_id } = await api.batchGenerateCharactersAsync({ count: 1, requirements: `${genRole.value}。${extra}` })
-      const { trackTask } = useBackgroundTasks()
-      trackTask(task_id, 'characters', `生成${genRole.value}角色`)
-      showGen.value = false
-      msg.success('生成任务已提交，可在右下角查看进度')
-      setTimeout(() => refresh(), 5000)
-    }
+      trackTask({ id: task_id, task_type: 'characters', title: `批量生成${genCount.value}个角色` })
+	      showGen.value = false
+	      msg.success('批量生成任务已提交，可在右下角查看进度')
+	    } else {
+	      // 单个生成也走异步任务，避免前台阻塞
+	      const { task_id } = await api.batchGenerateCharactersAsync({ count: 1, requirements: `${genRole.value}。${extra}` })
+	      const { trackTask } = useBackgroundTasks()
+	      trackTask({ id: task_id, task_type: 'characters', title: `生成${genRole.value}角色` })
+	      showGen.value = false
+	      msg.success('生成任务已提交，可在右下角查看进度')
+	    }
   } catch (e:any) { msg.error('生成失败：'+formatError(e)) }
   finally { generating.value = false }
 }
@@ -207,10 +215,9 @@ async function onBatch() {
     const reqText = `请生成${roleDesc}。${batchReq.value}`
     const { task_id } = await api.batchGenerateCharactersAsync({ count: totalCount, requirements: reqText })
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'characters', `批量生成${totalCount}个角色（${roleDesc}）`)
-    showBatch.value = false
-    msg.success('批量生成任务已提交，可在右下角查看进度')
-    setTimeout(() => refresh(), 5000)
+    trackTask({ id: task_id, task_type: 'characters', title: `批量生成${totalCount}个角色（${roleDesc}）` })
+	    showBatch.value = false
+	    msg.success('批量生成任务已提交，可在右下角查看进度')
   }
   catch (e:any) { msg.error('批量生成失败：'+formatError(e)) }
   finally { batchLoading.value = false }

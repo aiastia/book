@@ -16,6 +16,7 @@ from app.api.routes.global_routes import router as global_router
 from app.api.routes.writing_styles import router as writing_styles_router
 from app.api.routes.project_init import router as project_init_router
 from app.api.routes.tasks import router as tasks_router
+from app.api.routes.ws_tasks import router as ws_tasks_router
 from app.api.routes.admin import router as admin_router
 from app.core.auth import get_password_hash
 from app.core.database import Base, async_session, engine
@@ -143,6 +144,8 @@ async def _auto_migrate():
         ("characters", "ADD COLUMN sub_occupations TEXT DEFAULT ''"),
         # 第11批：剧情分析标准报告文本（=== 章节分析报告 ===）
         ("plot_analyses", "ADD COLUMN analysis_report TEXT DEFAULT ''"),
+        # 第12批：组织成员后置分配步骤 + 移除地点/物品初始化步骤
+        ("project_init_tasks", "ADD COLUMN assign_org_members_done INTEGER DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:
@@ -245,6 +248,7 @@ app.include_router(prompt_templates_router)
 app.include_router(writing_styles_router)
 app.include_router(project_init_router)
 app.include_router(tasks_router)
+app.include_router(ws_tasks_router)
 app.include_router(admin_router)
 
 # 前端静态文件

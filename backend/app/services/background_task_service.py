@@ -62,6 +62,7 @@ class TaskProgressTracker:
         """更新任务进度。progress 可省略（按 stage 自动算）。"""
         if progress is None and stage:
             progress = STAGE_PROGRESS.get(stage, 50)
+        task_data = None
         async with async_session() as db:
             values = {
                 "status": "running",
@@ -79,9 +80,20 @@ class TaskProgressTracker:
                 update(BackgroundTask).where(BackgroundTask.id == self.task_id).values(**values)
             )
             await db.commit()
+            # 获取完整任务数据用于 WebSocket 推送
+            task = (await db.execute(
+                select(BackgroundTask).where(BackgroundTask.id == self.task_id)
+            )).scalar_one_or_none()
+            if task:
+                task_data = task.to_dict()
+
+        # WebSocket 推送
+        if task_data:
+            await self._ws_broadcast(task_data)
 
     async def complete(self, result: dict = None, message: str = "完成"):
         """标记任务完成。"""
+        task_data = None
         async with async_session() as db:
             await db.execute(
                 update(BackgroundTask).where(BackgroundTask.id == self.task_id).values(
@@ -92,9 +104,18 @@ class TaskProgressTracker:
                 )
             )
             await db.commit()
+            task = (await db.execute(
+                select(BackgroundTask).where(BackgroundTask.id == self.task_id)
+            )).scalar_one_or_none()
+            if task:
+                task_data = task.to_dict()
+
+        if task_data:
+            await self._ws_broadcast(task_data)
 
     async def fail(self, error: str):
         """标记任务失败。"""
+        task_data = None
         async with async_session() as db:
             await db.execute(
                 update(BackgroundTask).where(BackgroundTask.id == self.task_id).values(
@@ -103,6 +124,24 @@ class TaskProgressTracker:
                 )
             )
             await db.commit()
+            task = (await db.execute(
+                select(BackgroundTask).where(BackgroundTask.id == self.task_id)
+            )).scalar_one_or_none()
+            if task:
+                task_data = task.to_dict()
+
+        if task_data:
+            await self._ws_broadcast(task_data)
+
+    async def _ws_broadcast(self, task_data: dict):
+        """通过 WebSocket 推送任务状态更新。"""
+        try:
+            from app.api.routes.ws_tasks import broadcast_task_update
+            uid = task_data.get("user_id")
+            if uid:
+                await broadcast_task_update(uid, task_data)
+        except Exception:
+            pass  # WebSocket 推送失败不影响主流程
 
     async def is_cancelled(self) -> bool:
         """检查任务是否被取消（执行协程内调用，优雅退出）。"""

@@ -231,7 +231,7 @@ class ChapterService:
         planner_context = {
             "chapter_number": str(chapter.chapter_number),
             "chapter_title": chapter.title or "",
-            "target_word_count": str(base_context.get("target_word_count", 3000)),
+            "target_word_count": str(base_context.get("target_word_count", 4000)),
             "user_prompt": "",
         }
         plan_result = await self.skill_engine.execute_skill(
@@ -464,7 +464,7 @@ class ChapterService:
                        "chapter_title": chapter.title or ""}
             if project:
                 context["project_title"] = project.title or ""
-                context["target_word_count"] = project.target_word_count or 3000
+                context["target_word_count"] = project.target_word_count or 4000
                 context["narrative_pov"] = project.narrative_pov or "第三人称"
                 context["narrative_perspective"] = context["narrative_pov"]
             # 应用覆盖项
@@ -664,6 +664,129 @@ class ChapterService:
             chapter.status = "draft"
             await self.db.commit()
             yield json.dumps({"error": str(e)}, ensure_ascii=False)
+
+    def _format_legacy_context_as_data(self, context: dict) -> str:
+        """将 build_chapter_context 的分散字段打包为 chapter_data 格式化字符串。
+
+        适配 chapter_generation_one_to_one_next 等新 prompt 的 {chapter_data} 单一变量格式。
+        当 Planner 失败回退到 legacy 流程时使用，确保模板变量被正确替换。
+        """
+        import json as _json
+        parts = []
+
+        # 核心信息
+        parts.append(f"<!-- 章节信息 -->")
+        parts.append(f"<chapter_info>")
+        parts.append(f"  章节号：{context.get('chapter_number', '')}")
+        parts.append(f"  章节标题：{context.get('chapter_title', '')}")
+        parts.append(f"  目标字数：{context.get('target_word_count', '')}")
+        parts.append(f"  叙事视角：{context.get('narrative_perspective', context.get('narrative_pov', ''))}")
+        parts.append(f"  作品名称：{context.get('project_title', '')}")
+        parts.append(f"  题材：{context.get('genre', '')}")
+        parts.append(f"</chapter_info>")
+
+        # 大纲
+        outline = context.get('chapter_outline', '')
+        if outline:
+            parts.append(f"<!-- 本章大纲 -->")
+            parts.append(f"<outline>{outline}</outline>")
+        expansion = context.get('expansion_plan', '')
+        if expansion:
+            parts.append(f"<expansion_plan>{expansion}</expansion_plan>")
+
+        # 近期大纲脉络
+        recent = context.get('recent_outlines', '')
+        if recent:
+            parts.append(f"<recent_outlines>{recent}</recent_outlines>")
+
+        # 前章衔接
+        continuation = context.get('continuation_point', '')
+        if continuation:
+            parts.append(f"<continuation_point>{continuation}</continuation_point>")
+        prev_content = context.get('previous_chapter_content', '')
+        if prev_content:
+            parts.append(f"<previous_chapter>{prev_content}</previous_chapter>")
+
+        # 角色信息
+        chars = context.get('characters_info', '')
+        if chars:
+            parts.append(f"<characters>{chars}</characters>")
+
+        # 世界设定
+        world = context.get('world_setting', '')
+        if world:
+            parts.append(f"<world>{world}</world>")
+
+        # 组织/职业
+        careers = context.get('chapter_careers', '')
+        if careers:
+            parts.append(f"<organizations>{careers}</organizations>")
+
+        # 伏笔
+        foreshadows = context.get('foreshadow_reminders', '')
+        if foreshadows:
+            parts.append(f"<foreshadows>{foreshadows}</foreshadows>")
+        pending_fs = context.get('pending_foreshadows', '')
+        if pending_fs:
+            parts.append(f"<pending_foreshadows>{pending_fs}</pending_foreshadows>")
+
+        # 记忆/前情
+        memories = context.get('relevant_memories', '')
+        if memories:
+            parts.append(f"<memories>{memories}</memories>")
+        recalled = context.get('recalled_memories', '')
+        if recalled:
+            parts.append(f"<recalled_memories>{recalled}</recalled_memories>")
+
+        # 物品/地点
+        items = context.get('key_items', '')
+        if items:
+            parts.append(f"<items>{items}</items>")
+        locs = context.get('key_locations', '')
+        if locs:
+            parts.append(f"<locations>{locs}</locations>")
+
+        # 连贯性增强
+        prev_analysis = context.get('previous_analysis', '')
+        if prev_analysis:
+            parts.append(f"<previous_analysis>{prev_analysis}</previous_analysis>")
+        char_states = context.get('character_current_states', '')
+        if char_states:
+            parts.append(f"<character_states>{char_states}</character_states>")
+        story_progress = context.get('story_progress', '')
+        if story_progress:
+            parts.append(f"<story_progress>{story_progress}</story_progress>")
+        recent_plans = context.get('recent_expansion_plans', '')
+        if recent_plans:
+            parts.append(f"<recent_expansion_plans>{recent_plans}</recent_expansion_plans>")
+
+        # 质量趋势
+        quality = context.get('quality_trends', '')
+        if quality:
+            parts.append(f"<quality_trends>{quality}</quality_trends>")
+        quality_detail = context.get('quality_trends_detail', '')
+        if quality_detail:
+            parts.append(f"<quality_trends_detail>{quality_detail}</quality_trends_detail>")
+
+        # 最近章节上下文
+        recent_ctx = context.get('recent_chapters_context', '')
+        if recent_ctx:
+            parts.append(f"<recent_chapters>{recent_ctx}</recent_chapters>")
+
+        # 卷摘要
+        vol = context.get('volume_summaries', '')
+        if vol:
+            parts.append(f"<volume_summaries>{vol}</volume_summaries>")
+
+        # 写作风格
+        style = context.get('writing_style', '')
+        if style:
+            parts.append(f"<writing_style>{style}</writing_style>")
+        style_custom = context.get('style_custom_prompt', '')
+        if style_custom:
+            parts.append(f"<style_custom_prompt>{style_custom}</style_custom_prompt>")
+
+        return "\n\n".join(parts)
 
     async def _post_generation(self, chapter: Chapter):
         """生成后处理"""

@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     AI_RETRY_MAX_DELAY: float = 30.0    # 重试最大间隔（秒）
 
     # 章节生成参数
-    CHAPTER_DEFAULT_WORDS: int = 2500
-    CHAPTER_MIN_WORDS: int = 2000
-    CHAPTER_MAX_WORDS: int = 3500
+    CHAPTER_DEFAULT_WORDS: int = 4000
+    CHAPTER_MIN_WORDS: int = 3000
+    CHAPTER_MAX_WORDS: int = 6000
     CHAPTER_CONTEXT_CHAPTERS: int = 10  # 上下文章节数
     CHAPTER_CONTEXT_WORDS: int = 500   # 衔接锚点字数
     VOLUME_SIZE: int = 10              # 每卷章节数（每 N 章生成一个卷摘要）

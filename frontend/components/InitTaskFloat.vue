@@ -1,16 +1,17 @@
 <script setup lang="ts">
 // 全局浮动任务面板：对标 MuMuAINovel FloatingTaskPanel
 // 展示所有后台任务（通用队列 + 旧项目初始化）
+// 任务完成后保留 24 小时，支持手动关闭
 import { apiGet, apiPost } from '~/composables/useApi'
 
-const { tasks, isActive, cancelTask, dismissTask, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
+const { tasks, isActive, hasAnyTasks, cancelTask, dismissTask, clearDoneTasks, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
 const msg = useMessage()
 const collapsed = ref(true)
 const resuming = ref(false)
 const failedTasks = ref<any[]>([])
 const ignoredTaskIds = ref<Set<number>>(new Set())
 
-watch(isActive, (v) => { if (v) collapsed.value = true })  // 新任务来时保持折叠（小条），避免遮挡操作区
+watch(isActive, (v) => { if (v) collapsed.value = false })  // 新任务来时展开面板
 
 // 旧 init-task 失败时刷新失败列表
 watch(legacyTaskStatus, (s) => {
@@ -34,12 +35,10 @@ async function loadFailedTasks() {
 // 忽略失败任务
 function ignoreTask(taskId: number) {
   ignoredTaskIds.value.add(taskId)
-  // 保存到 localStorage
   if (import.meta.client) {
     const ignored = Array.from(ignoredTaskIds.value)
     localStorage.setItem('moyu_ignored_tasks', JSON.stringify(ignored))
   }
-  // 从列表中移除
   failedTasks.value = failedTasks.value.filter(t => t.id !== taskId)
 }
 
@@ -52,9 +51,7 @@ async function onResume(taskId: number | string) {
     const result = await apiPost<any>(`/api/projects/init-task/${numericId}/resume`, {}, { timeout: 10000 })
     console.log('[InitTaskFloat] Resume result:', result)
     msg.success('任务已恢复执行')
-    // 从失败列表中移除
     failedTasks.value = failedTasks.value.filter(t => t.id !== numericId)
-    // 用 startLegacy 重新注册轮询（会设置 legacyTaskId 并启动 polling）
     startLegacy(numericId)
   } catch (e: any) {
     console.error('resume failed', e)
@@ -66,7 +63,6 @@ async function onResume(taskId: number | string) {
 
 // 页面加载时检查失败任务
 onMounted(() => {
-  // 恢复忽略的任务列表
   if (import.meta.client) {
     const saved = localStorage.getItem('moyu_ignored_tasks')
     if (saved) {
@@ -120,16 +116,36 @@ function tagStyle(status: string) {
   return { background: m.color + '20', color: m.color, borderColor: m.color + '40' }
 }
 
+function formatTime(ts: number | undefined) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const h = d.getHours().toString().padStart(2, '0')
+  const m = d.getMinutes().toString().padStart(2, '0')
+  return `${h}:${m}`
+}
+
+function parseSubProgress(t: any) {
+  if (!t.progress_details) return null
+  if (typeof t.progress_details === 'object') return t.progress_details
+  try { return JSON.parse(t.progress_details) } catch { return null }
+}
+
+// 是否有已完成/失败的任务
+const hasDoneTasks = computed(() =>
+  tasks.value.some(t => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
+)
+
 </script>
 
 <template>
-  <!-- 无任务时不渲染，避免遮挡页面操作区 -->
-  <div v-if="isActive || failedTasks.length" class="float-panel" :class="{ collapsed }">
+  <!-- 始终渲染浮窗，有任务时默认折叠，无任务时仅显示标题栏 -->
+  <div class="float-panel" :class="{ collapsed }">
     <div class="float-head" @click="collapsed = !collapsed">
       <span class="float-title-icon">&#x2699;&#xFE0F;</span>
       <span class="float-title">后台任务</span>
       <span v-if="failedTasks.length" class="float-badge warning">{{ failedTasks.length }} 个失败</span>
       <span v-else-if="isActive" class="float-badge">{{ tasks.length }} 个</span>
+      <span v-else-if="hasDoneTasks" class="float-badge done">{{ tasks.length }} 个已完成</span>
       <span class="float-toggle">{{ collapsed ? '&#9650;' : '&#9660;' }}</span>
     </div>
     <div v-show="!collapsed" class="float-body">
@@ -155,7 +171,7 @@ function tagStyle(status: string) {
       </div>
 
       <!-- 活跃任务列表 -->
-      <div v-for="t in tasks" :key="t.id" class="task-row">
+      <div v-for="t in tasks" :key="t.id" class="task-row" :class="{ done: t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled' }">
         <div class="task-status">
           <span class="task-tag" :style="tagStyle(t.status)">
             {{ statusMeta(t.status).icon }} {{ statusMeta(t.status).text }}
@@ -164,9 +180,27 @@ function tagStyle(status: string) {
             <span class="type-icon">{{ taskTypeIcon[t.task_type] || '&#x2699;&#xFE0F;' }}</span>
             {{ t.title || typeLabel[t.task_type] || t.task_type }}
           </span>
+          <span v-if="t._doneAt && t.status !== 'pending' && t.status !== 'running'" class="task-time">{{ formatTime(t._doneAt) }}</span>
         </div>
         <div class="task-msg">{{ t.status_message || '准备中...' }}</div>
-        <div class="task-progress">
+        <!-- 批量任务子进度：生成 / 分析 -->
+        <div v-if="parseSubProgress(t) && (t.status === 'pending' || t.status === 'running')" class="task-sub-progress">
+          <div v-if="parseSubProgress(t)?.generation?.total" class="sub-row">
+            <span class="sub-label">✍️ 生成</span>
+            <div class="sub-track">
+              <div class="sub-fill gen" :style="{ width: ((parseSubProgress(t).generation.done || 0) / (parseSubProgress(t).generation.total || 1) * 100) + '%' }"></div>
+            </div>
+            <span class="sub-num">{{ parseSubProgress(t).generation.done || 0 }}/{{ parseSubProgress(t).generation.total }}</span>
+          </div>
+          <div v-if="parseSubProgress(t)?.analysis?.total" class="sub-row">
+            <span class="sub-label">🔍 分析</span>
+            <div class="sub-track">
+              <div class="sub-fill ana" :style="{ width: ((parseSubProgress(t).analysis.done || 0) / (parseSubProgress(t).analysis.total || 1) * 100) + '%' }"></div>
+            </div>
+            <span class="sub-num">{{ parseSubProgress(t).analysis.done || 0 }}/{{ parseSubProgress(t).analysis.total }}</span>
+          </div>
+        </div>
+        <div class="task-progress" v-if="t.status === 'pending' || t.status === 'running'">
           <div class="progress-track">
             <div class="progress-fill" :style="{ width: (t.progress || 0) + '%', background: statusMeta(t.status).color }"></div>
           </div>
@@ -198,6 +232,11 @@ function tagStyle(status: string) {
         </div>
       </div>
 
+      <!-- 清空已完成任务 -->
+      <div v-if="hasDoneTasks && !isActive" class="clear-row">
+        <a-button size="small" type="link" @click="clearDoneTasks">清空已完成任务</a-button>
+      </div>
+
       <!-- 空状态提示 -->
       <div v-if="!tasks.length && !failedTasks.length" class="empty-hint">
         暂无后台任务
@@ -208,16 +247,17 @@ function tagStyle(status: string) {
 
 <style scoped>
 .float-panel { position: fixed; bottom: 24px; right: 24px; z-index: 1000; width: 360px; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(43,43,43,0.18); border: 1px solid #E8E4DC; overflow: hidden; transition: all 0.3s ease; }
-.float-panel.collapsed { width: 200px; }
+.float-panel.collapsed { width: 220px; }
 .float-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; border-bottom: 1px solid #F0EDE6; background: #FAFAF7; }
 .float-panel.collapsed .float-head { border-bottom: none; }
 .float-title-icon { font-size: 14px; }
 .float-title { font-size: 13px; font-weight: 600; color: #2B2B2B; }
 .float-badge { margin-left: auto; background: #4D8088; color: #fff; font-size: 11px; padding: 1px 7px; border-radius: 10px; font-weight: 600; }
 .float-badge.warning { background: #D49A4E; }
-.float-toggle { margin-left: auto; color: #8C8C8C; font-size: 11px; }
+.float-badge.done { background: #52A569; }
+.float-toggle { margin-left: 4px; color: #8C8C8C; font-size: 11px; }
 .float-panel:not(.collapsed) .float-toggle { margin-left: 0; }
-.float-body { padding: 8px 14px 12px; max-height: 360px; overflow-y: auto; }
+.float-body { padding: 8px 14px 12px; max-height: 380px; overflow-y: auto; }
 
 /* 失败任务区域 */
 .failed-section { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #F0EDE6; }
@@ -231,10 +271,12 @@ function tagStyle(status: string) {
 /* 任务行 */
 .task-row { padding: 10px 0; border-bottom: 1px solid #F5F2EB; }
 .task-row:last-child { border-bottom: none; }
+.task-row.done { opacity: 0.85; }
 .task-status { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .task-tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid; font-weight: 500; }
 .task-type { font-size: 12px; color: #4D8088; background: #EAF0F1; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; }
 .type-icon { font-size: 12px; }
+.task-time { font-size: 11px; color: #8C8C8C; margin-left: auto; }
 .task-msg { font-size: 13px; color: #595959; margin-bottom: 8px; line-height: 1.5; }
 .task-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .progress-track { flex: 1; height: 5px; background: #F0EDE6; border-radius: 999; overflow: hidden; }
@@ -246,5 +288,14 @@ function tagStyle(status: string) {
 .step-item.failed { background: #FFF0F0; color: #C75B5B; font-weight: 500; }
 .step-icon { font-size: 10px; }
 .task-actions { display: flex; justify-content: flex-end; gap: 4px; }
+/* 子进度条（批量任务生成/分析分开展示） */
+.task-sub-progress { margin-bottom: 6px; padding-left: 4px; }
+.sub-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.sub-label { font-size: 11px; color: #8C8C8C; min-width: 42px; }
+.sub-track { flex: 1; height: 4px; background: #F0EDE6; border-radius: 999; overflow: hidden; }
+.sub-fill.gen { height: 100%; background: #4D8088; border-radius: 999; transition: width .5s; }
+.sub-fill.ana { height: 100%; background: #D49A4E; border-radius: 999; transition: width .5s; }
+.sub-num { font-size: 10px; color: #8C8C8C; min-width: 36px; text-align: right; }
+.clear-row { text-align: center; padding: 8px 0 4px; }
 .empty-hint { font-size: 12px; color: #8C8C8C; text-align: center; padding: 12px 0; }
 </style>

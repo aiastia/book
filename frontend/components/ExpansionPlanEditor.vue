@@ -29,7 +29,7 @@ const summary = ref('')
 const emotionalTone = ref('紧张激烈')
 const conflictType = ref('人物冲突')
 const narrativeGoal = ref('')
-const estimatedWords = ref(3000)
+const estimatedWords = ref(4000)
 
 // 关键事件（标签）
 const keyEvents = ref<string[]>([])
@@ -75,7 +75,7 @@ watch(
     emotionalTone.value = plan.emotional_tone || '紧张激烈'
     conflictType.value = plan.conflict_type || '人物冲突'
     narrativeGoal.value = plan.narrative_goal || ''
-    estimatedWords.value = plan.estimated_words || 3000
+    estimatedWords.value = plan.estimated_words || 4000
     keyEventInput.value = ''
   },
   { immediate: true }

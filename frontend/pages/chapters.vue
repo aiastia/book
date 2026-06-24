@@ -27,7 +27,7 @@ const editingContent = ref('')
 const editingTitle = ref('')
 const generating = ref(false)
 const saving = ref(false)
-const targetWords = ref(3000)
+const targetWords = ref(4000)
 const narrativePov = ref('第三人称')
 if (import.meta.client) {
   const s = localStorage.getItem('moyu_chapter_words')
@@ -216,7 +216,16 @@ const statusText = (s: string) => ({ draft: '草稿', generating: '创作中', c
 const statusColor = (s: string) => ({ draft: 'default', generating: 'processing', completed: 'success' }[s] || 'default')
 
 // ===== 一键分析（异步后台任务）=====
-const { trackTask: trackBgTask } = useBackgroundTasks()
+const { trackTask: trackBgTask, onTaskCompleted } = useBackgroundTasks()
+
+// 当章节生成/批量生成/分析任务完成时自动刷新列表
+onTaskCompleted('chapter', () => {
+  refreshList()
+})
+onTaskCompleted('init', () => {
+  // 项目初始化完成后也刷新（大纲/章节可能变化）
+  setTimeout(() => refreshList(), 2000)
+})
 const batchAnalyzing = ref(false)
 async function onBatchAnalyze() {
   batchAnalyzing.value = true
@@ -317,10 +326,9 @@ async function onGenerate() {
     const { task_id } = await api.generateChapterAsync(editing.value.id)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })
-    msg.success('章节生成任务已提交，可在右下角查看进度')
-    if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
-    editorOpen.value = false
-    setTimeout(() => refreshList(), 5000)
+	    msg.success('章节生成任务已提交，可在右下角查看进度')
+	    if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
+	    editorOpen.value = false
   } catch (e: any) {
     msg.error('生成失败：' + formatError(e))
   } finally {

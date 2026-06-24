@@ -26,7 +26,7 @@ async def create_batch_task(
     chapter_ids: list[int],
     enable_analysis: bool = True,
     max_retries: int = 2,
-    target_word_count: int = 3000,
+    target_word_count: int = 4000,
     model_override: str = "",
     style_id: int = None,
     narrative_perspective: str = "",
@@ -167,7 +167,7 @@ async def run_batch_generation(task_id: int):
         max_retries = task.max_retries
         # 批量覆盖项
         model_override = task.model_override or ""
-        target_word_count = task.target_word_count or 3000
+        target_word_count = task.target_word_count or 4000
         narrative_perspective = task.narrative_perspective or ""
         style_id = task.style_id
 
@@ -237,9 +237,13 @@ async def run_batch_generation(task_id: int):
                         break
                     ch_num = chapter.chapter_number
 
-                    # 更新当前进度
+                    # 更新当前进度（生成阶段）
                     await _update_progress(task_id, idx, chapter_id, ch_num, attempt,
-                                           f"生成第{ch_num}章" + (f"（重试 {attempt}）" if attempt else ""))
+                                           f"生成第{ch_num}章" + (f"（重试 {attempt}）" if attempt else ""),
+                                           phase="generating",
+                                           sub_progress={"generation": {"done": completed, "total": len(chapter_ids)},
+                                                        "analysis": {"done": completed, "total": len(chapter_ids) if enable_analysis else 0},
+                                                        "phase": "generating"})
 
                     # 若已有内容则跳过
                     if chapter.content and len(chapter.content.strip()) > 100:
@@ -308,7 +312,11 @@ async def run_batch_generation(task_id: int):
                     )).scalar_one_or_none()
                     if c and c.content and len(c.content.strip()) >= 50:
                         await _update_progress(task_id, idx, chapter_id, c.chapter_number, 0,
-                                               f"分析第{c.chapter_number}章...")
+                                               f"分析第{c.chapter_number}章...",
+                                               phase="analyzing",
+                                               sub_progress={"generation": {"done": completed, "total": len(chapter_ids)},
+                                                            "analysis": {"done": completed, "total": len(chapter_ids)},
+                                                            "phase": "analyzing"})
                         svc = ChapterService(adb, project_id, user_id)
                         await svc._auto_analyze(c)
                         analysis_ok = True
@@ -370,7 +378,7 @@ async def _refresh_project_wc(project_id: int):
             await db.commit()
 
 
-async def _update_progress(task_id, idx, chapter_id, ch_num, attempt, message):
+async def _update_progress(task_id, idx, chapter_id, ch_num, attempt, message, phase="generating", sub_progress=None):
     async with async_session() as db:
         # 更新 BatchGenerationTask
         await db.execute(
@@ -385,11 +393,14 @@ async def _update_progress(task_id, idx, chapter_id, ch_num, attempt, message):
         )
         await db.commit()
     # 同步更新 BackgroundTask（浮动面板用）
-    await _sync_bg_task(task_id, message, progress=None)
+    await _sync_bg_task(task_id, message, progress=None, sub_progress=sub_progress)
 
 
-async def _sync_bg_task(batch_task_id: int, message: str, progress: int = None):
-    """同步更新 BackgroundTask（浮动面板查的表）。"""
+async def _sync_bg_task(batch_task_id: int, message: str, progress: int = None, sub_progress: dict = None):
+    """同步更新 BackgroundTask（浮动面板查的表）。
+    
+    sub_progress: {'generation': {'done': N, 'total': M}, 'analysis': {'done': N, 'total': M}, 'phase': 'generating'|'analyzing'}
+    """
     async with async_session() as db:
         from app.models.background_task import BackgroundTask
         bg = (await db.execute(
@@ -401,6 +412,9 @@ async def _sync_bg_task(batch_task_id: int, message: str, progress: int = None):
             values = {"status_message": message[:500], "status": "running", "updated_at": datetime.utcnow()}
             if progress is not None:
                 values["progress"] = min(99, max(0, progress))
+            if sub_progress is not None:
+                import json as _json
+                values["progress_details"] = _json.dumps(sub_progress, ensure_ascii=False)
             await db.execute(
                 update(BackgroundTask).where(BackgroundTask.id == bg.id).values(**values)
             )

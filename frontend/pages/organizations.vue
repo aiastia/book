@@ -10,8 +10,13 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useProjectApi()
 const msg = useMessage()
+const { onTaskCompleted } = useBackgroundTasks()
 const { data: tree, refresh } = await api.getOrgTree()
 const { data: characters } = await api.getCharacters()
+
+// 当组织生成/初始化任务完成时自动刷新列表
+onTaskCompleted('organizations', () => { refresh() })
+onTaskCompleted('init', () => { setTimeout(() => refresh(), 2000) })
 
 const generating = ref(false)
 const showGen = ref(false)
@@ -113,7 +118,7 @@ async function onGenerate() {
   try {
     const { task_id } = await api.generateOrganizationAsync({ count: genCount.value, user_input: genReq.value })
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'organizations', `生成 ${genCount.value} 个组织`)
+    trackTask({ id: task_id, task_type: 'organizations', title: `生成 ${genCount.value} 个组织` })
     showGen.value = false
     msg.success('生成任务已提交，可在右下角查看进度')
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
