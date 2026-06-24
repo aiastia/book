@@ -710,8 +710,8 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             chapters = (await task_db.execute(select(Chapter).where(Chapter.project_id == payload["project_id"]).order_by(Chapter.chapter_number))).scalars().all()
             existing_chapters = json.dumps([{"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""} for c in chapters], ensure_ascii=False) if chapters else "暂无"
             foreshadows_list = (await task_db.execute(select(Foreshadow).where(Foreshadow.project_id == payload["project_id"], Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
-            foreshadow_context = "\n".join([f"- {f.title}({f.status}): {f.content[:100]}" for f in foreshadows_list]) or "暂无"
             start_chapter, end_chapter = current_count + 1, current_count + payload["chapter_count"]
+            foreshadow_context = _format_foreshadows_for_outline(foreshadows_list, start_chapter, end_chapter)
             # 叙事视角：前端留空 = 按小说设定
             effective_pov = payload.get("narrative_pov") or proj.narrative_pov or "第三人称"
             engine, ai_client = await make_engine_and_client(task_db, payload["user_id"], model_override=(payload.get("ai_model") or None))
