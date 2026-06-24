@@ -48,6 +48,7 @@ function openAdd() {
     backend_type: 'openai', provider: 'openai', embedding_model: '',
   })
   remoteModels.value = []
+  modelSearch.value = ''
   showAdd.value = true
 }
 function openEdit(m: any) {
@@ -59,6 +60,7 @@ function openEdit(m: any) {
     embedding_model: m.embedding_model || '',
   })
   remoteModels.value = []
+  modelSearch.value = ''
   showAdd.value = true
 }
 async function onSave() {
@@ -98,8 +100,28 @@ async function onSetDefault(id: number) {
 
 /** 从远程 API 获取模型列表 */
 async function fetchModels() {
-  if (!form.base_url || !form.api_key) {
-    msg.warning('请先填写 Base URL 和 API Key')
+  if (!form.base_url) {
+    msg.warning('请先填写 Base URL')
+    return
+  }
+  modelSearch.value = ''
+  // 编辑模式且未填 Key：用后端已存 Key 拉取（无需重复填写）
+  if (editing.value && !form.api_key) {
+    fetchingModels.value = true
+    remoteModels.value = []
+    try {
+      const r = await api.fetchModelRemoteModels(form.id)
+      remoteModels.value = r.models || []
+      if (remoteModels.value.length === 0) msg.warning('未获取到可用模型')
+    } catch (e: any) {
+      msg.error('获取失败：' + formatError(e))
+    } finally {
+      fetchingModels.value = false
+    }
+    return
+  }
+  if (!form.api_key) {
+    msg.warning('请先填写 API Key')
     return
   }
   fetchingModels.value = true
@@ -120,6 +142,14 @@ async function fetchModels() {
 function selectRemoteModel(id: string) {
   form.model = id
 }
+
+// 远程模型搜索过滤
+const modelSearch = ref('')
+const filteredRemoteModels = computed(() => {
+  if (!modelSearch.value) return remoteModels.value
+  const q = modelSearch.value.toLowerCase()
+  return remoteModels.value.filter((rm: any) => rm.id.toLowerCase().includes(q))
+})
 
 // Provider 元信息
 const providerMeta: Record<string, { label: string; icon: string; defaultUrl: string; defaultModel: string }> = {
@@ -145,8 +175,12 @@ function onProviderChange(p: string) {
 const testingEmbed = ref(false)
 const embedResult = ref('')
 async function onTestEmbedding() {
-  if (!form.base_url || !form.api_key) {
-    msg.warning('请先填写 Base URL 和 API Key')
+  if (!form.base_url) {
+    msg.warning('请先填写 Base URL')
+    return
+  }
+  if (!form.api_key) {
+    msg.warning('请填写 API Key 后再测试')
     return
   }
   testingEmbed.value = true
@@ -334,24 +368,33 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
             <a-input v-model:value="form.base_url" :placeholder="providerMeta[form.provider]?.defaultUrl || 'https://api.openai.com/v1'" />
           </a-form-item>
           <a-form-item label="API Key">
-            <a-input-password v-model:value="form.api_key" :placeholder="editing ? '已保存（留空不修改）' : 'sk-...'" />
-            <div class="field-hint">{{ editing ? '留空表示不修改原密钥' : '在对应平台获取的 API Key' }}</div>
+            <a-input-password v-model:value="form.api_key" :placeholder="editing ? '留空不修改（获取模型时使用已存 Key）' : 'sk-...'" />
+            <div class="field-hint">{{ editing ? '留空保留原密钥，获取模型时自动使用已存 Key' : '在对应平台获取的 API Key' }}</div>
           </a-form-item>
         </div>
 
         <!-- 获取模型按钮 -->
         <div class="fetch-models-bar">
-          <a-button :loading="fetchingModels" :disabled="editing && !form.api_key" @click="fetchModels">
+          <a-button :loading="fetchingModels" @click="fetchModels">
             {{ fetchingModels ? '获取中...' : '🔍 获取可用模型' }}
           </a-button>
-          <span v-if="editing && !form.api_key" style="font-size:12px;color:#999;">编辑时需重新填写 Key 才能获取</span>
           <a-tag v-if="remoteModels.length" color="success">找到 {{ remoteModels.length }} 个模型</a-tag>
         </div>
+
+        <!-- 远程模型搜索 -->
+        <a-input
+          v-if="remoteModels.length"
+          v-model:value="modelSearch"
+          placeholder="搜索模型…"
+          allow-clear
+          size="small"
+          style="margin-bottom: 8px;"
+        />
 
         <!-- 远程模型列表 -->
         <div v-if="remoteModels.length" class="remote-models">
           <div
-            v-for="rm in remoteModels" :key="rm.id"
+            v-for="rm in filteredRemoteModels" :key="rm.id"
             class="remote-model-item"
             :class="{ selected: form.model === rm.id }"
             @click="selectRemoteModel(rm.id)"
@@ -376,7 +419,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <a-input v-model:value="form.embedding_model" placeholder="text-embedding-3-small（留空则不启用向量检索）" />
         </a-form-item>
         <a-form-item label=" ">
-          <a-button :loading="testingEmbed" :disabled="!form.base_url || (!form.api_key && !editing)" @click="onTestEmbedding">
+          <a-button :loading="testingEmbed" :disabled="!form.base_url" @click="onTestEmbedding">
             {{ testingEmbed ? '测试中...' : '🧪 测试 Embedding' }}
           </a-button>
         </a-form-item>

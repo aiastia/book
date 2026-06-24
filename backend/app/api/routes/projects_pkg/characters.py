@@ -37,6 +37,9 @@ async def list_characters(project_id: int, db: AsyncSession = Depends(get_db), u
         "weakness": c.weakness, "arc_type": c.arc_type, "character_change": c.character_change,
         "speech_style": c.speech_style, "status": c.status, "mental_state": c.mental_state,
         "tags": c.tags,
+        "main_career_id": c.main_career_id, "main_career_stage": c.main_career_stage,
+        "sub_careers": c.sub_careers or [],
+        "organization_id": c.organization_id,
     } for c in result.scalars().all()]
 
 
@@ -94,6 +97,15 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
     db.add(char)
     await db.commit()
     await db.refresh(char)
+
+    # 单个角色生成后：若项目已有≥2个角色，自动建立关系（让关系图谱能看到新角色）
+    try:
+        if len(chars) + 1 >= 2:
+            from app.api.routes.projects_pkg.relations import auto_rebuild_relations as _rebuild
+            await _rebuild(project_id, db, user)
+    except Exception as e:
+        print(f"[characters] 单角色生成后建关系失败（忽略）: {e}")
+
     return {
         "id": char.id, "name": char.name, "role": char.role, "gender": char.gender,
         "age": char.age, "identity": char.identity, "occupation": char.occupation,
@@ -105,6 +117,9 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
         "arc_type": char.arc_type, "character_change": char.character_change,
         "speech_style": char.speech_style, "status": char.status,
         "mental_state": char.mental_state,
+        "main_career_id": char.main_career_id, "main_career_stage": char.main_career_stage,
+        "sub_careers": char.sub_careers or [],
+        "organization_id": char.organization_id,
     }
 
 

@@ -384,6 +384,11 @@ export function useProjectApi() {
     return apiGet<{ models: Array<{ id: string; owned_by: string }>; default_model: string; config_name: string }>('/api/ai-models/default/remote-models', { timeout: 15000 })
   }
 
+  /** 用指定 AI 模型配置的已存凭据拉取远端模型列表（编辑时无需重复填 Key） */
+  function fetchModelRemoteModels(modelId: number) {
+    return apiGet<{ models: Array<{ id: string; owned_by: string }>; config_name: string }>(`/api/ai-models/${modelId}/remote-models`, { timeout: 15000 })
+  }
+
   /** 测试 embedding 接口连通性（用于记忆向量检索） */
   function testEmbedding(baseUrl: string, apiKey: string, embeddingModel: string) {
     return apiPost<{ ok: boolean; dim: number; model: string }>('/api/ai-models/test-embedding', { base_url: baseUrl, api_key: apiKey, embedding_model: embeddingModel }, { timeout: 30000 })
@@ -815,6 +820,7 @@ export function useProjectApi() {
     testAiModel,
     fetchRemoteModels,
     fetchDefaultRemoteModels,
+    fetchModelRemoteModels,
     testEmbedding,
     // Skill
     listSkills,

@@ -1,6 +1,8 @@
 """世界观 + 组织 + 职业体系"""
 import json
 from app.api.routes.projects_pkg.base import *
+from app.core.database import async_session
+from app.models.project import Project
 
 
 router = make_router()
@@ -55,6 +57,63 @@ async def generate_world_core(project_id: int, db: AsyncSession = Depends(get_db
     proj.world_rules = str(data.get("world_rules", ""))[:2000]
     await db.commit()
     return data
+
+
+@router.post("/{project_id}/world-core/generate-async")
+async def generate_world_core_async(project_id: int, req: dict = {}, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步生成核心世界观：立即返回 task_id，后台执行（灵感模式兜底可关闭网页）。"""
+    proj = await get_user_project(db, project_id, user)
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="generating", message="AI 正在生成世界观核心设定...")
+        async with async_session() as task_db:
+            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+            result = await ai_client.chat_json_retry(messages=[
+                {"role": "system", "content": (
+                    "你是资深网文世界观架构师。根据小说信息，生成丰富详实的核心世界观四要素。每个要素要写200-400字，包含具体细节。只返回纯 JSON：\n"
+                    '{"world_time_period": "时间设定（200-400字）", '
+                    '"world_location": "地点设定（200-400字）", '
+                    '"world_atmosphere": "氛围设定（200-400字）", '
+                    '"world_rules": "规则设定（200-400字）"}'
+                )},
+                {"role": "user", "content": f"小说《{payload['title']}》\n题材：{payload.get('genre', '网文')}\n简介：{payload.get('synopsis', '暂无')}\n请生成丰富详实的核心世界观，每个要素200-400字。"},
+            ], temperature=0.7, max_retries=3)
+            if result.get("error"):
+                await tracker.fail(result["error"])
+                return
+            await tracker.update(stage="saving", message="保存世界观...")
+            data = result.get("json") or {}
+            if isinstance(data, dict):
+                proj_obj = (await task_db.execute(
+                    select(Project).where(Project.id == payload["project_id"])
+                )).scalar_one_or_none()
+                if proj_obj:
+                    proj_obj.world_time_period = str(data.get("world_time_period", ""))[:2000]
+                    proj_obj.world_location = str(data.get("world_location", ""))[:2000]
+                    proj_obj.world_atmosphere = str(data.get("world_atmosphere", ""))[:2000]
+                    proj_obj.world_rules = str(data.get("world_rules", ""))[:2000]
+                    await task_db.commit()
+                    await tracker.complete(message="世界观核心设定已生成")
+                else:
+                    await tracker.fail("项目不存在")
+            else:
+                await tracker.fail("AI 未返回有效世界观")
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="world_core",
+        title=f"生成世界观核心设定",
+        payload={
+            "project_id": project_id, "user_id": user.id,
+            "title": proj.title, "genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无",
+        },
+        runner=_run,
+    )
+    return {"task_id": task_id}
 
 
 # ============ 世界观（多条 WorldSetting） ============

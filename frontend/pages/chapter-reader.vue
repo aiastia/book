@@ -18,7 +18,8 @@ const annotations = ref<any[]>([])
 const summary = ref<any>({})
 const loading = ref(false)
 const activeAnnotation = ref<any>(null)
-const sidebarOpen = ref(true)
+const sidebarOpen = ref(false)  // 默认纯正文阅读（沉浸式），需要时手动开标注
+const chapListOpen = ref(false) // 默认隐藏左侧章节列表，工具栏「目录」切出
 
 // 从 query 选章节
 onMounted(async () => {
@@ -33,18 +34,39 @@ async function selectChapter(id: number) {
   try {
     // 章节详情
     chapter.value = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${id}`)
-    // 标注
+    // 标注（有则展示高亮，无则纯正文阅读，不打扰）
     const r = await api.getAnnotations(id)
     annotations.value = r.annotations || []
     summary.value = r.summary || {}
-    if (!r.summary?.has_analysis) {
-      msg.info('此章节尚未分析，无标注。生成章节后会自动分析。')
-    }
   } catch (e: any) {
     msg.error('加载失败：' + formatError(e))
   } finally {
     loading.value = false
   }
+}
+
+// 键盘翻页（←/→）
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft' && navInfo.value.prev) selectChapter(navInfo.value.prev.id)
+  else if (e.key === 'ArrowRight' && navInfo.value.next) selectChapter(navInfo.value.next.id)
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+
+// 返回章节管理
+function goBack() {
+  navigateTo('/chapters')
+}
+
+// 字号控制
+const fontSize = ref(16)
+if (import.meta.client) {
+  const saved = localStorage.getItem('moyu_reader_fontsize')
+  if (saved) fontSize.value = Number(saved)
+}
+function changeFont(delta: number) {
+  fontSize.value = Math.min(24, Math.max(12, fontSize.value + delta))
+  if (import.meta.client) localStorage.setItem('moyu_reader_fontsize', String(fontSize.value))
 }
 
 // 标注按类型分组
@@ -93,9 +115,9 @@ const navInfo = computed(() => {
 <template>
   <div class="reader-root">
     <ClientOnly>
-      <div class="reader-page">
-        <!-- 左侧章节列表 -->
-        <div class="chap-sidebar">
+      <div class="reader-page" :class="{ 'no-sidebars': !chapListOpen && !sidebarOpen, 'no-annot': !sidebarOpen }">
+        <!-- 左侧章节列表（可切出） -->
+        <div v-if="chapListOpen" class="chap-sidebar">
           <div class="chap-sidebar-title">章节列表</div>
           <div
             v-for="c in (chapters || [])" :key="c.id"
@@ -110,23 +132,29 @@ const navInfo = computed(() => {
         <!-- 中间正文 -->
         <div class="reader-main">
           <div class="reader-toolbar">
-            <a-button size="small" :disabled="!navInfo.prev" @click="navInfo.prev && selectChapter(navInfo.prev.id)">← 上一章</a-button>
+            <a-button size="small" @click="goBack">← 返回</a-button>
+            <a-button size="small" @click="chapListOpen = !chapListOpen">📚 目录</a-button>
+            <a-button size="small" :disabled="!navInfo.prev" @click="navInfo.prev && selectChapter(navInfo.prev.id)">上一章</a-button>
             <span v-if="chapter" class="toolbar-title">第 {{ chapter.chapter_number }} 章 · {{ chapter.title }}</span>
             <a-button size="small" :disabled="!navInfo.next" @click="navInfo.next && selectChapter(navInfo.next.id)">下一章 →</a-button>
+            <a-button-group size="small">
+              <a-button @click="changeFont(-1)">A-</a-button>
+              <a-button @click="changeFont(1)">A+</a-button>
+            </a-button-group>
             <a-button size="small" type="link" @click="sidebarOpen = !sidebarOpen">
               {{ sidebarOpen ? '隐藏标注' : '显示标注' }}
             </a-button>
           </div>
-          <div v-if="loading" style="text-align:center;padding:40px;color:#8C8C8C;">加载中…</div>
-          <div v-if="chapter" class="reader-content">
+          <div v-if="chapter" class="reader-content" :style="{ fontSize: fontSize + 'px', lineHeight: 2 }">
             <AnnotatedText
               :content="chapter.content || ''"
               :annotations="annotations"
-              :active-id="activeAnnotation?.position"
+              :active-id="activeAnnotation ? `${activeAnnotation.type}-${activeAnnotation.position}` : null"
               @select="onSelectAnnotation"
             />
           </div>
-          <div v-else-if="!loading" class="select-hint">请从左侧选择章节</div>
+          <div v-if="loading" style="text-align:center;padding:40px;color:#8C8C8C;">加载中…</div>
+          <div v-else-if="!chapter" class="select-hint">请从左侧选择章节</div>
         </div>
 
         <!-- 右侧标注栏 -->
@@ -170,7 +198,12 @@ const navInfo = computed(() => {
 </template>
 
 <style scoped>
-.reader-page { display: grid; grid-template-columns: 200px 1fr 280px; gap: 16px; height: calc(100vh - 130px); }
+.reader-page { display: grid; grid-template-columns: 200px 1fr 280px; gap: 16px; height: calc(100vh - 110px); }
+/* 默认（无侧栏）：正文居中宽，沉浸式阅读 */
+.reader-page.no-sidebars { grid-template-columns: 1fr; max-width: 820px; margin: 0 auto; width: 100%; }
+.reader-page.no-sidebars .reader-content { max-width: none; }
+/* 无标注栏（有目录） */
+.reader-page.no-annot:not(.no-sidebars) { grid-template-columns: 200px 1fr; }
 .chap-sidebar { background: #fff; border-radius: 8px; padding: 12px; overflow-y: auto; border: 1px solid #E8E4DC; }
 .chap-sidebar-title { font-size: 13px; font-weight: 600; color: #4D8088; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #F0EDE6; }
 .chap-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; transition: background .15s; }

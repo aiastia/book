@@ -14,11 +14,15 @@ watch(isActive, (v) => { if (v) collapsed.value = true })  // 新任务来时保
 
 // 加载失败的任务
 async function loadFailedTasks() {
+  // 没登录态时跳过（避免 401）
+  if (import.meta.client && !localStorage.getItem('moyu_token')) return
   try {
     const data = await apiGet<any[]>('/api/projects/init-tasks/failed', { timeout: 5000 })
     failedTasks.value = (data || []).filter(t => !ignoredTaskIds.value.has(t.id))
-  } catch (e) {
-    console.warn('加载失败任务失败', e)
+  } catch (e: any) {
+    // 静默失败：未登录或接口异常时不影响页面
+    if (String(e).includes('401') || String(e).includes('403')) return
+    console.warn('加载失败任务失败', e?.message || e)
   }
 }
 

@@ -117,6 +117,8 @@ class CharacterCreate(BaseModel):
     speech_style: str = ""
     status: str = "alive"
     mental_state: str = ""
+    main_career_id: Optional[int] = None
+    main_career_stage: int = 0  # 主职业等级阶段 0-10
 
 
 class ForeshadowCreate(BaseModel):

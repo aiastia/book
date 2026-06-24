@@ -4,6 +4,7 @@ import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
+import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
 
 useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
@@ -486,6 +487,49 @@ function applyDenoise() {
   msg.success('已应用')
 }
 
+// ===== 纯阅读 Modal（对标 mumu，沉浸式，无标注） =====
+const pureReaderVisible = ref(false)
+const pureReaderChapter = ref<any>(null)
+const pureReaderLoading = ref(false)
+
+async function fetchChapterForReader(id: number): Promise<any> {
+  return await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${id}`)
+}
+
+// 全屏沉浸式阅读：打开纯阅读 Modal
+async function goReader(c: any) {
+  // 章节列表中的 c 通常不含 content，先取完整内容
+  if (c.content) {
+    pureReaderChapter.value = c
+  } else {
+    pureReaderLoading.value = true
+    pureReaderChapter.value = c  // 先显示标题
+    pureReaderVisible.value = true
+    try {
+      const ch = await fetchChapterForReader(c.id)
+      pureReaderChapter.value = { ...c, content: ch.content, word_count: ch.word_count }
+    } catch (e: any) {
+      msg.error('加载章节内容失败：' + formatError(e))
+    } finally {
+      pureReaderLoading.value = false
+      return
+    }
+  }
+  pureReaderVisible.value = true
+}
+
+async function onPureReaderChange(chapterId: number) {
+  pureReaderLoading.value = true
+  try {
+    const ch = await fetchChapterForReader(chapterId)
+    pureReaderChapter.value = ch
+  } catch (e: any) {
+    msg.error('加载章节失败：' + formatError(e))
+  } finally {
+    pureReaderLoading.value = false
+  }
+}
+
 // ===== 内嵌阅读器（带标注）=====
 const readerOpen = ref(false)
 const readerChapter = ref<any>(null)
@@ -536,7 +580,7 @@ async function openReader(c: any) {
     readerLoading.value = false
   }
 }
-
+	
 async function readerNavigate(direction: -1 | 1) {
   const list = chapters.value || []
   const idx = list.findIndex((c: any) => c.id === readerChapter.value?.id)
@@ -724,7 +768,7 @@ async function onPlanSaved() {
                 <div v-else-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
               </div>
               <div class="ch-row-actions" @click.stop>
-                <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
+                <a-button type="text" size="small" :disabled="!c.word_count" @click.stop="goReader(c)">📖 阅读</a-button>
                 <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
                 <a-button v-if="c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
                 <a-button type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
@@ -759,7 +803,7 @@ async function onPlanSaved() {
             <div v-else-if="!c.word_count" class="ch-row-empty">暂无内容</div>
           </div>
           <div class="ch-row-actions" @click.stop>
-            <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
+            <a-button type="text" size="small" :disabled="!c.word_count" @click.stop="goReader(c)">📖 阅读</a-button>
             <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
             <a-button v-if="c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
             <a-button type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
@@ -1027,6 +1071,16 @@ async function onPlanSaved() {
       :chapter-summary="planSummary"
     />
   </div>
+
+  <!-- 纯阅读 Modal（沉浸式，无标注/分析） -->
+  <ChapterReaderModal
+    :visible="pureReaderVisible"
+    :chapter="pureReaderChapter"
+    :chapters="chapters || []"
+    :loading="pureReaderLoading"
+    @close="pureReaderVisible = false; pureReaderLoading = false"
+    @change="onPureReaderChange"
+  />
 </template>
 
 <style scoped>

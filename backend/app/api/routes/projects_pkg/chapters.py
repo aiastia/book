@@ -12,6 +12,17 @@ from app.services.async_ai_service import submit_async_task
 router = make_router()
 
 
+async def _refresh_project_word_count(db: AsyncSession, project_id: int):
+    """汇总项目所有章节字数，更新 project.current_word_count。"""
+    total = (await db.execute(
+        select(func.coalesce(func.sum(Chapter.word_count), 0)).where(Chapter.project_id == project_id)
+    )).scalar() or 0
+    proj = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if proj:
+        proj.current_word_count = total
+        await db.commit()
+
+
 @router.post("/{project_id}/chapters")
 async def create_chapter(project_id: int, req: ChapterCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     await get_user_project(db, project_id, user)  # 权限校验
@@ -74,6 +85,8 @@ async def update_chapter(project_id: int, chapter_id: int, req: ChapterUpdate, d
     if "content" in data:
         c.word_count = len(data["content"] or "")
     await db.commit()
+    if "content" in data:
+        await _refresh_project_word_count(db, project_id)
     return {"ok": True}
 
 
@@ -85,6 +98,7 @@ async def delete_chapter(project_id: int, chapter_id: int, db: AsyncSession = De
         raise HTTPException(404, "章节不存在")
     await db.delete(c)
     await db.commit()
+    await _refresh_project_word_count(db, project_id)
     return {"ok": True}
 
 
@@ -94,6 +108,7 @@ async def generate_chapter(project_id: int, chapter_id: int, db: AsyncSession = 
     result = await service.generate_chapter(chapter_id)
     if result.get("error"):
         raise HTTPException(500, result["error"])
+    await _refresh_project_word_count(db, project_id)
     return result
 
 
@@ -119,6 +134,7 @@ async def generate_chapter_async(project_id: int, chapter_id: int, db: AsyncSess
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return
+            await _refresh_project_word_count(task_db, payload["project_id"])
             await tracker.complete(result=result, message=f"第{payload['chapter_number']}章生成完成（{result.get('word_count', 0)}字）")
 
     task_id = await submit_async_task(

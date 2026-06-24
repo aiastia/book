@@ -75,11 +75,8 @@ async function onStepNext() {
     if (stepResults.theme) body.theme = stepResults.theme
 
     let res: any
-    if (currentProjectId.value) {
-      res = await api.inspirationStep(stepName, body)
-    } else {
-      res = await api.globalInspirationStep(stepName, body)
-    }
+    // 灵感模式不依赖项目上下文，统一用全局接口（避免项目被删后 404）
+    res = await api.globalInspirationStep(stepName, body)
     currentOptions.value = res?.options || []
     currentPrompt.value = res?.prompt || ''
     step.value++
@@ -115,11 +112,7 @@ async function onQuickComplete() {
     if (stepResults.title) body.title = stepResults.title
     if (stepResults.description) body.description = stepResults.description
     let res: any
-    if (currentProjectId.value) {
-      res = await api.inspirationQuickComplete(body)
-    } else {
-      res = await api.globalInspirationQuickComplete(body)
-    }
+    res = await api.globalInspirationQuickComplete(body)
     quickResult.value = res
   } catch (e: any) {
     msg.error('快速补全失败：' + formatError(e))
@@ -156,14 +149,22 @@ async function onCreateProject() {
       // 使用统一的后台任务管理，确保浮窗立即显示
       startLegacy(task.task_id)
     } catch (e: any) {
-      console.warn('后台任务提交失败，将尝试同步生成', e)
-      // 兜底：同步生成
-      genStep.value = '生成世界观...'
-      try { await apiPost(`/api/projects/${pid}/world-core/generate`, {}, { timeout: 90000 }) } catch {}
-      genStep.value = '生成角色...'
-      try { await apiPost(`/api/projects/${pid}/characters/batch-generate`, { count: 5, requirements: protagonistName ? `主角名字：${protagonistName}` : '' }, { timeout: 120000 }) } catch {}
-      genStep.value = '生成大纲...'
-      try { await apiPost(`/api/projects/${pid}/outlines/generate`, { chapter_count: 10 }, { timeout: 120000 }) } catch {}
+      console.warn('后台任务提交失败，将逐个提交异步任务', e)
+      // 兜底：逐个提交异步后台任务（不阻塞页面，可安全关闭网页）
+      try {
+        const t1 = await apiPost<any>(`/api/projects/${pid}/world-core/generate-async`, {}, { timeout: 5000 })
+        startLegacy(t1.task_id)
+      } catch { /* 忽略 */ }
+      try {
+        const t2 = await apiPost<any>(`/api/projects/${pid}/characters/batch-generate-async`,
+          { count: 5, requirements: protagonistName ? `主角名字：${protagonistName}` : '' }, { timeout: 5000 })
+        startLegacy(t2.task_id)
+      } catch { /* 忽略 */ }
+      try {
+        const t3 = await apiPost<any>(`/api/projects/${pid}/outlines/generate-async`,
+          { chapter_count: 10 }, { timeout: 5000 })
+        startLegacy(t3.task_id)
+      } catch { /* 忽略 */ }
     }
 
     genStep.value = ''

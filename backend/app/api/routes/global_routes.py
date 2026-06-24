@@ -104,6 +104,9 @@ async def update_ai_model(model_id: int, req: AIModelUpdate, db: AsyncSession = 
     if not m:
         raise HTTPException(404, "模型配置不存在")
     data = req.model_dump(exclude_none=True)
+    # 空 api_key 表示不修改（保留原值），避免前端留空时覆盖已存密钥
+    if not data.get("api_key"):
+        data.pop("api_key", None)
     if data.get("is_default"):
         others = await db.execute(
             select(AIModelConfig).where(
@@ -266,6 +269,38 @@ async def get_default_remote_models(db: AsyncSession = Depends(get_db), user=Dep
     provider = cfg.provider or cfg.backend_type or "openai"
     res = await _fetch_remote_model_list(cfg.base_url, api_key, provider)
     res["default_model"] = cfg.model
+    res["config_name"] = cfg.name
+    return res
+
+
+@router.get("/ai-models/{model_id}/remote-models")
+async def get_model_remote_models(
+    model_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """用指定 AI 模型配置的已存凭据拉取远端可用模型列表（无需用户重复填 Key）。"""
+    from app.models.ai_model import AIModelConfig
+
+    result = await db.execute(
+        select(AIModelConfig).where(
+            AIModelConfig.id == model_id, AIModelConfig.user_id == user.id,
+        )
+    )
+    cfg = result.scalar_one_or_none()
+    if not cfg:
+        raise HTTPException(404, "模型配置不存在")
+
+    api_key = cfg.api_key or ""
+    try:
+        if hasattr(cfg, "decrypt_api_key"):
+            api_key = cfg.decrypt_api_key() or api_key
+    except Exception:
+        pass
+
+    if not api_key:
+        raise HTTPException(400, "该模型未保存 API Key，请先填入 Key 再获取")
+
+    provider = cfg.provider or cfg.backend_type or "openai"
+    res = await _fetch_remote_model_list(cfg.base_url, api_key, provider)
     res["config_name"] = cfg.name
     return res
 

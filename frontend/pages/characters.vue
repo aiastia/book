@@ -33,6 +33,8 @@ const orgNameById = (id: number | null) => {
 const showGen = ref(false)
 const genRole = ref('主角')
 const genExtra = ref('')
+const genCount = ref(1)
+const genOrgId = ref<number | null>(null)
 const generating = ref(false)
 const showBatch = ref(false)
 const batchCount = ref(5)
@@ -45,6 +47,7 @@ const editForm = reactive({
   appearance:'', personality:'', background:'', growth_experience:'', ability:'',
   story_goal:'', motivation:'', weakness:'', arc_type:'', character_change:'', speech_style:'',
   status:'alive', mental_state:'', organization_id: null as number | null,
+  main_career_id: null as number | null, main_career_stage: 1,
 })
 const roleOptions = ['主角','配角','反派','路人']
 const arcOptions = ['成长','堕落','救赎','顿悟','平淡','']
@@ -73,9 +76,27 @@ const displayFields = [
 const subOccupationTags = (s: string) => (s || '').split(';').map(x => x.trim()).filter(Boolean)
 
 async function onGenerate() {
+  // 组织补充要求（让 AI 知道有哪些组织可选）
+  const orgName = genOrgId.value ? (organizations.value || []).find((o:any)=>o.id===genOrgId.value)?.name : ''
+  const orgHint = orgName ? `该角色应属于「${orgName}」组织。` : (genOrgId.value === null ? '' : '')
+  const extra = (genExtra.value ? genExtra.value + ' ' : '') + orgHint
   generating.value = true
-  try { await api.generateCharacter({ role_type: genRole.value, extra: genExtra.value }); await refresh(); showGen.value=false; msg.success('角色生成完成') }
-  catch (e:any) { msg.error('生成失败：'+formatError(e)) }
+  try {
+    if (genCount.value > 1) {
+      // 数量>1 走批量生成
+      const { task_id } = await api.batchGenerateCharactersAsync({ count: genCount.value, requirements: `${genRole.value}。${extra}` })
+      const { trackTask } = useBackgroundTasks()
+      trackTask(task_id, 'characters', `批量生成${genCount.value}个角色`)
+      showGen.value = false
+      msg.success('批量生成任务已提交，可在右下角查看进度')
+      setTimeout(() => refresh(), 5000)
+    } else {
+      await api.generateCharacter({ role_type: genRole.value, extra })
+      await refresh()
+      showGen.value = false
+      msg.success('角色生成完成')
+    }
+  } catch (e:any) { msg.error('生成失败：'+formatError(e)) }
   finally { generating.value = false }
 }
 async function onBatch() {
@@ -161,12 +182,19 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
     <a-empty v-else description="暂无角色，点击 AI 生成" />
 
     <!-- AI 生成 -->
-    <a-modal v-model:open="showGen" title="AI 生成角色" width="420px">
+    <a-modal v-model:open="showGen" title="AI 生成角色" width="460px">
       <a-form layout="vertical">
-        <a-form-item label="角色定位"><a-select v-model:value="genRole"><a-select-option v-for="r in roleOptions" :key="r" :label="r" :value="r" /></a-select></a-form-item>
-        <a-form-item label="补充要求"><a-textarea v-model:value="genExtra" :rows="3" /></a-form-item>
+        <a-row :gutter="12">
+          <a-col :span="12"><a-form-item label="角色定位"><a-select v-model:value="genRole"><a-select-option v-for="r in roleOptions" :key="r" :label="r" :value="r" /></a-select></a-form-item></a-col>
+          <a-col :span="12"><a-form-item label="生成数量"><a-input-number v-model:value="genCount" :min="1" :max="10" style="width:100%" /></a-form-item></a-col>
+        </a-row>
+        <a-form-item label="所属组织"><a-select v-model:value="genOrgId" allow-clear placeholder="选择组织（AI 会据此分配）">
+          <a-select-option :value="null">不限</a-select-option>
+          <a-select-option v-for="o in (organizations || [])" :key="o.id" :value="o.id">{{ o.name }}</a-select-option>
+        </a-select></a-form-item>
+        <a-form-item label="补充要求"><a-textarea v-model:value="genExtra" :rows="3" placeholder="可选：对角色的额外要求" /></a-form-item>
       </a-form>
-      <template #footer><a-button @click="showGen=false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">{{ generating?'生成中…':'生成' }}</a-button></template>
+      <template #footer><a-button @click="showGen=false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">{{ generating?'生成中…':`生成 ${genCount} 个` }}</a-button></template>
     </a-modal>
     <!-- 批量 -->
     <a-modal v-model:open="showBatch" title="批量生成角色" width="480px">
@@ -198,6 +226,19 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
         <a-row :gutter="12">
           <a-col :span="8"><a-form-item label="主职业"><a-auto-complete v-model:value="editForm.occupation" :options="occupationOptions.map(o=>({value:o}))" :filter-option="(input:string, option:any)=>option.value.toLowerCase().includes(input.toLowerCase())" allow-clear :placeholder="occupationOptions.length?'选择或输入主职业':'可直接输入'" /></a-form-item></a-col>
           <a-col :span="16"><a-form-item label="副职业"><a-input v-model:value="editForm.sub_occupations" placeholder="多个副职业用分号 ; 分隔，如：炼丹师;阵法师" /></a-form-item></a-col>
+        </a-row>
+        <a-row :gutter="12">
+          <a-col :span="12"><a-form-item label="修炼体系">
+            <a-select v-model:value="editForm.main_career_id" allow-clear placeholder="选择修炼体系（关联职业阶段）">
+              <a-select-option :value="null">未设定</a-select-option>
+              <a-select-option v-for="cr in (careers || [])" :key="cr.id" :value="cr.id">{{ cr.name }}</a-select-option>
+            </a-select>
+          </a-form-item></a-col>
+          <a-col :span="12"><a-form-item label="修炼阶段">
+            <a-select v-model:value="editForm.main_career_stage" placeholder="选择阶段">
+              <a-select-option v-for="lv in 11" :key="lv-1" :value="lv-1">Lv.{{ lv-1 }}</a-select-option>
+            </a-select>
+          </a-form-item></a-col>
         </a-row>
         <a-form-item label="身份"><a-input v-model:value="editForm.identity" /></a-form-item>
         <a-divider orientation="left" plain>外貌与性格</a-divider>

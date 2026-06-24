@@ -117,6 +117,7 @@ async def _auto_migrate():
         ("chapters", "ADD COLUMN sub_index INTEGER DEFAULT 1"),
         # 第6批：初始化流程增强（8步进度 + 重试 + resume）
         ("project_init_tasks", "ADD COLUMN career_done INTEGER DEFAULT 0"),
+        ("project_init_tasks", "ADD COLUMN assign_careers_done INTEGER DEFAULT 0"),
         ("project_init_tasks", "ADD COLUMN relations_done INTEGER DEFAULT 0"),
         ("project_init_tasks", "ADD COLUMN locations_done INTEGER DEFAULT 0"),
         ("project_init_tasks", "ADD COLUMN items_done INTEGER DEFAULT 0"),
