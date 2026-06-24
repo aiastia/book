@@ -242,7 +242,7 @@ async def generate_outlines(project_id: int, req: OutlineGenerateRequest, db: As
         "narrative_pov": project.narrative_pov or "第三人称",
         "mcp_references": "",
         "requirements": "",
-        "user_prompt": f"请为《{project.title}》生成{req.chapter_count}章大纲。如需确认角色关系、组织详情、伏笔状态，可使用工具查询。",
+        "user_prompt": f"请为《{project.title}》生成{req.chapter_count}章大纲。",
     }, tools=get_chapter_tools(), tool_executor=make_tool_executor(db, project_id, req.chapter_count + 1))
     check_skill_error(result)
     outlines_data = result.get("json") or []
@@ -314,7 +314,7 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
                 "narrative_pov": proj.narrative_pov or "第三人称",
                 "mcp_references": "",
                 "requirements": "",
-                "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。如需查询角色、组织、伏笔等，可使用工具。",
+                "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。",
             }, tools=get_chapter_tools(), tool_executor=make_tool_executor(task_db, payload["project_id"], payload["chapter_count"] + 1))
             if result.get("error"):
                 await tracker.fail(result["error"])
@@ -503,7 +503,7 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         "story_direction": req.story_direction or "",
         "requirements": req.other_requirements or "",
         "mcp_references": "",
-        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章的详情、角色关系或伏笔状态，可使用工具。\n{extra_req_text}",
+        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
     }, tools=get_chapter_tools(), tool_executor=make_tool_executor(db, project_id, start_chapter))
     check_skill_error(result)
     outlines_data = result.get("json") or []
@@ -668,7 +668,7 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
                 "story_direction": payload.get("story_direction") or "",
                 "requirements": payload.get("other_requirements") or "",
                 "mcp_references": "",
-                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章详情、角色关系或伏笔状态，可使用工具。\n{extra_req_text}",
+                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
             }, tools=get_chapter_tools(), tool_executor=make_tool_executor(task_db, payload["project_id"], start_chapter))
             if result.get("error"):
                 await tracker.fail(result["error"])

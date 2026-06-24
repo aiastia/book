@@ -48,7 +48,7 @@ INIT_STEPS = [
 STEP_ORDER = [s[0] for s in INIT_STEPS]
 
 
-async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=3, tools=None, tool_executor=None):
+async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=1, tools=None, tool_executor=None):
     """带重试的 skill 调用。
     
     每次调用内部含 execute_skill 的 JSON 重试（3次），
@@ -1227,7 +1227,7 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
         "characters_info": chars_info,
         "synopsis": proj.synopsis or "暂无简介",
         "chapter_count": chapter_count,
-        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲。如果需要确认角色关系、组织详情、伏笔状态，可使用工具查询。",
+        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲",
         # 用户自定义模板可能用的变量
         "title": proj.title,
         "genre": proj.genre or "网文",
