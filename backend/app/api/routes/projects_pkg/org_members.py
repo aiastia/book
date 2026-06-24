@@ -216,24 +216,17 @@ async def _generate_members_for_org(db: AsyncSession, project_id: int, org_id: i
         return []
     char_list = "\n".join(f"- ID:{c.id} {c.name}（{c.role or '角色'}）" for c in chars)
 
-    prompt = f"""为组织《{org.name}》（类型：{org.org_type or '组织'}）分配成员。
+    result = await engine.execute_skill("org_member_assign", ai_client, {
+        "title": org.name,
+        "user_prompt": f"""为组织《{org.name}》（类型：{org.org_type or '组织'}）分配成员。
 
 组织简介：{org.description[:200] if org.description else '无'}
 可选角色：
 {char_list}
 {('额外要求：' + user_prompt) if user_prompt else ''}
 
-要求：
-1. 从可选角色中选择 3-8 个加入此组织
-2. 每个成员包含：character_id(必须是可选角色ID)、position(职位)、rank(等级1-10)、loyalty(忠诚度0-100)、contribution(贡献度0-100)、status("active")
-3. 职位要符合组织类型，等级和忠诚度要合理
-
-返回纯JSON数组：[{{"character_id":0,"position":"","rank":5,"loyalty":60,"contribution":40,"status":"active"}}]"""
-
-    result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.8, max_tokens=4096,
-    )
+要求：从可选角色中选择 3-8 个加入此组织。每个成员包含 character_id、role（职位）。返回纯JSON数组。""",
+    })
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
     data = result.get("json") or []
@@ -315,7 +308,9 @@ async def generate_all_members(
     )
 
     engine, ai_client = await make_engine_and_client(db, user.id)
-    prompt = f"""将所有角色合理分配到各组织。每个角色至少分配到一个最匹配的组织。
+    result = await engine.execute_skill("org_member_assign", ai_client, {
+        "title": proj.title,
+        "user_prompt": f"""将所有角色合理分配到各组织。每个角色至少分配到一个最匹配的组织。
 {('额外要求：' + req.user_prompt) if req.user_prompt else ''}
 
 组织列表：
@@ -324,19 +319,9 @@ async def generate_all_members(
 角色列表：
 {char_list}
 
-要求：
-1. 根据角色定位、性格与组织特征，将每个角色分配到最合适的组织
-2. 每个角色至少分配到一个组织，一个角色可以属于多个组织
-3. 为每个角色的每个组织身份指定：position(职位)、rank(等级1-10)、loyalty(忠诚度0-100)、contribution(贡献度0-100)
-4. 职位要贴合组织类型和角色定位，核心成员等级高、忠诚高
-
 返回JSON对象：
-{{"assignments":[{{"character_id":1,"organization_id":2,"position":"长老","rank":8,"loyalty":85,"contribution":60,"status":"active","is_primary":true}}]}}"""
-
-    result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.8, max_tokens=8192,
-    )
+{{"assignments":[{{"character_id":1,"organization_id":2,"position":"长老","rank":8,"loyalty":85,"contribution":60,"status":"active","is_primary":true}}]}}""",
+    })
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
     data = result.get("json") or {}

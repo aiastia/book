@@ -287,11 +287,9 @@ async def partial_regenerate(
 4. 只输出重写后的片段内容（不要包含前文后文，不要说明，不要 markdown）
 
 请直接输出："""
-    result = await ai_client.chat(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.85,
-        max_tokens=max(1000, min(int(max_w * 3), 8000)),
-    )
+    result = await engine.execute_skill("partial_regenerate", ai_client, {
+        "user_prompt": prompt,
+    })
     if result.get("error"):
         raise HTTPException(500, f"局部重写失败: {result['error']}")
     new_text = (result.get("content") or "").strip()
