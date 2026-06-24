@@ -119,6 +119,35 @@ def _inject_context_blocks(context: dict, skill_name: str = "") -> list[dict]:
     return msgs
 
 
+async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tokens, tools, tool_executor) -> dict:
+    """带工具调用的 JSON 输出：先用 chat_with_tools 让 AI 按需查询，再解析最终输出为 JSON。"""
+    import json as _json
+    raw = await ai_client.chat_with_tools(
+        messages=messages,
+        tools=tools,
+        tool_executor=tool_executor,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+    )
+    if raw.get("error"):
+        return raw
+    content = raw.get("content", "")
+    # 尝试解析 JSON（复用 json_helper 的清洗逻辑）
+    from app.services.json_helper import clean_json_response, parse_json
+    try:
+        cleaned = clean_json_response(content)
+        parsed = parse_json(cleaned)
+        if parsed is not None:
+            return {"json": parsed, "content": content, "model": raw.get("model", ""),
+                    "input_tokens": raw.get("input_tokens", 0),
+                    "output_tokens": raw.get("output_tokens", 0),
+                    "duration_ms": raw.get("duration_ms", 0)}
+    except Exception:
+        pass
+    return {"json": None, "error": f"工具调用后无法解析 JSON", "content": content}
+
+
 class SkillEngine:
     """Skill 插件执行引擎"""
 
@@ -270,11 +299,18 @@ class SkillEngine:
                     continue
                 break
         else:
-            result = await ai_client.chat_json_retry(
-                messages=messages, model=model,
-                temperature=temperature,
-                max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
-            )
+            # JSON 输出技能：如果有工具，走 chat_with_tools 后解析 JSON
+            if tools and tool_executor:
+                result = await _chat_with_tools_json(
+                    ai_client, messages, model, temperature, max_tokens,
+                    tools, tool_executor,
+                )
+            else:
+                result = await ai_client.chat_json_retry(
+                    messages=messages, model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+                )
 
         for hook in (skill.post_hooks or []):
             hook_type = hook.get("type")

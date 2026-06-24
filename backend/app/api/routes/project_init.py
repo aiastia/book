@@ -1227,7 +1227,7 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
         "characters_info": chars_info,
         "synopsis": proj.synopsis or "暂无简介",
         "chapter_count": chapter_count,
-        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲",
+        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲。如需确认角色关系、组织详情、伏笔状态，可使用工具查询。",
         # 用户自定义模板可能用的变量
         "title": proj.title,
         "genre": proj.genre or "网文",
