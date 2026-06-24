@@ -181,28 +181,20 @@ async def auto_assign_careers(
         return {"count": 0, "message": "所有角色已分配主职业"}
     char_list = "\n".join(f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.occupation or '无职业'}，性格：{(c.personality or '未知')[:50]}）" for c in chars)
 
-    prompt = f"""为以下角色从职业体系中选择最匹配的主职业。
+    engine, ai_client = await make_engine_and_client(db, user.id)
+    result = await engine.execute_skill("career_assign", ai_client, {
+        "title": proj.title,
+        "genre": proj.genre or "网文",
+        "user_prompt": f"""请为以下角色从职业体系中选择最匹配的主职业。
 
-题材：{proj.genre or '网文'}
 职业体系：
 {career_list}
 
 待分配角色：
 {char_list}
-{('额外要求：' + req.user_prompt) if req.user_prompt else ''}
 
-要求：
-1. 每个角色分配1个最匹配的主职业(career_type="main")
-2. 返回：character_id(角色ID)、career_id(职业ID)、current_stage(初始阶段1-3)、started_at(开始时间描述)
-3. 职业要与角色性格、背景、能力匹配
-
-返回纯JSON数组：[{{"character_id":0,"career_id":0,"current_stage":1,"started_at":""}}]"""
-
-    result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=4096,
-    )
+要求：每个角色分配1个最匹配的主职业(career_type="main")，返回character_id、career_id、current_stage(初始阶段1-3)、started_at。{'额外要求：' + req.user_prompt if req.user_prompt else ''}""",
+    })
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
     data = result.get("json") or []

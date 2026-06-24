@@ -126,14 +126,12 @@ async def regenerate_chapter(
     await db.commit()
     await db.refresh(task)
 
-    # 调 AI 重写
+    # 调 AI 重写（使用公用 skill 的 system prompt，user_prompt 携带具体指令）
     engine, ai_client = await make_engine_and_client(db, user.id)
     prompt = _build_rewrite_prompt(chapter, outline, req, project)
-    result = await ai_client.chat(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.85,
-        max_tokens=16384,
-    )
+    result = await engine.execute_skill("chapter_full_rewrite", ai_client, {
+        "user_prompt": prompt,
+    })
     if result.get("error"):
         task.status = "failed"
         task.error = result["error"]

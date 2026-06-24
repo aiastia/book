@@ -1,0 +1,10 @@
+{
+  "name": "career_assign",
+  "display_name": "角色职业分配",
+  "description": "AI 自动将角色匹配到已有职业体系中",
+  "category": "character",
+  "skill_type": "builtin",
+  "config": {"max_tokens": 4096},
+  "parameters": {"type": "object", "properties": {}},
+  "system_prompt_file": "career_assign.md"
+}

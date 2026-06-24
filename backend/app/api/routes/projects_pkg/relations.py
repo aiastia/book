@@ -207,19 +207,15 @@ async def auto_rebuild_relations(project_id: int, db: AsyncSession = Depends(get
     ])
 
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await ai_client.chat_json_retry(messages=[
-        {"role": "system", "content": (
-            "你是资深小说编辑。根据角色信息，分析他们之间合理的关系网络。"
-            "只返回纯 JSON，格式 {\"relations\": [{\"from_id\": 数字, \"to_id\": 数字, "
-            "\"relation_type\": \"关系名(如师徒/恋人/宿敌/父子)\", \"intimacy\": -100到100整数, "
-            "\"description\": \"简短描述\"}]}。from_id/to_id 必须是上面给出的真实角色 ID。"
-        )},
-        {"role": "user", "content": f"小说《{proj.title}》（{proj.genre}）的角色列表：\n{chars_info}\n\n请分析这些角色之间的关系。"},
-    ], temperature=0.5, max_retries=3)
+    result = await engine.execute_skill("character_relations_generate", ai_client, {
+        "title": proj.title,
+        "characters_info": chars_info,
+        "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
+    })
 
     check_skill_error(result)
     data = result.get("json") or {}
-    ai_relations = data.get("relations", []) if isinstance(data, dict) else []
+    ai_relations = data.get("relations", []) if isinstance(data, dict) else data if isinstance(data, list) else []
 
     # 建立 id → character 映射，过滤无效引用
     id_set = {c.id for c in chars}

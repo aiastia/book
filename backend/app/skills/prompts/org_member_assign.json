@@ -1,0 +1,10 @@
+{
+  "name": "org_member_assign",
+  "display_name": "组织成员分配",
+  "description": "AI 自动将角色分配到已有组织中",
+  "category": "character",
+  "skill_type": "builtin",
+  "config": {"max_tokens": 4096},
+  "parameters": {"type": "object", "properties": {}},
+  "system_prompt_file": "org_member_assign.md"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "chapter_full_rewrite",
+  "display_name": "章节全文重写",
+  "description": "根据用户要求重写整个章节",
+  "category": "chapter",
+  "skill_type": "builtin",
+  "config": {"max_tokens": 24576},
+  "parameters": {"type": "object", "properties": {}},
+  "system_prompt_file": "chapter_full_rewrite.md"
+}

@@ -102,16 +102,11 @@ async def generate_world_core(project_id: int, db: AsyncSession = Depends(get_db
     """AI 生成核心世界观（时间/地点/氛围/规则）并写入 Project"""
     proj = await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await ai_client.chat_json_retry(messages=[
-        {"role": "system", "content": (
-            "你是资深网文世界观架构师。根据小说信息，生成丰富详实的核心世界观四要素。每个要素要写200-400字，包含具体细节。只返回纯 JSON：\n"
-            '{"world_time_period": "时间设定（200-400字）：详细描述时代背景、历史阶段、社会状态、当前局势。如：架空大乾王朝末期，王朝立国三百余年，表面繁华实则内忧外患……具体描写政治格局、阶层矛盾、时代特征", '
-            '"world_location": "地点设定（200-400字）：详细描述主要地理舞台、关键地点、空间布局。如：故事发生在九州大陆中域的天玄宗所在地苍茫山脉……具体描写山川地貌、核心场所、势力分布", '
-            '"world_atmosphere": "氛围设定（200-400字）：详细描述整体基调、感官体验、社会心理。如：表面是修仙界的清静超然，暗处却是弱肉强食的残酷……描写视觉/听觉/嗅觉细节、角色心理状态", '
-            '"world_rules": "规则设定（200-400字）：详细描述力量体系、修炼法则、社会规则、禁忌。如：灵气修炼分为炼气/筑基/金丹等境界，每境三层……具体描写修炼方式、资源争夺、天道法则"}'
-        )},
-        {"role": "user", "content": f"小说《{proj.title}》\n题材：{proj.genre or '网文'}\n简介：{proj.synopsis or '暂无'}\n请生成丰富详实的核心世界观，每个要素200-400字。"},
-    ], temperature=0.7, max_retries=3)
+    result = await engine.execute_skill("world_core_generate", ai_client, {
+        "title": proj.title,
+        "genre": proj.genre or "网文",
+        "synopsis": proj.synopsis or "暂无",
+    })
     check_skill_error(result)
     data = result.get("json") or {}
     if not isinstance(data, dict):
@@ -137,16 +132,11 @@ async def generate_world_core_async(project_id: int, req: dict = {}, db: AsyncSe
         await tracker.update(stage="generating", message="AI 正在生成世界观核心设定...")
         async with async_session() as task_db:
             engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
-            result = await ai_client.chat_json_retry(messages=[
-                {"role": "system", "content": (
-                    "你是资深网文世界观架构师。根据小说信息，生成丰富详实的核心世界观四要素。每个要素要写200-400字，包含具体细节。只返回纯 JSON：\n"
-                    '{"world_time_period": "时间设定（200-400字）", '
-                    '"world_location": "地点设定（200-400字）", '
-                    '"world_atmosphere": "氛围设定（200-400字）", '
-                    '"world_rules": "规则设定（200-400字）"}'
-                )},
-                {"role": "user", "content": f"小说《{payload['title']}》\n题材：{payload.get('genre', '网文')}\n简介：{payload.get('synopsis', '暂无')}\n请生成丰富详实的核心世界观，每个要素200-400字。"},
-            ], temperature=0.7, max_retries=3)
+            result = await engine.execute_skill("world_core_generate", ai_client, {
+                "title": payload["title"],
+                "genre": payload.get("genre", "网文"),
+                "synopsis": payload.get("synopsis", "暂无"),
+            })
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return
@@ -199,32 +189,22 @@ async def create_world(project_id: int, req: WorldSettingCreate, db: AsyncSessio
 
 @router.post("/{project_id}/worlds/generate")
 async def generate_world(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """AI 生成详细世界设定条目（地理/历史/种族/势力等），多条存库。
-
-    用直接 chat_json 精简提示词（不走长 skill，避免超时）。
-    """
+    """AI 生成详细世界设定条目（地理/历史/种族/势力等），多条存库。"""
     proj = await get_user_project(db, project_id, user)
-    ai_client = await AIClient.from_user_config(db, user.id)
-    world_context = ""
-    if proj.world_location: world_context += f"地点：{proj.world_location}\n"
-    if proj.world_rules: world_context += f"规则：{proj.world_rules}\n"
-    if proj.world_atmosphere: world_context += f"氛围：{proj.world_atmosphere}\n"
+    engine, ai_client = await make_engine_and_client(db, user.id)
+    world_ctx = ""
+    if proj.world_time_period: world_ctx += f"时间背景：{proj.world_time_period}\n"
+    if proj.world_location: world_ctx += f"地理位置：{proj.world_location}\n"
+    if proj.world_atmosphere: world_ctx += f"氛围基调：{proj.world_atmosphere}\n"
+    if proj.world_rules: world_ctx += f"世界规则：{proj.world_rules}\n"
 
-    result = await ai_client.chat_json_retry(messages=[
-        {"role": "system", "content": (
-            "你是世界观设定师。根据小说信息生成详细世界设定条目。只返回纯JSON数组，每项：\n"
-            '[{"name":"条目名","category":"分类(地理/历史/种族/势力/修炼体系/科技/文化/其他)",'
-            '"content":"详细描述(150-300字，要丰富具体，包含具体的地点名称、历史事件、种族特征等)"}]\n'
-            "生成6-8条，每条内容要详实。"
-        )},
-        {"role": "user", "content": (
-            f"小说《{proj.title}》题材：{proj.genre or '网文'}\n"
-            f"简介：{proj.synopsis or '暂无'}\n"
-            f"核心世界观：\n{world_context or '请根据题材自行设定'}\n"
-            f"补充创意：{req.get('idea', '')}\n"
-            "请生成详细世界设定。"
-        )},
-    ], temperature=0.8, max_retries=3)
+    result = await engine.execute_skill("world_detail_generate", ai_client, {
+        "title": proj.title,
+        "genre": proj.genre or "网文",
+        "synopsis": proj.synopsis or "暂无",
+        "world_info": world_ctx or "暂无",
+        "user_prompt": req.get("idea", ""),
+    })
     check_skill_error(result)
     items = result.get("json") or []
     if not isinstance(items, list):

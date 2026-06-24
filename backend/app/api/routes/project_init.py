@@ -987,13 +987,13 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
 
     # ===== 角色-组织关联 =====
     # 组织已生成，现在将角色分配到组织中
-    await _link_characters_to_orgs(db, pid, proj, ai_client)
+    await _link_characters_to_orgs(db, pid, proj, engine, ai_client)
 
     task.org_done = 1
     return None
 
 
-async def _link_characters_to_orgs(db, pid, proj, ai_client):
+async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     """将已有角色自动分配到已有组织中（AI 辅助匹配）。"""
     import logging
     logger = logging.getLogger(__name__)
@@ -1039,20 +1039,16 @@ async def _link_characters_to_orgs(db, pid, proj, ai_client):
         char_parts.append("\n".join(info))
     char_list = "\n\n".join(char_parts)
 
-    prompt = f"""将角色分配到最合适的组织。返回纯JSON数组。
-
-已有组织：
+    result = await engine.execute_skill("org_member_assign", ai_client, {
+        "title": proj.title,
+        "genre": proj.genre or "网文",
+        "world_info": _build_world_info(proj),
+        "user_prompt": f"""已有组织：
 {org_list}
 
 待分配角色：
-{char_list}
-
-返回：[{{"character_id":0,"organization_id":0,"role":"核心成员"}}]"""
-
-    result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7, max_tokens=4096,
-    )
+{char_list}""",
+    })
     if result.get("error"):
         logger.warning(f"[init] 组织成员分配失败: {result['error']}")
         return

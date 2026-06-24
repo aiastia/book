@@ -183,12 +183,11 @@ async def validate_outline_entities(
                     f"- ID:{c.id} {c.name}（{c.role or '角色'}，{(c.personality or '')[:80]}，职业:{c.occupation or '无'}）"
                     for c in unassigned[:20]
                 )
-                r = await ai_client.chat_json_retry(messages=[{"role": "user", "content": f"""将以下角色分配到最合适的组织。返回纯JSON数组。
-
-已有组织：\n{org_list}
-待分配角色：\n{char_list}
-
-返回：[{{"character_id":0,"organization_id":0,"role":"成员"}}]"""}], temperature=0.7, max_tokens=2048)
+                r = await engine.execute_skill("org_member_assign", ai_client, {
+                    "title": title,
+                    "genre": genre or "网文",
+                    "user_prompt": f"""已有组织：\n{org_list}\n\n待分配角色：\n{char_list}""",
+                })
                 if not r.get("error"):
                     data = r.get("json") or []
                     if isinstance(data, dict):

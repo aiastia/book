@@ -49,34 +49,52 @@ _CONTEXT_BLOCKS = {
     "foreshadow_ctx": _mk("【伏笔上下文】", ["foreshadow_context"], lambda c: str(c.get("foreshadow_context",""))),
 }
 
-# skill → 注入的上下文块（前缀匹配）
+# skill → 注入的上下文块（前缀匹配，长前缀优先）
+# 标记：🔵=初始化管线使用  🟢=页面手动使用  ⚪=内部自动调用
 _SKILL_BLOCKS = {
+    # 🔵 世界观生成（初始化 step1 + 页面手动）
     "world_core_generate":     ["project","world"],
     "world_detail_generate":   ["project","world"],
     "world_generate":          ["project","world"],
+    # 🔵🟢 地点/物品生成（初始化 step4-5 + 页面手动）
+    "locations_generate":      ["project","world"],
+    "items_generate":          ["project","world"],
+    # 🔵 职业体系生成（初始化 step2）
     "career_system_generation":["project","world"],
+    # 🔵 组织生成（初始化 step6 + 页面手动）
     "organization_generate":   ["project","world","characters"],
     "single_organization_":    ["project","world","characters"],
     "auto_organization_":      ["project","world","characters"],
+    # 🔵 角色批量生成（初始化 step3）
     "characters_batch_generation": ["project","world","orgs"],
     "character_generate":      ["project","world","orgs"],
+    # 🔵 角色关系生成（初始化 step7）
     "character_relations_generate": ["project","characters"],
+    # 🔵 大纲生成/续写（初始化 step8 + 页面手动）
     "outline_create":          ["project","world","characters","orgs","past_outlines","foreshadow_ctx"],
     "outline_continue":        ["project","world","characters","orgs","recent","past_outlines","foreshadow_ctx"],
     "outline_expand_":         ["project","world","characters","orgs","outline"],
+    # ⚪ 角色职业/组织分配（初始化内部调用 + 页面手动触发）
+    "career_assign":           ["project","characters"],
+    "org_member_assign":       ["project","characters","orgs"],
+    # 🟢 章节生成（页面逐章/批量生成）
     "chapter_generation_":     ["project","world","characters","orgs","outline","previous","foreshadow","memory","recent","quality"],
     "chapter_generate_":       ["project","world","characters","orgs","outline","previous","foreshadow","memory","recent","quality"],
+    # ⚪ 章节后处理（自动摘要/分析）
     "chapter_summary":         ["project","outline"],
     "plot_analysis":           ["project","outline","foreshadow"],
     "volume_summary":          ["project","recent"],
+    # 🟢 灵感模式/导入
     "inspire":                 ["project"],
     "inspiration_":            ["project"],
     "book_import_":            ["project"],
+    # 🟢 伏笔规划/去AI味/章节重写
     "foreshadow_plan":         ["project","outline","foreshadow"],
     "ai_denoising":            ["project","outline"],
     "chapter_planner":         ["project"],
     "partial_regenerate":      ["project","outline","characters"],
     "chapter_regeneration_":   ["project","outline","characters"],
+    # ⚪ 兜底
     "_default_":               ["project"],
 }
 
