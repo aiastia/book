@@ -369,10 +369,10 @@ export function useBackgroundTasks() {
         _isLegacy: true,
         _steps: [
           { label: '世界观', done: legacyTaskStatus.value?.world_done },
-          { label: '地点', done: legacyTaskStatus.value?.locations_done },
-          { label: '物品', done: legacyTaskStatus.value?.items_done },
           { label: '职业', done: legacyTaskStatus.value?.career_done },
           { label: '角色', done: legacyTaskStatus.value?.characters_done },
+          { label: '地点', done: legacyTaskStatus.value?.locations_done },
+          { label: '物品', done: legacyTaskStatus.value?.items_done },
           { label: '组织', done: legacyTaskStatus.value?.org_done },
           { label: '关系', done: legacyTaskStatus.value?.relations_done },
           { label: '大纲', done: legacyTaskStatus.value?.outline_done },
