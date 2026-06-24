@@ -139,6 +139,7 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
 
     result, werr = await _safe_skill_call(engine, ai_client, "world_core_generate", {
         "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无",
+        "user_prompt": f"请为《{proj.title}》生成核心世界观。",
     }, "世界观")
     if werr:
         return werr

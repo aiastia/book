@@ -106,6 +106,7 @@ async def generate_world_core(project_id: int, db: AsyncSession = Depends(get_db
         "title": proj.title,
         "genre": proj.genre or "网文",
         "synopsis": proj.synopsis or "暂无",
+        "user_prompt": f"请为《{proj.title}》生成核心世界观。",
     })
     check_skill_error(result)
     data = result.get("json") or {}
@@ -136,6 +137,7 @@ async def generate_world_core_async(project_id: int, req: dict = {}, db: AsyncSe
                 "title": payload["title"],
                 "genre": payload.get("genre", "网文"),
                 "synopsis": payload.get("synopsis", "暂无"),
+                "user_prompt": f"请为《{payload['title']}》生成核心世界观。",
             })
             if result.get("error"):
                 await tracker.fail(result["error"])
