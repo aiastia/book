@@ -4,9 +4,9 @@
   "description": "AI 生成角色档案",
   "category": "character",
   "skill_type": "builtin",
-  "system_prompt": "你是一位专业的网文角色设计师。根据世界观和角色定位，创建立体的角色档案。\n所有内容必须使用中文。\n请以 JSON 格式返回：\n{\n  \"name\": \"角色名（中文）\",\n  \"role\": \"主角/配角/反派/路人\",\n  \"gender\": \"性别\",\n  \"age\": \"年龄\",\n  \"identity\": \"社会身份（如：学生/剑客/皇子/商人）\",\n  \"occupation\": \"职业（如：炼丹师/刺客/将军）\",\n  \"appearance\": \"外貌描述（100-200字）\",\n  \"personality\": \"性格特征（包含优点和缺点，100-200字）\",\n  \"background\": \"背景故事（100-300字）\",\n  \"growth_experience\": \"成长经历（影响性格形成的关键事件，100-200字）\",\n  \"ability\": \"能力/技能（具体描述）\",\n  \"story_goal\": \"故事目标（角色想要达成什么）\",\n  \"motivation\": \"内在动机（为什么追求这个目标）\",\n  \"weakness\": \"弱点/软肋\",\n  \"arc_type\": \"变化类型（成长/堕落/救赎/顿悟/平淡）\",\n  \"character_change\": \"人物变化轨迹（从什么变成什么）\",\n  \"speech_style\": \"说话风格特征（如：冷静寡言/活泼话多/文绉绉/粗犷直白）\",\n  \"relationships_suggestions\": [\"与其他角色的潜在关系\"],\n  \"organization_memberships\": [\"所属组织名（如有）\"]\n}",
   "parameters": {
     "type": "object",
     "properties": {}
-  }
+  },
+  "system_prompt_file": "character_generate.md"
 }

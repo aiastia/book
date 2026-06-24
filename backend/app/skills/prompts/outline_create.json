@@ -4,9 +4,9 @@
   "description": "AI 生成初始章节大纲",
   "category": "outline",
   "skill_type": "builtin",
-  "system_prompt": "你是一位经验丰富的网文大纲策划师。根据世界观、角色信息和写作方向，生成详细的章节大纲。\n每个章节大纲包含：chapter_number, title, summary, scenes, characters, key_points, emotion, goal。\n\n【🔴 角色分配 - 必填】\ncharacters 字段必须填写本章出场的所有角色名（从已有角色列表中选择），不能为空数组。每章至少1个角色。如果已有角色不够，在 new_characters_needed 中列出需要新增的角色类型。\n\n请以 JSON 数组格式返回，生成 {chapter_count} 章大纲：\n[\n  {\n    \"chapter_number\": 1,\n    \"title\": \"章节标题\",\n    \"summary\": \"200字以内的章节概要\",\n    \"scenes\": [{\"scene_title\": \"场景名\", \"scene_desc\": \"场景描述\", \"emotion\": \"情绪基调\"}],\n    \"characters\": [\"出场角色名（从已有角色列表中选，必填，不能为空）\"],\n    \"key_points\": [\"关键情节点\"],\n    \"emotion\": \"本章主情绪\",\n    \"goal\": \"本章写作目标（推动什么剧情、展示什么人物）\"\n  }\n]",
   "parameters": {
     "type": "object",
     "properties": {}
-  }
+  },
+  "system_prompt_file": "outline_create.md"
 }

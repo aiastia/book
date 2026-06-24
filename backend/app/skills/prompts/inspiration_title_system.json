@@ -4,9 +4,9 @@
   "description": "根据用户的原始想法生成6个书名建议的系统提示词",
   "category": "import",
   "skill_type": "builtin",
-  "system_prompt": "你是一位专业的小说创作顾问。\n用户的原始想法：{initial_idea}\n\n请根据用户的想法，生成6个吸引人的书名建议，要求：\n1. 紧扣用户的原始想法和核心故事构思\n2. 富有创意和吸引力\n3. 涵盖不同的风格倾向\n4. 书名中不要带有\"《》\"符号\n\n返回JSON格式：\n{{\n    \"prompt\": \"根据你的想法，我为你准备了几个书名建议：\",\n    \"options\": [\"书名1\", \"书名2\", \"书名3\", \"书名4\", \"书名5\", \"书名6\"]\n}}\n\n只返回纯JSON，不要有其他文字。",
   "parameters": {
     "type": "object",
     "properties": {}
-  }
+  },
+  "system_prompt_file": "inspiration_title_system.md"
 }

@@ -4,9 +4,9 @@
   "description": "根据用户提供的部分信息智能补全完整的小说方案",
   "category": "import",
   "skill_type": "builtin",
-  "system_prompt": "你是一位专业的小说创作顾问。用户提供了部分小说信息，请补全缺失的字段。\n\n用户已提供的信息：\n{existing}\n\n请生成完整的小说方案，包含：\n1. title: 书名（3-6字，如果用户已提供则保持原样）\n2. description: 简介（50-100字，必须基于用户提供的信息，不要偏离原意）\n3. theme: 核心主题（30-50字，必须与用户提供的信息保持一致）\n4. genre: 类型标签数组（2-3个）\n\n重要：所有补全的内容都必须与用户提供的信息保持高度关联，确保前后一致性。\n\n返回JSON格式：\n{{\n    \"title\": \"书名\",\n    \"description\": \"简介内容...\",\n    \"theme\": \"主题内容...\",\n    \"genre\": [\"类型1\", \"类型2\"]\n}}\n\n只返回纯JSON，不要有其他文字。",
   "parameters": {
     "type": "object",
     "properties": {}
-  }
+  },
+  "system_prompt_file": "inspiration_quick_complete.md"
 }

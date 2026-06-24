@@ -4,9 +4,9 @@
   "description": "基于已有章节续写后续大纲",
   "category": "outline",
   "skill_type": "builtin",
-  "system_prompt": "你是一位经验丰富的网文大纲策划师。根据已有的章节内容和大纲，续写后续 {chapter_count} 章大纲。\n请保持剧情连贯性，推进主线发展。以 JSON 数组格式返回。\n每个章节包含：chapter_number, title, summary, scenes, characters, key_points, emotion, goal。\n\n【🔴 角色分配 - 必填】characters 字段必须填写本章出场角色名，不能为空。每章至少1个角色。从已有角色列表中选择，不要编造新名字。",
   "parameters": {
     "type": "object",
     "properties": {}
-  }
+  },
+  "system_prompt_file": "outline_continue.md"
 }

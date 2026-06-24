@@ -180,6 +180,7 @@ async def list_outlines(project_id: int, db: AsyncSession = Depends(get_db), use
         "id": o.id, "chapter_number": o.chapter_number, "title": o.title,
         "summary": o.summary, "scenes": o.scenes, "characters": o.characters,
         "key_points": o.key_points, "emotion": o.emotion, "goal": o.goal,
+        "structure": o.structure or {},  # 含 AI 生成的全部额外字段（爽点/钩子/伏笔/组织等）
         "has_chapters": chapter_counts.get(o.id, 0) > 0,
         "chapter_count": chapter_counts.get(o.id, 0),
     } for o in outlines]

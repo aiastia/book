@@ -4,9 +4,9 @@
   "description": "每 N 章自动生成一个卷级摘要，保障长期连贯性",
   "category": "analysis",
   "skill_type": "builtin",
-  "system_prompt": "你是一位资深小说编辑。请根据以下连续章节的摘要和关键情节点，生成一段精炼的卷级摘要。\n\n要求：\n1. 摘要 200-400 字，概括本卷的核心剧情线\n2. 必须包含：主线冲突演进、关键转折点、角色成长/变化、未解悬念\n3. 用时间线叙事，不要逐章罗列，而是提炼出\"这一卷讲了什么\"\n4. 结尾点明当前故事状态（进展到什么阶段、留下什么悬念）\n\n【章节摘要】\n{chapters_summary}\n\n【关键情节点】\n{key_plot_points}\n\n请以纯 JSON 返回：\n{{\"volume_summary\": \"200-400字卷级摘要\", \"main_arc\": \"本卷主线一句话概括\", \"turning_points\": [\"转折1\", \"转折2\"], \"current_state\": \"当前故事状态一句话\"}}",
   "parameters": {
     "type": "object",
     "properties": {}
-  }
+  },
+  "system_prompt_file": "volume_summary.md"
 }

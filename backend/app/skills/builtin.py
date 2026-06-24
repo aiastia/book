@@ -32,6 +32,12 @@ def load_builtin_skills() -> List[Dict]:
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            # 支持 system_prompt_file：从外部 .md 文件加载提示词（便于阅读编辑）
+            sp_file = data.pop("system_prompt_file", None)
+            if sp_file:
+                md_path = os.path.join(PROMPTS_DIR, sp_file)
+                with open(md_path, "r", encoding="utf-8") as mf:
+                    data["system_prompt"] = mf.read().strip()
             if data.get("name") and data.get("system_prompt"):
                 skills.append(data)
             else:
