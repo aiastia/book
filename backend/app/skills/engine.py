@@ -122,7 +122,8 @@ def _inject_context_blocks(context: dict, skill_name: str = "") -> list[dict]:
 async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tokens, tools, tool_executor) -> dict:
     """带工具调用的 JSON 输出：先用 chat_with_tools 让 AI 按需查询，再解析最终输出为 JSON。
     
-    如果工具调用后无法解析 JSON，退回无工具模式重试一次。
+    不再退回无工具模式重试——重试会重新发送完整请求浪费大量 token。
+    工具调用已提供充足上下文，解析失败说明 AI 输出本身有问题，直接返回错误即可。
     """
     import json as _json
     raw = await ai_client.chat_with_tools(
@@ -147,16 +148,10 @@ async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tok
                     "input_tokens": raw.get("input_tokens", 0),
                     "output_tokens": raw.get("output_tokens", 0),
                     "duration_ms": raw.get("duration_ms", 0)}
-    except Exception:
-        pass
-    # 兜底：工具调用方式失败，退回普通 JSON 模式（无工具）
-    import logging
-    logging.getLogger(__name__).warning("[engine] 工具调用后无法解析JSON，退回无工具模式重试")
-    return await ai_client.chat_json_retry(
-        messages=messages, model=model,
-        temperature=temperature,
-        max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
-    )
+    except Exception as e:
+        return {"json": None, "error": f"工具调用后JSON解析异常: {e}", "content": content}
+    # parse_json 返回 None（非异常），也视为失败
+    return {"json": None, "error": "工具调用后无法解析JSON（AI未返回有效JSON结构）", "content": content}
 
 
 class SkillEngine:

@@ -79,9 +79,9 @@ export function useNavigation() {
   const isAdmin = computed(() => currentPath.value.startsWith('/admin'))
 
   // 给项目页面的链接自动追加 ?pid=（刷新时可恢复项目上下文）
-  // 仅在客户端追加，SSR 时不追加以避免 cookie/localStorage 不一致导致的水合警告
+  // SSR 和客户端同时追加，保证 HTML 一致性，避免水合警告
   function withPid(item: NavItem): NavItem {
-    if (import.meta.client && isProject.value && currentProjectId.value) {
+    if (isProject.value && currentProjectId.value) {
       return { ...item, to: item.to + '?pid=' + currentProjectId.value }
     }
     return item

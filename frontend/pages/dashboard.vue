@@ -162,7 +162,9 @@ function copyCoverPrompt() {
           <a-tag :color="r.type === 'success' ? 'success' : 'warning'" size="small">{{ r.badge }}</a-tag>
         </div>
       </div>
-      <a-empty v-else description="暂无章节，先去生成大纲吧" :image-style="{ height: '60px' }" />
+      <ClientOnly>
+        <a-empty v-if="!recentChapters.length" description="暂无章节，先去生成大纲吧" :image-style="{ height: '60px' }" />
+      </ClientOnly>
     </a-card>
   </div>
 

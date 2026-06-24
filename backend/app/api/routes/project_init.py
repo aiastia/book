@@ -51,7 +51,7 @@ STEP_ORDER = [s[0] for s in INIT_STEPS]
 async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=1, tools=None, tool_executor=None):
     """带重试的 skill 调用。
     
-    每次调用内部含 execute_skill 的 JSON 重试（3次），
+    每次调用内部含 execute_skill 的 JSON 重试（AI_MAX_RETRIES=1 次），
     这里额外重试 max_retries 次，处理连接级错误。
     支持透传 tools 和 tool_executor 给 execute_skill。
     """

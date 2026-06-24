@@ -139,6 +139,82 @@ def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
     )
 
 
+def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_chapter: int) -> str:
+    """将伏笔按目标章节分组格式化，让 AI 知道哪些必须在本次大纲中回收。
+
+    分组：
+    - 🎯 本次必须回收（target 在 [start, end] 内）
+    - ⚠️ 已超期未回收（target < start）
+    - ⏰ 下一批即将到期（target 在 (end, end+10]）
+    - 📋 待回收（target > end+10 或未指定）
+    - 🌱 待埋入（status=pending，plant_chapter 在本次范围内）
+    """
+    if not foreshadows:
+        return "暂无伏笔"
+
+    must = []       # 本次必须回收
+    overdue = []    # 超期
+    upcoming = []   # 下一批
+    future = []     # 远期
+    plant_now = []  # 待埋入
+
+    for f in foreshadows:
+        target = f.target_resolve_chapter_number
+        plant = f.plant_chapter_number
+
+        # 待埋入的伏笔（状态 pending，埋入计划在本批次范围）
+        if f.status == "pending" and plant and start_chapter <= plant <= end_chapter:
+            plant_now.append(f)
+            continue
+
+        if target:
+            if start_chapter <= target <= end_chapter:
+                must.append(f)
+            elif target < start_chapter:
+                overdue.append(f)
+            elif target <= end_chapter + 10:
+                upcoming.append(f)
+            else:
+                future.append(f)
+        else:
+            future.append(f)
+
+    parts = []
+
+    if must:
+        lines = [f"🎯 【本次必须回收（第{start_chapter}-{end_chapter}章）】"]
+        for f in must:
+            lines.append(f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章，优先:{f.priority or 5}）")
+        parts.append("\n".join(lines))
+
+    if overdue:
+        lines = ["⚠️ 【已超期未回收（请尽快安排）】"]
+        for f in overdue:
+            lines.append(f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章，已超期）")
+        parts.append("\n".join(lines))
+
+    if upcoming:
+        lines = ["⏰ 【下一批即将到期（第{}章前）】".format(end_chapter + 10)]
+        for f in upcoming:
+            lines.append(f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章）")
+        parts.append("\n".join(lines))
+
+    if plant_now:
+        lines = ["🌱 【本次应埋入的伏笔】"]
+        for f in plant_now:
+            lines.append(f"  - {f.title}：{f.content or ''}（计划在第{f.plant_chapter_number}章埋入，第{f.target_resolve_chapter_number or '?'}章回收）")
+        parts.append("\n".join(lines))
+
+    if future:
+        lines = ["📋 【远期伏笔（可铺垫，不必立即回收）】"]
+        for f in future:
+            target_str = f"目标第{f.target_resolve_chapter_number}章" if f.target_resolve_chapter_number else "未指定回收章节"
+            lines.append(f"  - {f.title}：{f.content or ''}（{target_str}）")
+        parts.append("\n".join(lines))
+
+    return "\n\n".join(parts) if parts else "暂无伏笔"
+
+
 async def _project_context(db: AsyncSession, project_id: int, project: Project) -> dict:
     """收集项目的世界观/角色/组织上下文信息（生成大纲时复用）。
 
@@ -463,10 +539,11 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         ], ensure_ascii=False)
 
     existing_chapters = json.dumps([{"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""} for c in chapters], ensure_ascii=False) if chapters else "暂无"
-    foreshadow_context = "\n".join([f"- {f.title}({f.status}): {f.content[:100]}" for f in foreshadows_list]) or "暂无"
 
     current_count = max((o.chapter_number for o in outlines), default=0)
     start_chapter, end_chapter = current_count + 1, current_count + req.chapter_count
+
+    foreshadow_context = _format_foreshadows_for_outline(foreshadows_list, start_chapter, end_chapter)
 
     # 叙事视角：前端留空 = 按小说设定（取项目默认）
     effective_pov = req.narrative_pov or proj.narrative_pov or "第三人称"

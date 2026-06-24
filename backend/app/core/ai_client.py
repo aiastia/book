@@ -100,7 +100,7 @@ class AIClient:
                     float(settings.AI_TIMEOUT),
                     connect=float(settings.AI_CONNECT_TIMEOUT),
                 ),
-                max_retries=settings.AI_MAX_RETRIES,
+                max_retries=settings.AI_SDK_MAX_RETRIES,  # SDK 层不重试，由应用层统一控制，避免透明重试导致重复计费
             )
         return self._client
 
@@ -180,6 +180,8 @@ class AIClient:
         max_tokens: int = None,
     ) -> dict:
         """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
+        import logging
+        logger = logging.getLogger(__name__)
         result = await self.chat(
             messages=messages,
             model=model,
@@ -189,6 +191,13 @@ class AIClient:
         if result.get("error"):
             return result
         content = result["content"].strip()
+
+        # 记录每次 AI 调用的 token 消耗，便于排查重复计费
+        logger.info(
+            f"[AI] model={result.get('model', '?')} "
+            f"input={result.get('input_tokens', 0)} output={result.get('output_tokens', 0)} "
+            f"duration={result.get('duration_ms', 0)}ms content_len={len(content)}"
+        )
 
         # 响应过短：AI 未返回有效 JSON（通常是上下文溢出或模型异常），不重试
         if len(content) < 20:
@@ -229,10 +238,14 @@ class AIClient:
         - 仅对「JSON 解析失败」重试；AI 调用本身报错（如 401/网络）不重试。
         - 每次重试在 messages 末尾追加格式强化提示，并把上次失败内容反馈给 AI。
         """
+        import logging
+        logger = logging.getLogger(__name__)
         if max_retries is None:
             max_retries = settings.AI_MAX_RETRIES
         hint_messages = list(messages)
         last_result = None
+        total_input_tokens = 0
+        total_output_tokens = 0
         for attempt in range(1, max_retries + 1):
             last_result = await self.chat_json(
                 messages=hint_messages,
@@ -240,10 +253,16 @@ class AIClient:
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            total_input_tokens += last_result.get("input_tokens", 0)
+            total_output_tokens += last_result.get("output_tokens", 0)
             # 成功（有 json 数据，且无 error）→ 直接返回
             if last_result.get("json") is not None and not last_result.get("error"):
                 if attempt > 1:
                     last_result["retries"] = attempt - 1
+                    logger.warning(
+                        f"[AI] JSON解析在第{attempt}次尝试后成功，"
+                        f"共消耗 input={total_input_tokens} output={total_output_tokens} tokens"
+                    )
                 return last_result
 
             # AI 调用本身的错误
@@ -254,12 +273,17 @@ class AIClient:
                 return last_result
             if is_conn_error and attempt < max_retries:
                 delay = min(settings.AI_RETRY_DELAY * attempt, settings.AI_RETRY_MAX_DELAY)
+                logger.warning(f"[AI] 连接错误，{delay}s后重试 (attempt {attempt}/{max_retries}): {err_msg[:200]}")
                 await asyncio.sleep(delay)
                 continue
 
             # JSON 解析失败 → 准备重试（最后一次也跳出）
             if attempt < max_retries:
                 bad_content = (last_result.get("content") or "")[:500]
+                logger.warning(
+                    f"[AI] JSON解析失败，准备重试 (attempt {attempt}/{max_retries})，"
+                    f"已消耗 input={total_input_tokens} output={total_output_tokens} tokens"
+                )
                 hint_messages = list(messages) + [
                     {
                         "role": "user",
@@ -307,8 +331,9 @@ class AIClient:
             "content": (
                 f"【工具调用预算】你最多有 {tool_rounds} 轮工具调用机会（每轮可同时调多个工具）。"
                 f"第 {max_rounds} 轮你必须直接输出最终结果，不能再调用工具。"
-                f"如果你已获得足够信息，可以提前输出，不必用完所有轮次。"
-                f"建议：第一轮批量查询所有明确需要的信息，后续轮次根据初步结果做补充查询。"
+                f"如果你已获得足够信息，可以提前输出，不必用完所有轮次。\n"
+                f"建议：第一轮批量查询所有明确需要的信息，后续轮次根据初步结果做补充查询。\n"
+                f"⚠️ 重要：如果某次查询返回「未找到」或空结果，说明该数据确实不存在，不要换关键词反复查同类数据。直接基于已有信息继续。"
             ),
         }
         current_messages = [budget_hint] + list(messages)

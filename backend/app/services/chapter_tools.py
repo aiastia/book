@@ -3,7 +3,7 @@
 让 AI 在写作过程中按需主动查询数据库——查角色档案、伏笔状态、物品归属、前文剧情等。
 对标 MuMu 的 MCP 工具架构，但查询的是本地 DB 而非外部服务。
 
-工具列表（11个）：
+工具列表（12个）：
 1. query_character - 查角色完整档案
 2. query_character_relations - 查角色关系网络
 3. query_foreshadows - 查伏笔状态
@@ -15,6 +15,7 @@
 9. query_world_setting - 查世界设定条目
 10. query_plot_timeline - 查剧情演进时间线（跨章因果链追溯）
 11. query_outline - 查大纲规划（计划 vs 实际对比）
+12. list_available_entities - 列出项目中所有可查询的实体概要（角色/组织/地点/物品）
 """
 import json
 import logging
@@ -216,6 +217,18 @@ def get_chapter_tools() -> list[dict]:
                 }
             }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_available_entities",
+                "description": "列出项目中所有可查询的实体概要（角色、组织、地点、物品、职业、世界设定）。用于了解'有哪些东西可查'，避免盲猜名字浪费查询轮数。建议作为第一轮的第一个调用，拿到全貌后再精准查询细节。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            }
+        },
     ]
 
 
@@ -267,6 +280,9 @@ def make_tool_executor(db: AsyncSession, project_id: int, chapter_number: int = 
 
             elif tool_name == "query_outline":
                 return await _query_outline(db, project_id, arguments.get("chapter_number", 1))
+
+            elif tool_name == "list_available_entities":
+                return await _list_available_entities(db, project_id)
 
             else:
                 return json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
@@ -662,6 +678,73 @@ async def _query_outline(db: AsyncSession, project_id: int, chapter_number: int)
             result["actual_summary"] = chapter.summary[:300]
         result["word_count"] = chapter.word_count or 0
 
+    return json.dumps(result, ensure_ascii=False)
+
+
+async def _list_available_entities(db: AsyncSession, project_id: int) -> str:
+    """列出项目中所有可查询的实体概要，让 AI 了解全局再精准查询。"""
+    # 角色
+    chars = (await db.execute(
+        select(Character).where(Character.project_id == project_id)
+    )).scalars().all()
+    character_list = [{
+        "name": c.name, "role": c.role or "", "gender": c.gender or "",
+        "status": c.status or "alive", "identity": (c.identity or "")[:50],
+    } for c in chars]
+
+    # 组织
+    orgs = (await db.execute(
+        select(Organization).where(Organization.project_id == project_id)
+    )).scalars().all()
+    organization_list = [{
+        "name": o.name, "org_type": o.org_type or "", "location": o.location or "",
+    } for o in orgs]
+
+    # 地点
+    locs = (await db.execute(
+        select(Location).where(Location.project_id == project_id)
+    )).scalars().all()
+    location_list = [{
+        "name": l.name, "location_type": l.location_type or "",
+        "danger_level": l.danger_level or "safe",
+    } for l in locs]
+
+    # 物品
+    items = (await db.execute(
+        select(Item).where(Item.project_id == project_id)
+    )).scalars().all()
+    item_list = [{
+        "name": i.name, "category": i.category or "", "rarity": i.rarity or "",
+    } for i in items]
+
+    # 职业
+    careers = (await db.execute(
+        select(Career).where(Career.project_id == project_id)
+    )).scalars().all()
+    career_list = [{"name": c.name, "career_type": c.career_type or ""} for c in careers]
+
+    # 世界设定
+    worlds = (await db.execute(
+        select(WorldSetting).where(WorldSetting.project_id == project_id)
+    )).scalars().all()
+    world_setting_list = [{"name": w.name, "category": w.category or ""} for w in worlds]
+
+    result = {
+        "total_counts": {
+            "characters": len(character_list),
+            "organizations": len(organization_list),
+            "locations": len(location_list),
+            "items": len(item_list),
+            "careers": len(career_list),
+            "world_settings": len(world_setting_list),
+        },
+        "characters": character_list,
+        "organizations": organization_list,
+        "locations": location_list,
+        "items": item_list,
+        "careers": career_list,
+        "world_settings": world_setting_list,
+    }
     return json.dumps(result, ensure_ascii=False)
 
 

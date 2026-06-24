@@ -26,7 +26,8 @@ class Settings(BaseSettings):
     # AI 超时和重试配置（环境变量：MOYU_AI_TIMEOUT / MOYU_AI_MAX_RETRIES）
     AI_TIMEOUT: int = 600               # 读写超时（秒），默认 10 分钟（复杂提示词需要更长推理时间）
     AI_CONNECT_TIMEOUT: int = 120        # 连接超时（秒）
-    AI_MAX_RETRIES: int = 2             # SDK 层重试次数（chat_json_retry 内部也会重试，减少叠加）
+    AI_SDK_MAX_RETRIES: int = 0         # OpenAI SDK 层 HTTP 重试次数（0=不重试，避免 SDK 透明重试导致重复计费）
+    AI_MAX_RETRIES: int = 1             # 应用层 JSON 解析重试次数（仅重试 1 次，减少 token 浪费）
     AI_RETRY_DELAY: float = 3.0         # 重试基础间隔（秒），指数退避
     AI_RETRY_MAX_DELAY: float = 30.0    # 重试最大间隔（秒）
 
