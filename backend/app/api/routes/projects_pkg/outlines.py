@@ -412,9 +412,28 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     if not isinstance(outlines_data, list):
         raise HTTPException(500, "AI 返回的大纲格式不正确")
     created = []
+    created_objs = []
     for item in outlines_data:
-        db.add(_build_outline(project_id, item, char_names=ctx["char_names"], org_names=ctx["org_names"]))
+        o = _build_outline(project_id, item, char_names=ctx["char_names"], org_names=ctx["org_names"])
+        db.add(o)
+        created_objs.append(o)
         created.append(item)
+    await db.flush()
+
+    # 1对1模式：自动为续写的大纲创建对应章节
+    if (proj.outline_mode or "one_to_one") == "one_to_one":
+        for o in created_objs:
+            existing = (await db.execute(
+                select(Chapter).where(Chapter.project_id == project_id, Chapter.chapter_number == o.chapter_number)
+            )).scalars().first()
+            if existing:
+                continue
+            ch = Chapter(
+                project_id=project_id, chapter_number=o.chapter_number,
+                title=o.title, summary=o.summary[:200] if o.summary else "",
+                status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+            )
+            db.add(ch)
     await db.commit()
 
     # ===== 新角色检测 =====
@@ -544,8 +563,26 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             await tracker.update(stage="saving", message="保存大纲...")
             outlines_data = result.get("json") or []
             if isinstance(outlines_data, list):
+                created_objs = []
                 for item in outlines_data:
-                    task_db.add(_build_outline(payload["project_id"], item, char_names=ctx["char_names"], org_names=ctx["org_names"]))
+                    o = _build_outline(payload["project_id"], item, char_names=ctx["char_names"], org_names=ctx["org_names"])
+                    task_db.add(o)
+                    created_objs.append(o)
+                await task_db.flush()
+                # 1对1模式：自动为续写的大纲创建对应章节
+                if (proj.outline_mode or "one_to_one") == "one_to_one":
+                    for o in created_objs:
+                        existing = (await task_db.execute(
+                            select(Chapter).where(Chapter.project_id == payload["project_id"], Chapter.chapter_number == o.chapter_number)
+                        )).scalars().first()
+                        if existing:
+                            continue
+                        ch = Chapter(
+                            project_id=payload["project_id"], chapter_number=o.chapter_number,
+                            title=o.title, summary=o.summary[:200] if o.summary else "",
+                            status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                        )
+                        task_db.add(ch)
                 await task_db.commit()
             await tracker.complete(message=f"续写完成（{len(outlines_data)}章）")
 

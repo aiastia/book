@@ -4,7 +4,7 @@ import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: '角色设定 — 墨语' })
-const { currentProjectId } = useProject()
+const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useProjectApi()
 const msg = useMessage()
@@ -133,9 +133,16 @@ function toggleChangedField(key: string) {
   }
 }
 
+async function loadCharOrgs(charId: number) {
+  const res = await api.getCharacterOrganizations(charId)
+  const d = (res as any)?.data
+  charOrgs.value = (d?.value ?? d ?? []) as any[]
+}
+
 // ===== 独立人物日志弹窗 =====
 const showLogModal = ref(false)
 const logCharacter = ref<any>(null)
+const charOrgs = ref<any[]>([])  // 角色所属的所有组织
 
 function openChangeLog(c: any) {
   logCharacter.value = c
@@ -224,6 +231,7 @@ function openEdit(c:any) {
     }
   })
   loadChangeLogs(c.id)
+  loadCharOrgs(c.id)
 }
 async function onSave() {
   try {
@@ -249,6 +257,39 @@ async function onDelete(id:number) {
   catch (e:any) { msg.error('删除失败：'+formatError(e)) }
 }
 const roleColor: Record<string,string> = { '主角':'error', '反派':'warning', '配角':'processing', '路人':'default' }
+
+// 展开/折叠
+const expandedChars = ref<Set<number>>(new Set())
+function toggleExpand(id: number) {
+  if (expandedChars.value.has(id)) expandedChars.value.delete(id)
+  else expandedChars.value.add(id)
+}
+
+// 人际关系（从关系表获取）
+const charRelations = ref<Record<number, string[]>>({})
+async function loadAllRelations() {
+  try {
+    const res = await api.getRelations()
+    const d = (res as any)?.data
+    const rels = (d?.value ?? d ?? []) as any[]
+    const map: Record<number, string[]> = {}
+    for (const r of rels) {
+      const other = r.from_character_id === r.to_character_id ? null : null
+      if (r.from_character_id && r.to_character_id && r.from_character_id !== r.to_character_id) {
+        const nameA = r.from_name || ''
+        const nameB = r.to_name || ''
+        if (nameA && nameB) {
+          if (!map[r.from_character_id]) map[r.from_character_id] = []
+          if (!map[r.to_character_id]) map[r.to_character_id] = []
+          map[r.from_character_id].push(`${nameB}：${r.relation_type}`)
+          map[r.to_character_id].push(`${nameA}：${r.relation_type}`)
+        }
+      }
+    }
+    charRelations.value = map
+  } catch { /* ignore */ }
+}
+loadAllRelations()
 </script>
 
 <template>
@@ -273,48 +314,36 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
             </div>
           </div>
         </template>
-        <!-- 内容平铺（描述列表） -->
+        <!-- 内容 -->
         <div class="char-desc">
-          <div v-for="f in displayFields" :key="f.key" v-show="c[f.key]" class="desc-row">
-            <span class="desc-label">{{ f.label }}</span>
-            <span v-if="f.key === 'sub_occupations'" class="desc-value">
-              <a-tag v-for="so in subOccupationTags(c[f.key])" :key="so" color="cyan" size="small">{{ so }}</a-tag>
-            </span>
-            <span v-else class="desc-value">{{ c[f.key] }}</span>
-          </div>
-          <!-- 主职业阶段 -->
-          <div v-if="c.main_career_id" class="desc-row career-row">
-            <span class="desc-label">主修</span>
-            <span class="desc-value">
-              <a-tag color="gold" size="small">
-                {{ careerNameById(c.main_career_id) }}
-                <span v-if="c.main_career_stage_desc"> · {{ c.main_career_stage_desc }}</span>
-                <span v-else-if="c.main_career_stage && String(c.main_career_stage) !== '0'"> · Lv.{{ c.main_career_stage }}</span>
-              </a-tag>
-            </span>
-          </div>
-          <!-- 副职业阶段 -->
-          <div v-if="(c.sub_careers || []).length" class="desc-row career-row">
-            <span class="desc-label">副修</span>
-            <span class="desc-value">
-              <a-tag v-for="(sc, i) in (c.sub_careers || [])" :key="i" color="cyan" size="small" style="margin-right:4px">
-                {{ sc.name || careerNameById(sc.career_id) }}
-                <span v-if="sc.stage_desc"> · {{ sc.stage_desc }}</span>
-                <span v-else-if="sc.stage && String(sc.stage) !== '0'"> · Lv.{{ sc.stage }}</span>
-              </a-tag>
-            </span>
-          </div>
-          <!-- 所属组织（支持多个） -->
-          <div v-if="c.organization_id || (c.organization_members && c.organization_members.length)" class="desc-row">
-            <span class="desc-label">组织</span>
-            <span class="desc-value">
-              <a-tag v-if="c.organization_id" color="blue" size="small">{{ orgNameById(c.organization_id) }}</a-tag>
-              <a-tag v-for="(om, i) in (c.organization_members || [])" :key="i" color="blue" size="small">
-                {{ om.organization_name || orgNameById(om.organization_id) }}
-              </a-tag>
-            </span>
-          </div>
-          <div v-if="!displayFields.some(f=>c[f.key]) && !c.main_career_id && !(c.sub_careers||[]).length" class="desc-empty">暂无详细信息，点击编辑补充</div>
+          <!-- 基本信息（始终显示） -->
+          <div class="desc-row" v-if="c.identity"><span class="desc-label">身份</span><span class="desc-value">{{ c.identity }}</span></div>
+          <div class="desc-row" v-if="c.age"><span class="desc-label">年龄</span><span class="desc-value">{{ c.age }}</span></div>
+          <div class="desc-row" v-if="c.gender"><span class="desc-label">性别</span><span class="desc-value">{{ c.gender }}</span></div>
+          <!-- 主修 -->
+          <div v-if="c.main_career_id" class="desc-row"><span class="desc-label">主修</span><span class="desc-value"><a-tag color="gold" size="small">{{ careerNameById(c.main_career_id) }}<span v-if="c.main_career_stage_desc"> · {{ c.main_career_stage_desc }}</span></a-tag></span></div>
+          <!-- 副修 -->
+          <div v-if="(c.sub_careers || []).length" class="desc-row"><span class="desc-label">副修</span><span class="desc-value"><a-tag v-for="(sc, i) in (c.sub_careers || [])" :key="i" color="cyan" size="small" style="margin-right:4px">{{ sc.name || careerNameById(sc.career_id) }}<span v-if="sc.stage_desc"> · {{ sc.stage_desc }}</span></a-tag></span></div>
+          <!-- 组织 -->
+          <div v-if="c.organization_id" class="desc-row"><span class="desc-label">组织</span><span class="desc-value"><a-tag color="blue" size="small">{{ orgNameById(c.organization_id) }}</a-tag></span></div>
+          <!-- 背景（截断） -->
+          <div v-if="c.background" class="desc-row"><span class="desc-label">背景</span><span class="desc-value">{{ expandedChars.has(c.id) ? c.background : (c.background || '').slice(0, 80) + ((c.background || '').length > 80 ? '…' : '') }}</span></div>
+
+          <!-- 展开内容 -->
+          <template v-if="expandedChars.has(c.id)">
+            <div v-for="f in displayFields" :key="f.key" v-show="c[f.key] && !['identity','age','gender'].includes(f.key)" class="desc-row">
+              <span class="desc-label">{{ f.label }}</span>
+              <span v-if="f.key === 'sub_occupations'" class="desc-value"><a-tag v-for="so in subOccupationTags(c[f.key])" :key="so" color="cyan" size="small">{{ so }}</a-tag></span>
+              <span v-else class="desc-value">{{ c[f.key] }}</span>
+            </div>
+            <!-- 人际关系 -->
+            <div v-if="charRelations[c.id]?.length" class="desc-row"><span class="desc-label">关系</span><span class="desc-value" style="font-size:12px;line-height:1.8;">{{ charRelations[c.id].join('；') }}</span></div>
+          </template>
+          
+          <div v-if="!c.identity && !c.age && !c.gender && !c.main_career_id && !(c.sub_careers||[]).length" class="desc-empty">暂无详细信息，点击编辑补充</div>
+        </div>
+        <div style="text-align:center;margin-top:4px;">
+          <a-button type="link" size="small" @click="toggleExpand(c.id)">{{ expandedChars.has(c.id) ? '收起 ▲' : '展开 ▼' }}</a-button>
         </div>
       </a-card>
     </div>
@@ -360,20 +389,21 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
     </a-modal>
     <!-- 编辑（弹窗，非抽屉）-->
     <a-modal :open="!!editing" @update:open="(v:any)=>{if(!v)editing=null}" title="编辑角色档案" width="680px" v-if="editing" :footer="null">
+      <div style="font-size:11px;color:#999;margin-bottom:8px;"><span style="color:#e91e63;font-weight:600;">*</span> 标记的字段会被章节分析自动更新</div>
       <a-form layout="vertical">
         <a-divider orientation="left" plain>基本信息</a-divider>
         <a-row :gutter="12">
           <a-col :span="8"><a-form-item label="姓名"><a-input v-model:value="editForm.name" /></a-form-item></a-col>
           <a-col :span="8"><a-form-item label="定位"><a-select v-model:value="editForm.role"><a-select-option v-for="r in roleOptions" :key="r" :label="r" :value="r" /></a-select></a-form-item></a-col>
-          <a-col :span="8"><a-form-item label="状态"><a-select v-model:value="editForm.status"><a-select-option value="alive">存活</a-select-option><a-select-option value="dead">死亡</a-select-option><a-select-option value="missing">失踪</a-select-option><a-select-option value="retired">退隐</a-select-option></a-select></a-form-item></a-col>
+          <a-col :span="8"><a-form-item label="状态" class="dynamic-label"><a-select v-model:value="editForm.status"><a-select-option value="alive">存活</a-select-option><a-select-option value="dead">死亡</a-select-option><a-select-option value="missing">失踪</a-select-option><a-select-option value="retired">退隐</a-select-option></a-select></a-form-item></a-col>
         </a-row>
         <a-row :gutter="12">
-          <a-col :span="8"><a-form-item label="主组织">
-            <a-select v-model:value="editForm.organization_id" allow-clear placeholder="选择主组织">
-              <a-select-option :value="null">无</a-select-option>
-              <a-select-option v-for="o in (organizations || [])" :key="o.id" :value="o.id">{{ o.name }}</a-select-option>
-            </a-select>
-            <div style="font-size:11px;color:#8C8C8C;margin-top:2px;">💡 角色可属于多个组织，在「<NuxtLink :to="`/projects/${currentProjectId}/organizations`" style="color:#4D8088;">组织与势力</NuxtLink>」页面管理</div>
+          <a-col :span="8"><a-form-item label="组织">
+            <div v-if="charOrgs.length" style="display:flex;flex-wrap:wrap;gap:4px;">
+              <a-tag v-for="o in charOrgs" :key="o.id" color="blue" size="small">{{ o.name }}<span v-if="o.position"> · {{ o.position }}</span></a-tag>
+            </div>
+            <span v-else style="color:#ccc;font-size:12px;">暂无</span>
+            <div style="font-size:11px;color:#8C8C8C;margin-top:2px;">💡 在「<NuxtLink :to="projectUrl('/organizations')" style="color:#4D8088;">组织与势力</NuxtLink>」页面管理</div>
           </a-form-item></a-col>
           <a-col :span="8"><a-form-item label="性别"><a-input v-model:value="editForm.gender" /></a-form-item></a-col>
           <a-col :span="8"><a-form-item label="年龄"><a-input v-model:value="editForm.age" /></a-form-item></a-col>
@@ -386,7 +416,7 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
               <a-select-option v-for="cr in mainCareers" :key="cr.id" :value="cr.id">{{ cr.name }}</a-select-option>
             </a-select>
           </a-form-item></a-col>
-          <a-col :span="10"><a-form-item label="境界">
+          <a-col :span="10"><a-form-item label="境界" class="dynamic-label">
             <a-select
               v-model:value="editForm.main_career_stage_desc"
               allow-clear
@@ -429,21 +459,21 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
         <a-form-item label="身份"><a-input v-model:value="editForm.identity" /></a-form-item>
         <a-divider orientation="left" plain>外貌与性格</a-divider>
         <a-form-item label="外貌"><a-textarea v-model:value="editForm.appearance" :rows="2" /></a-form-item>
-        <a-form-item label="性格"><a-textarea v-model:value="editForm.personality" :rows="2" /></a-form-item>
+        <a-form-item label="性格" class="dynamic-label"><a-textarea v-model:value="editForm.personality" :rows="2" /></a-form-item>
         <a-divider orientation="left" plain>背景与成长</a-divider>
         <a-form-item label="背景"><a-textarea v-model:value="editForm.background" :rows="2" /></a-form-item>
         <a-form-item label="成长经历"><a-textarea v-model:value="editForm.growth_experience" :rows="2" /></a-form-item>
-        <a-form-item label="能力"><a-textarea v-model:value="editForm.ability" :rows="2" /></a-form-item>
+        <a-form-item label="能力" class="dynamic-label"><a-textarea v-model:value="editForm.ability" :rows="2" /></a-form-item>
         <a-divider orientation="left" plain>动机与目标</a-divider>
         <a-form-item label="故事目标"><a-textarea v-model:value="editForm.story_goal" :rows="2" /></a-form-item>
         <a-form-item label="内在动机"><a-textarea v-model:value="editForm.motivation" :rows="2" /></a-form-item>
         <a-form-item label="弱点"><a-textarea v-model:value="editForm.weakness" :rows="2" /></a-form-item>
         <a-divider orientation="left" plain>人物变化 <span style="font-size:11px;color:#999;font-weight:normal;">（变化类型/轨迹随章节自动累积更新）</span></a-divider>
         <a-row :gutter="12">
-          <a-col :span="12"><a-form-item label="变化类型"><a-select v-model:value="editForm.arc_type" allowClear><a-select-option v-for="a in arcOptions" :key="a" :label="a||'未设定'" :value="a" /></a-select></a-form-item></a-col>
-          <a-col :span="12"><a-form-item label="当前心理"><a-input v-model:value="editForm.mental_state" /></a-form-item></a-col>
+          <a-col :span="12"><a-form-item label="变化类型" class="dynamic-label"><a-select v-model:value="editForm.arc_type" allowClear><a-select-option v-for="a in arcOptions" :key="a" :label="a||'未设定'" :value="a" /></a-select></a-form-item></a-col>
+          <a-col :span="12"><a-form-item label="当前心理" class="dynamic-label"><a-input v-model:value="editForm.mental_state" /></a-form-item></a-col>
         </a-row>
-        <a-form-item label="人物变化轨迹"><a-textarea v-model:value="editForm.character_change" :rows="3" placeholder="随章节自动累积（第N章：xxx），也可手动补充" /></a-form-item>
+        <a-form-item label="人物变化轨迹" class="dynamic-label"><a-textarea v-model:value="editForm.character_change" :rows="3" placeholder="随章节自动累积（第N章：xxx），也可手动补充" /></a-form-item>
         <a-form-item label="说话风格"><a-input v-model:value="editForm.speech_style" /></a-form-item>
       </a-form>
       <div style="text-align:right;margin-top:12px;">
@@ -496,6 +526,13 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
 .desc-label { color:#8C8C8C; min-width:60px; flex-shrink:0; }
 .desc-value { color:#2B2B2B; white-space:pre-wrap; }
 .desc-empty { color:#bbb; font-size:13px; text-align:center; padding:12px; }
+/* 动态字段标记 */
+.dynamic-label :deep(.ant-form-item-label > label)::after {
+  content: ' *';
+  color: #e91e63;
+  font-weight: bold;
+  font-size: 14px;
+}
 /* 变化日志 */
 .change-log-list { max-height: 200px; overflow-y: auto; margin-bottom: 8px; }
 .change-log-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f5f5f5; font-size: 12px; }

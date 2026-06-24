@@ -132,24 +132,29 @@ async function onQuickComplete() {
   }
 }
 
-async function onCreateProject() {
-  const data: any = {
-    title: stepResults.title || quickResult.value?.title || '',
-    genre: stepResults.genre.join('、') || quickResult.value?.genre || '',
-    synopsis: stepResults.description || quickResult.value?.description || '',
-  }
-  // 主角名字暂存，创建时传给角色生成
-  if (stepResults.protagonist_name?.trim()) {
-    if (import.meta.client) sessionStorage.setItem('moyu_protagonist_name', stepResults.protagonist_name.trim())
-  }
-  if (!data.title) { msg.warning('缺少书名，无法创建项目'); return }
-  creating.value = true
-  try {
-    const protagonistName = stepResults.protagonist_name?.trim() || ''
-    // 1. 创建项目
-    genStep.value = '创建项目...'
-    const { createProject: selectAndCreate } = useProject()
-    const created = await selectAndCreate(data.title, data.genre, data.synopsis)
+	async function onCreateProject() {
+	  const data: any = {
+	    title: stepResults.title || quickResult.value?.title || '',
+	    genre: stepResults.genre.join('、') || quickResult.value?.genre || '',
+	    synopsis: stepResults.description || quickResult.value?.description || '',
+	    target_word_count: quickResult.value?.target_word_count || 100000,
+	    narrative_pov: quickResult.value?.narrative_pov || '第三人称',
+	  }
+	  // 主角名字暂存，创建时传给角色生成
+	  if (stepResults.protagonist_name?.trim()) {
+	    if (import.meta.client) sessionStorage.setItem('moyu_protagonist_name', stepResults.protagonist_name.trim())
+	  }
+	  if (!data.title) { msg.warning('缺少书名，无法创建项目'); return }
+	  creating.value = true
+	  try {
+	    const protagonistName = stepResults.protagonist_name?.trim() || ''
+	    // 1. 创建项目
+	    genStep.value = '创建项目...'
+	    const { createProject: selectAndCreate } = useProject()
+	    const created = await selectAndCreate(data.title, data.genre, data.synopsis, {
+	      target_word_count: data.target_word_count,
+	      narrative_pov: data.narrative_pov,
+	    })
     const pid = created.id
 
     // 2. 提交后台初始化任务（世界观+角色+大纲异步生成）

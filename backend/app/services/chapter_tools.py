@@ -240,6 +240,7 @@ async def _query_character(db: AsyncSession, project_id: int, name: str) -> str:
         results.append({
             "name": c.name, "role": c.role or "", "gender": c.gender or "",
             "age": c.age or "", "status": c.status or "alive",
+            "identity": c.identity or "",
             "mental_state": c.mental_state or "",
             "appearance": (c.appearance or "")[:200],
             "personality": (c.personality or "")[:200],
@@ -249,7 +250,13 @@ async def _query_character(db: AsyncSession, project_id: int, name: str) -> str:
             "motivation": (c.motivation or "")[:150],
             "weakness": (c.weakness or "")[:100],
             "occupation": c.occupation or "",
+            "sub_occupations": c.sub_occupations or "",
             "speech_style": c.speech_style or "",
+            "growth_experience": (c.growth_experience or "")[:150],
+            "arc_type": c.arc_type or "",
+            "character_change": (c.character_change or "")[:150],
+            "tags": c.tags or [],
+            "main_career_stage_desc": c.main_career_stage_desc or "",
         })
     return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
 

@@ -26,7 +26,7 @@ async function loadRelations() {
 await loadRelations()
 
 // 视图切换
-const viewMode = ref<'chart' | 'table' | 'change_log'>('chart')
+const viewMode = ref<'chart' | 'table' | 'change_log' | 'manage_types'>('chart')
 
 // 关系类型 → 颜色
 const categoryColor: Record<string, string> = {
@@ -112,6 +112,51 @@ async function onDelete(record: any) {
   }
 }
 
+// ===== 关系类型管理（子视图） =====
+const { data: relationTypes, refresh: refreshTypes } = await api.getRelationTypes()
+const showAddType = ref(false)
+const newTypeName = ref('')
+const newTypeCategory = ref('social')
+const renamingType = ref<string | null>(null)
+const renameTarget = ref('')
+const editCategory = ref('social')
+const typeColors2 = ['#e91e63','#ff5722','#f44336','#2196f3','#6B9CA4','#4caf50','#ff9800','#9c27b0','#00bcd4','#795548']
+const typeColorMap2 = ref<Record<string, string>>({})
+function colorForType(name: string): string {
+  if (!typeColorMap2.value[name]) {
+    const idx = Object.keys(typeColorMap2.value).length % typeColors2.length
+    typeColorMap2.value[name] = typeColors2[idx]
+  }
+  return typeColorMap2.value[name]
+}
+async function onAddType() {
+  const name = newTypeName.value.trim()
+  if (!name) { msg.warning('请输入类型名称'); return }
+  try {
+    await api.createRelation({ from_character_id: 0, to_character_id: 0, relation_type: name, category: newTypeCategory.value, intimacy: 0, status: 'template' })
+    newTypeName.value = ''; newTypeCategory.value = 'social'; showAddType.value = false
+    await refreshTypes(); await refresh()
+    msg.success(`已添加「${name}」`)
+  } catch (e: any) { msg.error('添加失败：' + formatError(e)) }
+}
+function openRenameType(t: any) { renamingType.value = t.name; renameTarget.value = t.name; editCategory.value = t.category || 'social' }
+async function onRenameType() {
+  const oldName = renamingType.value; const newName = renameTarget.value.trim()
+  if (!oldName || !newName) { msg.warning('名称不能为空'); return }
+  try {
+    if (oldName !== newName) {
+      await api.renameRelationType(oldName, newName)
+    }
+    renamingType.value = null; await refreshTypes(); await refresh()
+    msg.success(oldName !== newName ? `已重命名「${oldName}」→「${newName}」` : '已保存')
+  } catch (e: any) { msg.error('更新失败：' + formatError(e)) }
+}
+async function onDeleteTypeItem(t: any) {
+  if (!await msg.confirm(`确定删除「${t.name}」？${t.count || 0} 条关系将被改为"相识"。`)) return
+  try { await api.deleteRelationType(t.name); await refreshTypes(); await refresh(); msg.success(`已删除「${t.name}」`) }
+  catch (e: any) { msg.error('删除失败：' + formatError(e)) }
+}
+
 // ===== 关系变化日志（全量汇总） =====
 const allChangeLogs = ref<any[]>([])
 const loadingLogs = ref(false)
@@ -145,11 +190,10 @@ async function loadAllChangeLogs() {
 
 const logColumns = [
   { title: '章节', dataIndex: 'chapter_number', key: 'chapter_number', width: 80 },
-  { title: '角色 A', dataIndex: 'char_a', key: 'char_a', width: 100 },
-  { title: '角色 B', dataIndex: 'char_b', key: 'char_b', width: 100 },
-  { title: '变更内容', key: 'changes', width: 200 },
+  { title: '角色对', key: 'pair', width: 160 },
+  { title: '变更详情', key: 'changes', width: 240 },
   { title: '摘要', dataIndex: 'summary', key: 'summary' },
-  { title: '操作', key: 'actions', width: 80 },
+  { title: '操作', key: 'actions', width: 60 },
 ]
 
 // 格式化 changed_fields 为可读文本
@@ -317,6 +361,7 @@ async function rebuild() {
         <a-radio-button value="chart">图谱视图</a-radio-button>
         <a-radio-button value="table">表格视图</a-radio-button>
         <a-radio-button value="change_log">📋 变化日志</a-radio-button>
+        <a-radio-button value="manage_types">🏷️ 管理类型</a-radio-button>
       </a-radio-group>
     </div>
     <a-alert v-if="!graph?.nodes?.length" message="暂无角色，请先在「角色设定」中创建角色" type="info" show-icon />
@@ -345,7 +390,7 @@ async function rebuild() {
       </div>
 
       <!-- 表格视图 -->
-      <div v-else>
+      <div v-else-if="viewMode === 'table'">
         <div class="legend" style="margin-bottom: 12px">
           <span v-for="(label, key) in categoryLabel" :key="key" class="legend-item">
             <span class="dot" :style="{ background: categoryColor[key] }"></span>{{ label }}
@@ -378,43 +423,77 @@ async function rebuild() {
       <div v-if="viewMode === 'change_log'">
         <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;">
           <a-button size="small" :loading="loadingLogs" @click="loadAllChangeLogs">🔄 刷新日志</a-button>
-          <span style="font-size:12px;color:#888;">记录每次章节分析后自动检测到的角色关系变化</span>
+          <span style="font-size:12px;color:#888;">章节生成后自动分析记录的关系变化</span>
         </div>
-        <a-table
-          v-if="allChangeLogs.length"
-          :columns="logColumns"
-          :data-source="allChangeLogs"
-          :pagination="{ pageSize: 20 }"
-          size="middle"
-          :loading="loadingLogs"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'chapter_number'">
-              <span style="font-weight:600;color:#4D8088;">第{{ record.chapter_number }}章</span>
-            </template>
-            <template v-else-if="column.key === 'char_a'">
-              {{ record.char_a || record.from_name || '?' }}
-            </template>
-            <template v-else-if="column.key === 'char_b'">
-              {{ record.char_b || record.to_name || '?' }}
-            </template>
-            <template v-else-if="column.key === 'changes'">
-              <span style="font-size:12px;">{{ formatChanges(record.changed_fields) }}</span>
-            </template>
-            <template v-else-if="column.key === 'actions'">
-              <a-button type="link" danger size="small" @click="onDeleteLog(record.id, record.relation_id)">删除</a-button>
-            </template>
-          </template>
-        </a-table>
+        <div v-if="allChangeLogs.length" class="log-timeline">
+          <div v-for="log in allChangeLogs" :key="log.id" class="log-entry">
+            <span class="log-chapter-badge">第{{ log.chapter_number }}章</span>
+            <span class="log-pair">{{ log.char_a || '?' }} ↔ {{ log.char_b || '?' }}</span>
+            <span class="log-change">{{ formatChanges(log.changed_fields) }}</span>
+            <span v-if="log.summary" class="log-note">{{ log.summary }}</span>
+            <a-button type="link" danger size="small" @click="onDeleteLog(log.id, log.relation_id)" style="flex-shrink:0">✕</a-button>
+          </div>
+        </div>
         <a-empty v-else-if="!loadingLogs" description="暂无变化记录。章节生成后自动分析会在此处记录角色关系变化。" />
       </div>
 
-      <!-- 已用关系类型 → 独立页面管理 -->
-      <div v-if="usedRelationTypes.length" style="margin-top:12px;text-align:right;">
-        <NuxtLink :to="projectUrl('/relation-types')" style="font-size:12px;color:#4D8088;">⚙️ 管理关系类型（{{ usedRelationTypes.length }} 种）→</NuxtLink>
+      <!-- 管理类型视图 -->
+      <div v-if="viewMode === 'manage_types'" class="manage-types">
+        <!-- 颜色图例 -->
+        <div style="margin-bottom:12px;padding:8px 12px;background:#fafafa;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <span style="font-size:12px;color:#888;">分类颜色：</span>
+          <span v-for="(label, key) in categoryLabel" :key="key" style="display:flex;align-items:center;gap:4px;font-size:12px;">
+            <span class="legend-dot" :style="{ background: categoryColor[key] }"></span>{{ label }}
+          </span>
+        </div>
+        <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;">
+          <a-button type="primary" size="small" @click="showAddType = true">＋ 添加类型</a-button>
+          <span style="font-size:12px;color:#888;">编辑/删除类型，重命名会批量更新全部关系</span>
+        </div>
+        <div v-if="(relationTypes || []).filter((x:any) => x.name !== 'template').length" class="types-grid2">
+          <a-card v-for="t in (relationTypes || []).filter((x:any) => x.name !== 'template')" :key="t.name" size="small" hoverable class="type-card2">
+            <template #title>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="type-dot2" :style="{ background: categoryColor[t.category] || colorForType(t.name) }"></span>
+                <template v-if="renamingType === t.name">
+                  <a-input v-model:value="renameTarget" size="small" style="width:110px" @press-enter="onRenameType" />
+                  <a-select v-model:value="editCategory" size="small" style="width:80px">
+                    <a-select-option v-for="(label, key) in categoryLabel" :key="key" :value="key">{{ label }}</a-select-option>
+                  </a-select>
+                  <a-button size="small" type="primary" @click="onRenameType">确定</a-button>
+                  <a-button size="small" @click="renamingType = null">取消</a-button>
+                </template>
+                <template v-else>
+                  <span class="type-name2">{{ t.name }}</span>
+                  <a-tag v-if="t.category" size="small" :color="{family:'pink',romantic:'orange',hostile:'red',professional:'blue',social:'cyan'}[t.category]||'default'">{{ {family:'亲情',romantic:'情感',hostile:'敌对',professional:'职业',social:'社交'}[t.category] || t.category }}</a-tag>
+                </template>
+              </div>
+            </template>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="color:#888;font-size:12px;">{{ t.count }} 条关系</span>
+            </div>
+            <template #actions>
+              <a-button size="small" @click="openRenameType(t)">✏️ 编辑</a-button>
+              <a-button size="small" danger @click="onDeleteTypeItem(t)">🗑 删除</a-button>
+            </template>
+          </a-card>
+        </div>
+        <a-empty v-else description="暂无关系类型" />
       </div>
     </template>
   </div>
+
+  <!-- 添加类型弹窗 -->
+  <a-modal v-model:open="showAddType" title="添加关系类型" width="400px" @ok="onAddType">
+    <a-form-item label="类型名称">
+      <a-input v-model:value="newTypeName" placeholder="如：难友、青梅竹马" @press-enter="onAddType" />
+    </a-form-item>
+    <a-form-item label="所属分类">
+      <a-select v-model:value="newTypeCategory">
+        <a-select-option v-for="(label, key) in categoryLabel" :key="key" :value="key">{{ label }}</a-select-option>
+      </a-select>
+    </a-form-item>
+  </a-modal>
 
   <!-- 添加/编辑关系弹窗 -->
   <a-modal v-model:open="showForm" :title="editing ? '编辑关系' : '添加关系'" width="520px">
@@ -468,7 +547,22 @@ async function rebuild() {
 
 <style scoped>
 .chart-wrap { display: flex; flex-direction: column; gap: 12px; }
-.view-tabs { margin-bottom: 14px; }
+.view-tabs { margin-bottom: 14px; display:flex; align-items:center; }
+/* 变化日志时间线 */
+.log-timeline { max-height: 500px; overflow-y: auto; }
+.log-entry { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid #f5f5f5; font-size:13px; }
+.log-entry:last-child { border-bottom:none; }
+.log-chapter-badge { background:#EAF0F1; color:#4D8088; font-weight:600; padding:2px 8px; border-radius:4px; font-size:12px; white-space:nowrap; }
+.log-pair { font-weight:500; white-space:nowrap; }
+.log-change { color:#333; font-size:12px; }
+.log-note { color:#888; font-size:11px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 管理类型 */
+.types-grid2 { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
+.type-card2 { border-radius:10px; }
+.type-dot2 { width:12px; height:12px; border-radius:50%; flex-shrink:0; }
+.type-name2 { font-size:15px; font-weight:600; }
+.manage-types { }
+.legend-dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
 .flow-card { background: #fafafa; border: 1px solid #e8e8e8; border-radius: 8px; height: 540px; overflow: hidden; }
 /* Vue Flow 根元素需撑满容器高度才可见 */
 .flow-card :deep(.vue-flow) { width: 100%; height: 100%; }

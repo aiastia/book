@@ -183,6 +183,30 @@ async def update_character(project_id: int, character_id: int, req: CharacterCre
     return {"ok": True}
 
 
+@router.get("/{project_id}/characters/{character_id}/organizations")
+async def get_character_organizations(project_id: int, character_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """获取角色所属的所有组织（从 OrganizationMember 表）"""
+    await get_user_project(db, project_id, user)
+    from app.models.organization_member import OrganizationMember
+    from app.models.organization import Organization
+    members = (await db.execute(
+        select(OrganizationMember).where(
+            OrganizationMember.project_id == project_id,
+            OrganizationMember.character_id == character_id,
+        )
+    )).scalars().all()
+    org_ids = [m.organization_id for m in members]
+    orgs = []
+    if org_ids:
+        org_rows = (await db.execute(select(Organization).where(Organization.id.in_(org_ids)))).scalars().all()
+        org_map = {o.id: o for o in org_rows}
+        for m in members:
+            o = org_map.get(m.organization_id)
+            if o:
+                orgs.append({"id": o.id, "name": o.name, "position": m.position or ""})
+    return orgs
+
+
 @router.delete("/{project_id}/characters/{character_id}")
 async def delete_character(project_id: int, character_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     c = (await db.execute(select(Character).where(Character.id == character_id, Character.project_id == project_id))).scalar_one_or_none()

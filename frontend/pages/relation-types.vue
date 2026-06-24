@@ -112,6 +112,7 @@ async function onDeleteType(t: any) {
         </template>
         <div class="type-body">
           <span class="type-count">{{ t.count }} 条关系</span>
+          <a-tag v-if="t.category" size="small" :color="{family:'pink',romantic:'orange',hostile:'red',professional:'blue',social:'cyan'}[t.category]||'default'">{{ {family:'亲情',romantic:'情感',hostile:'敌对',professional:'职业',social:'社交'}[t.category] || t.category }}</a-tag>
         </div>
         <template #actions>
           <a-button size="small" @click="openRename(t)">✏️ 重命名</a-button>

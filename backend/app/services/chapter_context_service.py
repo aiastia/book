@@ -686,7 +686,6 @@ class ChapterContextService:
         for c in core_chars:
             snapshot = await get_character_state_at_chapter(self.db, self.project_id, c.id, chapter.chapter_number)
             s = snapshot if snapshot else {}
-            # 以下字段优先取快照值（如果快照中有），否则取当前 Character 值
             _st = s.get('status', c.status)
             _ms = s.get('mental_state', c.mental_state)
             _ap = s.get('appearance', c.appearance)
@@ -696,7 +695,18 @@ class ChapterContextService:
             _oc = s.get('occupation', c.occupation)
             _od = s.get('occupation_detail', c.occupation_detail)
             _oi = s.get('organization_id', c.organization_id)
+            _id = s.get('identity', c.identity)
+            _wk = s.get('weakness', c.weakness)
+            _sg = s.get('story_goal', c.story_goal)
+            _mo = s.get('motivation', c.motivation)
+            _ge = s.get('growth_experience', c.growth_experience)
+            _at = s.get('arc_type', c.arc_type)
+            _cc = s.get('character_change', c.character_change)
+            _so = s.get('sub_occupations', c.sub_occupations)
+            _cs = s.get('main_career_stage_desc', c.main_career_stage_desc)
             parts = [f"【{c.name}】{c.role}，{c.gender}，{c.age}岁"]
+            if _id:
+                parts.append(f"  身份：{str(_id)[:100]}")
             if _st and str(_st) != "alive":
                 parts.append(f"  状态：{_st}")
             if _ms:
@@ -709,8 +719,24 @@ class ChapterContextService:
                 parts.append(f"  背景：{str(_bg)[:120]}")
             if _ab:
                 parts.append(f"  能力：{str(_ab)[:120]}")
+            if _wk:
+                parts.append(f"  弱点：{str(_wk)[:100]}")
+            if _sg:
+                parts.append(f"  目标：{str(_sg)[:100]}")
+            if _mo:
+                parts.append(f"  动机：{str(_mo)[:100]}")
+            if _ge:
+                parts.append(f"  成长经历：{str(_ge)[:120]}")
+            if _at:
+                parts.append(f"  人物弧线：{_at}")
+            if _cc:
+                parts.append(f"  变化轨迹：{str(_cc)[:120]}")
             if _oc:
                 parts.append(f"  职业：{str(_oc)[:80]}")
+            if _so:
+                parts.append(f"  副职业：{str(_so)[:100]}")
+            if _cs:
+                parts.append(f"  境界：{str(_cs)[:60]}")
             if _od:
                 parts.append(f"  职业阶段：{str(_od)[:200]}")
             # 组织归属

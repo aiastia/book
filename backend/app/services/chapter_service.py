@@ -259,7 +259,13 @@ class ChapterService:
                         chars = await self._list_chapter_characters(chapter)
                         parts.append("<characters>")
                         for c in chars:
-                            parts.append(f"  [{c.name}] 定位:{c.role} 性格:{c.personality[:120]} 背景:{c.background[:120]} 能力:{c.ability[:100]} 说话风格:{c.speech_style[:80]}")
+                            parts.append(
+                                f"  [{c.name}] 定位:{c.role} 身份:{c.identity or ''} "
+                                f"性格:{c.personality[:120]} 背景:{c.background[:120]} "
+                                f"能力:{c.ability[:100]} 弱点:{c.weakness[:80]} "
+                                f"目标:{c.story_goal[:80]} 说话风格:{c.speech_style[:80]} "
+                                f"弧线:{c.arc_type or ''} 境界:{c.main_career_stage_desc or ''}"
+                            )
                         parts.append("</characters>")
                     else:
                         info = await self._query_character(name)
@@ -491,7 +497,9 @@ class ChapterService:
                     use_legacy = True
 
             if use_legacy:
-                # 回退：全量构建上下文 + tool calling（旧流程）
+                # 回退：全量构建上下文 + 适配新 Writer prompt
+                # 新 prompt（chapter_generation_one_to_one_next 等）使用 {chapter_data} 单一变量，
+                # 需要将 build_chapter_context 的分散字段打包为一个格式化字符串。
                 context = await self.context_service.build_chapter_context(chapter, project)
                 if overrides:
                     if overrides.get("narrative_pov"):
@@ -500,13 +508,14 @@ class ChapterService:
                     if overrides.get("target_word_count"):
                         context["target_word_count"] = overrides["target_word_count"]
                         context["word_count_requirement"] = f"目标{overrides['target_word_count']}字"
-                context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。"
-                from app.services.chapter_tools import get_chapter_tools, make_tool_executor
-                tools = get_chapter_tools()
-                tool_executor = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
+
+                # 将完整上下文打包为 chapter_data（适配新 prompt 的单一变量格式）
+                chapter_data = self._format_legacy_context_as_data(context)
+                context["chapter_data"] = chapter_data
+                context["user_prompt"] = ""
+
                 result = await self.skill_engine.execute_skill(
                     skill_name, ai_client, context,
-                    tools=tools, tool_executor=tool_executor,
                 )
             else:
                 # ===== Phase 3: Writer（新流程，无工具调用） =====

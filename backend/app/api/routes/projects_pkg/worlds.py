@@ -402,6 +402,90 @@ async def generate_organization(project_id: int, req: OrgGenerateRequest, db: As
         "location": org.location, "motto": org.motto}}
 
 
+class OrgBatchGenerateRequest(BaseModel):
+    count: int = 1
+    user_input: str = ""
+
+
+@router.post("/{project_id}/organizations/generate-async")
+async def generate_organization_async(project_id: int, req: OrgBatchGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步批量生成组织：立即返回 task_id，后台执行。"""
+    await get_user_project(db, project_id, user)
+    
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        try:
+            async with async_session() as task_db:
+                count = payload.get("count", 1)
+                user_input = payload.get("user_input", "")
+                user_id = payload["user_id"]
+                pid = payload["project_id"]
+                
+                for i in range(count):
+                    await tracker.update(
+                        stage="generating",
+                        message=f"正在生成第 {i+1}/{count} 个组织…",
+                        progress=int((i / max(count, 1)) * 100),
+                    )
+                    proj = await task_db.get(Project, pid)
+                    orgs = (await task_db.execute(
+                        select(Organization).where(Organization.project_id == pid)
+                    )).scalars().all()
+                    chars = (await task_db.execute(
+                        select(Character).where(Character.project_id == pid)
+                    )).scalars().all()
+                    worlds_data = (await task_db.execute(
+                        select(WorldSetting).where(WorldSetting.project_id == pid)
+                    )).scalars().all()
+                    existing_orgs = "\n".join([f"- {o.name}({o.org_type}): {o.description[:150]}" for o in orgs]) or "暂无"
+                    characters_info = "\n".join([f"- {c.name}({c.role})" for c in chars]) or "暂无"
+                    world_info = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds_data]) or "暂无"
+
+                    engine, ai_client = await make_engine_and_client(task_db, user_id)
+                    result = await engine.execute_skill("single_organization_generation", ai_client, {
+                        "title": proj.title, "genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
+                        "existing_organizations": existing_orgs, "characters_info": characters_info, "world_info": world_info,
+                        "user_prompt": f"请为这部{proj.genre or '网文'}生成一个组织/势力。{user_input}",
+                    })
+                    if result.get("error"):
+                        await tracker.fail(f"第{i+1}个失败: {result['error']}")
+                        return
+                    org_data = result.get("json") or {}
+                    if not isinstance(org_data, dict):
+                        continue
+                    pv = org_data.get("power_value", org_data.get("power_level", 50))
+                    try: pv = int(pv)
+                    except: pv = 50
+                    org = Organization(
+                        project_id=pid,
+                        name=str(org_data.get("name", ""))[:100],
+                        org_type=str(org_data.get("org_type", org_data.get("organization_type", org_data.get("type", ""))))[:50],
+                        description=str(org_data.get("description", org_data.get("background", "")))[:2000],
+                        power_value=pv,
+                        location=str(org_data.get("location", ""))[:200],
+                        motto=str(org_data.get("motto", org_data.get("organization_purpose", "")))[:200],
+                        color=str(org_data.get("color", ""))[:20],
+                    )
+                    task_db.add(org)
+                    await task_db.commit()
+                await tracker.complete(message=f"生成完成（{count} 个组织）")
+        except Exception as e:
+            try: await tracker.fail(str(e))
+            except: pass
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="organizations",
+        title=f"AI 生成组织（{req.count}个）",
+        payload={"count": req.count, "user_input": req.user_input, "project_id": project_id, "user_id": user.id},
+        runner=_run,
+    )
+    return {"task_id": task_id}
+
+
 @router.post("/{project_id}/organizations/auto-analysis")
 async def auto_analyze_organizations(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """自动组织分析：预测是否需要新组织"""

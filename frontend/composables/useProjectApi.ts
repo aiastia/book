@@ -325,10 +325,16 @@ export function useProjectApi() {
   function deleteCharacterChangeLog(characterId: number, logId: number) {
     return apiDelete(`/api/projects/${pid()}/characters/${characterId}/change-logs/${logId}`)
   }
+  function getCharacterOrganizations(characterId: number) {
+    return useApi<any[]>(`/api/projects/${pid()}/characters/${characterId}/organizations`, { key: `char-orgs-${characterId}` })
+  }
 
   // ---- 组织 AI 生成 ----
   function generateOrganization(body: { user_input?: string }) {
     return apiPost<any>(`/api/projects/${pid()}/organizations/generate`, body, { timeout: 60000 })
+  }
+  function generateOrganizationAsync(body: { count?: number; user_input?: string }) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/organizations/generate-async`, body, { timeout: 10000 })
   }
 
   function autoAnalyzeOrganizations() {
@@ -750,6 +756,7 @@ export function useProjectApi() {
     getCharacterChangeLogs,
     createCharacterChangeLog,
     deleteCharacterChangeLog,
+    getCharacterOrganizations,
     // 世界观
     getWorlds,
     createWorld,
@@ -760,6 +767,7 @@ export function useProjectApi() {
     deleteOrganization,
     updateOrganization,
     generateOrganization,
+    generateOrganizationAsync,
     autoAnalyzeOrganizations,
     autoGenerateOrganization,
     generateCareerSystem,

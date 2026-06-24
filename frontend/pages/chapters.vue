@@ -371,6 +371,26 @@ async function createFromOutline(o: any) {
   }
 }
 
+const batchCreating = ref(false)
+async function createAllFromOutlines() {
+  const uncreated = (outlines.value || []).filter((o: any) => !createdChapterNos.value.has(o.chapter_number))
+  if (!uncreated.length) { msg.info('没有需要创建的章节'); return }
+  batchCreating.value = true
+  let created = 0
+  try {
+    for (const o of uncreated) {
+      await api.createChapter({ chapter_number: o.chapter_number, title: o.title, outline_id: o.id })
+      created++
+    }
+    await refreshList()
+    msg.success(`已创建 ${created} 个章节`)
+  } catch (e: any) {
+    msg.error(`创建失败（已完成 ${created}/${uncreated.length}）：` + formatError(e))
+  } finally {
+    batchCreating.value = false
+  }
+}
+
 // ===== 手动创建（one-to-many）=====
 const manualCreateOpen = ref(false)
 const manualCreateNo = ref(1)
@@ -743,6 +763,9 @@ async function onPlanSaved() {
           第{{ o.chapter_number }}章 {{ o.title }}
         </a-button>
       </div>
+      <a-button type="primary" size="small" style="margin-top:8px;" :loading="batchCreating" @click="createAllFromOutlines">
+        📦 一键全部创建
+      </a-button>
     </a-card>
 
     <!-- ===== 章节列表 ===== -->

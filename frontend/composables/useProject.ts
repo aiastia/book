@@ -96,12 +96,16 @@ export function useProject() {
     }
   }
 
-  /** 新建项目并设为当前项目 */
-  async function createProject(title: string, genre: string = '', synopsis: string = '') {
-    const data = await apiPost<{ id: number; title: string }>('/api/projects', { title, genre, synopsis })
-    selectProject(data.id, { id: data.id, title: data.title, genre })
-    return data
-  }
+	/** 新建项目并设为当前项目 */
+	async function createProject(title: string, genre: string = '', synopsis: string = '', options?: { target_word_count?: number; narrative_pov?: string; outline_mode?: string }) {
+	    const body: any = { title, genre, synopsis }
+	    if (options?.target_word_count) body.target_word_count = options.target_word_count
+	    if (options?.narrative_pov) body.narrative_pov = options.narrative_pov
+	    if (options?.outline_mode) body.outline_mode = options.outline_mode
+	    const data = await apiPost<{ id: number; title: string }>('/api/projects', body)
+	    selectProject(data.id, { id: data.id, title: data.title, genre })
+	    return data
+	}
 
   /** 生成带项目 ID 的页面路径（用于 NuxtLink / navigateTo） */
   function projectUrl(path: string) {

@@ -3,6 +3,7 @@
 // 左侧组织列表（树形）+ 右侧选中组织详情 + 内嵌成员表格
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
+import { useBackgroundTasks } from '~/composables/useBackgroundTasks'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: '组织与势力 — 墨语' })
 const { currentProjectId } = useProject()
@@ -110,10 +111,11 @@ async function onGenMembers() {
 async function onGenerate() {
   generating.value = true
   try {
-    for (let i = 0; i < genCount.value; i++) {
-      await api.generateOrganization({ user_input: genReq.value || `第${i + 1}个组织` })
-    }
-    await refresh(); showGen.value = false; msg.success(`生成 ${genCount.value} 个组织`)
+    const { task_id } = await api.generateOrganizationAsync({ count: genCount.value, user_input: genReq.value })
+    const { trackTask } = useBackgroundTasks()
+    trackTask(task_id, 'organizations', `生成 ${genCount.value} 个组织`)
+    showGen.value = false
+    msg.success('生成任务已提交，可在右下角查看进度')
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { generating.value = false }
 }
