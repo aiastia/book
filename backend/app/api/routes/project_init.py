@@ -46,18 +46,19 @@ INIT_STEPS = [
 STEP_ORDER = [s[0] for s in INIT_STEPS]
 
 
-async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=3):
+async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=3, tools=None, tool_executor=None):
     """带重试的 skill 调用。
     
     每次调用内部含 execute_skill 的 JSON 重试（3次），
     这里额外重试 max_retries 次，处理连接级错误。
+    支持透传 tools 和 tool_executor 给 execute_skill。
     """
     import logging
     logger = logging.getLogger(__name__)
     last_err = None
     for attempt in range(max_retries):
         try:
-            result = await engine.execute_skill(skill_name, ai_client, context)
+            result = await engine.execute_skill(skill_name, ai_client, context, tools=tools, tool_executor=tool_executor)
             if not result.get("error"):
                 return result, None
             last_err = result.get("error")
@@ -73,12 +74,27 @@ async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤
     return None, f"{label}失败（已重试{max_retries}次）: {last_err}"
 
 
+def _build_world_info(proj) -> str:
+    """构建完整的世界观上下文字符串（四个维度）。"""
+    parts = []
+    if proj.world_time_period:
+        parts.append(f"时间背景：{proj.world_time_period}")
+    if proj.world_location:
+        parts.append(f"地理位置：{proj.world_location}")
+    if proj.world_atmosphere:
+        parts.append(f"氛围基调：{proj.world_atmosphere}")
+    if proj.world_rules:
+        parts.append(f"世界规则：{proj.world_rules}")
+    return "\n".join(parts) if parts else "暂无世界观信息"
+
+
 from app.core.database import get_db, async_session
 from app.core.auth import get_current_user
 from app.models.project import Project
 from app.models.project_init_task import ProjectInitTask
 from app.skills.engine import SkillEngine
 from app.core.ai_client import AIClient
+from app.services.chapter_tools import get_chapter_tools, make_tool_executor
 
 router = APIRouter(prefix="/api/projects", tags=["项目初始化"])
 
@@ -138,7 +154,8 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
     # 详细世界设定
     detail_result, derr = await _safe_skill_call(engine, ai_client, "world_detail_generate", {
         "genre": proj.genre or "网文", "title": proj.title,
-        "world_info": f"时间={proj.world_time_period}\n地点={proj.world_location}\n规则={proj.world_rules}",
+        "synopsis": proj.synopsis or "暂无",
+        "world_info": _build_world_info(proj),
     }, "详细设定", max_retries=2)
     if not derr and detail_result:
         items = detail_result.get("json") or []
@@ -164,8 +181,8 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
 
     career_result, cerr = await _safe_skill_call(engine, ai_client, "career_system_generation", {
         "title": proj.title, "genre": proj.genre or "网文",
-        "world_info": f"规则：{proj.world_rules or ''}",
-        "user_prompt": f"请为《{proj.title}》生成职业体系：精确 5 个主职业（career_type=\"main\") + 8 个副职业（career_type=\"sub\")。主职业需有完整的进阶境界体系（stages 数组，每个阶段含 name/level/requirement/ability/power_level）。",
+        "world_info": _build_world_info(proj),
+        "user_prompt": f"请为《{proj.title}》设计职业体系。精确生成 5 个主职业（career_type=\"main\"）+ 8 个副职业（career_type=\"sub\"）。主职业需有完整的进阶境界体系（stages 数组，每个阶段含 name/level/requirement/ability/power_level）。副职业有 3-5 个进阶阶段。",
     }, "职业")
     if cerr:
         return cerr
@@ -231,18 +248,12 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         "genre": proj.genre or "网文", "title": proj.title,
         "synopsis": proj.synopsis or "暂无简介", "count": "5",
         "existing_characters": "暂无",
-        "world_info": f"{proj.world_location or ''} {proj.world_rules or ''}",
-        "user_prompt": f"""请生成5个角色（必须包含1个主角、1个反派、其余配角）。
-
-【重要：职业必须从以下已有职业体系中选择主职业和副职业，不要编造】
-已有职业体系：{career_info}
-- 每个角色的 occupation（主职业）必须从上述职业中选一个
-- sub_occupations（副职业数组）也必须从上述职业中选择
-
-【重要：组织必须从以下已有组织中选择】
-已有组织：{org_info}
-- 角色如果属于某个组织，必须在 organization_memberships 中填写准确的已有组织名
-- 无所属组织的角色 organization_memberships 返回空数组 []""",
+        "world_info": _build_world_info(proj),
+        "user_prompt": (
+            f"请生成5个角色（必须包含1个主角、1个反派、其余配角）。\n"
+            f"已有职业体系：{career_info}\n"
+            f"已有组织：{org_info}"
+        ),
     }, "角色")
     if cerr:
         return cerr
@@ -462,7 +473,10 @@ async def _link_org_memberships(db, pid, raw_chars):
 
 
 async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
-    """步骤：为角色自动分配主职业（初始化时自动执行）。"""
+    """步骤：为角色自动分配主职业（初始化时自动执行）。
+
+    改进：传递完整的角色/职业/世界观上下文，让 AI 有足够信息做出精准匹配。
+    """
     from app.models.character import Character
     from app.models.career import Career
     from app.models.character_career import CharacterCareer
@@ -472,13 +486,26 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
 
     careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
     if not careers:
-        # 没有职业体系，跳过
         task.assign_careers_done = 1
         return None
 
-    career_list = "\n".join(f"- ID:{c.id} {c.name}（{c.career_type or 'main'}，{c.category or '通用'}）" for c in careers)
+    # 构建详细职业列表（含描述、境界、能力）
+    career_parts = []
+    for c in careers:
+        stage_names = []
+        if c.stages and isinstance(c.stages, list):
+            stage_names = [s.get("name", "") for s in c.stages[:5] if isinstance(s, dict)]
+        stage_preview = " → ".join(stage_names) if stage_names else "无境界数据"
+        abilities = "、".join(c.abilities[:3]) if isinstance(c.abilities, list) and c.abilities else "无"
+        career_parts.append(
+            f"- ID:{c.id} {c.name}（{c.career_type or 'main'}，{c.category or '通用'}）\n"
+            f"  描述：{(c.description or '')[:200]}\n"
+            f"  境界：{stage_preview}\n"
+            f"  核心能力：{abilities}"
+        )
+    career_list = "\n".join(career_parts)
 
-    # 已有主职业的角色 ID
+    # 已有主职业的角色 ID（已通过 _step_characters 的 occupation 匹配过的）
     assigned_ids = [cc.character_id for cc in (await db.execute(
         select(CharacterCareer).where(CharacterCareer.project_id == pid, CharacterCareer.career_type == "main")
     )).scalars().all()]
@@ -494,34 +521,65 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
         task.assign_careers_done = 1
         return None
 
-    char_list = "\n".join(
-        f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.occupation or '无职业'}，性格：{(c.personality or '未知')[:80]}）"
-        for c in chars
-    )
+    # 构建详细角色列表（含身份/背景/目标/动机/能力）
+    char_parts = []
+    for c in chars:
+        info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
+        if c.identity:
+            info.append(f"  身份：{c.identity[:100]}")
+        if c.occupation:
+            info.append(f"  当前职业标注：{c.occupation[:80]}")
+        if c.personality:
+            info.append(f"  性格：{c.personality[:150]}")
+        if c.background:
+            info.append(f"  背景：{c.background[:150]}")
+        if c.ability:
+            info.append(f"  能力：{c.ability[:150]}")
+        if c.story_goal:
+            info.append(f"  目标：{c.story_goal[:100]}")
+        if c.motivation:
+            info.append(f"  动机：{c.motivation[:100]}")
+        if c.growth_experience:
+            info.append(f"  成长经历：{c.growth_experience[:120]}")
+        char_parts.append("\n".join(info))
+    char_list = "\n\n".join(char_parts)
 
-    prompt = f"""为以下角色从职业体系中选择最匹配的主职业。
+    world_info = _build_world_info(proj)
 
-题材：{proj.genre or '网文'}
-职业体系：
+    system_prompt = f"""你是资深网文角色设计顾问。为小说《{proj.title}》（题材：{proj.genre or '网文'}）中的角色匹配最合适的主职业。
+
+【小说简介】
+{proj.synopsis or '暂无'}
+
+【世界观】
+{world_info}
+
+【匹配原则】
+1. 职业要与角色的性格、背景、成长经历、能力方向相匹配
+2. 主角职业应有成长空间和叙事潜力（不要选过于边缘的职业）
+3. 反派的职业应与其野心或对主角的压制关系吻合
+4. 配角的职业可以偏向辅助/功能性，但应符合其人设
+5. 境界起点要合理：主角略高（但不能满级），反派与主角相当或略高，配角按剧情位置分配
+
+返回纯JSON数组：[{{"character_id":0,"career_id":0,"current_stage":1,"started_at":"开始时间描述"}}]"""
+
+    user_prompt = f"""请为以下角色匹配最合适的职业：
+
+【可用职业体系】
 {career_list}
 
-待分配角色：
-{char_list}
-
-要求：
-1. 每个角色分配1个最匹配的主职业(career_type="main")
-2. 返回：character_id(角色ID)、career_id(职业ID)、current_stage(初始阶段1-3)、started_at(开始时间描述)
-3. 职业要与角色性格、背景、能力匹配
-
-返回纯JSON数组：[{{"character_id":0,"career_id":0,"current_stage":1,"started_at":""}}]"""
+【待分配角色】
+{char_list}"""
 
     result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
         temperature=0.7,
         max_tokens=4096,
     )
     if result.get("error"):
-        # 分配失败不阻断初始化流程
         task.assign_careers_done = 1
         return None
 
@@ -630,17 +688,32 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
     name_to_id = {c.name: c.id for c in chars}
     id_set = {c.id for c in chars}
 
-    # 给 AI 更明确的上下文：带 ID，要求返回 from_id/to_id
-    char_list = "、".join(f"{c.name}(ID:{c.id}，{c.role or '角色'})" for c in chars[:12])
+    # 构建详细角色信息（让 AI 基于性格/背景/目标生成有深度的关系）
+    char_parts = []
+    for c in chars[:12]:
+        info = [f"{c.name}（ID:{c.id}，{c.role or '角色'}，{c.gender or ''}，{c.age or '?'}岁）"]
+        if c.identity:
+            info.append(f"  身份：{c.identity[:100]}")
+        if c.personality:
+            info.append(f"  性格：{c.personality[:120]}")
+        if c.background:
+            info.append(f"  背景：{c.background[:120]}")
+        if c.story_goal:
+            info.append(f"  目标：{c.story_goal[:80]}")
+        if c.motivation:
+            info.append(f"  动机：{c.motivation[:80]}")
+        if c.weakness:
+            info.append(f"  弱点：{c.weakness[:60]}")
+        if c.occupation:
+            info.append(f"  职业：{c.occupation[:60]}")
+        info.append("")
+        char_parts.append("\n".join(info))
+    char_list = "\n".join(char_parts)
+
     rel_result, rerr = await _safe_skill_call(engine, ai_client, "character_relations_generate", {
         "title": proj.title,
         "characters_info": char_list,
-        "user_prompt": (
-            f"请分析《{proj.title}》中以下角色之间的关系，生成 5-10 条主要关系：\n{char_list}\n\n"
-            "要求：每条关系用 from_id 和 to_id（上面给出的真实ID）指明两端，"
-            "并给出 relation_type(如师徒/恋人/宿敌/父子)、category(family/romantic/hostile/professional/social)、"
-            "intimacy(-100到100整数)。只返回纯 JSON 数组。"
-        ),
+        "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
     }, "关系图谱")
     if rerr:
         return rerr
@@ -693,8 +766,8 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
         task.status_message = f"角色关系：AI返回{len(rels)}条但均无法匹配到角色，请到「关系图谱」页手动重建"
     else:
         task.status_message = f"已生成 {added_rels} 条角色关系"
-	    task.relations_done = 1
-	    return None
+        task.relations_done = 1
+        return None
 
 
 async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
@@ -758,31 +831,55 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
 
     # 用 AI 为未分配角色匹配合适组织
     org_list = "\n".join(
-        f"- ID:{o.id} {o.name}（{o.org_type or '势力'}，势力值:{o.power_value or 50}，{o.description or ''}）"
+        f"- ID:{o.id} {o.name}（{o.org_type or '势力'}，势力值:{o.power_value or 50}）\n"
+        f"  描述：{(o.description or '')[:200]}\n"
+        f"  所在地：{o.location or '未知'}｜格言：{o.motto or '无'}"
         for o in orgs[:10]
     )
-    char_list = "\n".join(
-        f"- ID:{c.id} {c.name}（{c.role or '角色'}，{(c.personality or '')[:80]}，{(c.background or '')[:100]}，职业:{c.occupation or '无'}）"
-        for c in unassigned[:20]
-    )
+    char_parts = []
+    for c in unassigned[:20]:
+        info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
+        if c.identity:
+            info.append(f"  身份：{c.identity[:100]}")
+        if c.occupation:
+            info.append(f"  职业：{c.occupation[:80]}")
+        if c.personality:
+            info.append(f"  性格：{c.personality[:150]}")
+        if c.background:
+            info.append(f"  背景：{c.background[:150]}")
+        if c.story_goal:
+            info.append(f"  目标：{c.story_goal[:100]}")
+        char_parts.append("\n".join(info))
+    char_list = "\n\n".join(char_parts)
 
-    prompt = f"""请将以下角色分配到最合适的组织中。
+    world_info = _build_world_info(proj)
 
-已有组织：
-{org_list}
+    system_prompt = f"""你是网文势力策划师。为小说《{proj.title}》（题材：{proj.genre or '网文'}）中的角色分配到最合适的组织。
 
-待分配角色：
-{char_list}
+【世界观】
+{world_info}
 
-要求：
-1. 每个角色分配1个最匹配的组织（根据角色性格、背景、职业匹配组织类型和定位）
-2. 返回 role 字段（角色在组织中的职位/身份，如"核心成员""外门弟子""长老""佣兵"等）
-3. 无所属组织的角色 organization_id 设为 null，role 设为空字符串
+【分配原则】
+1. 根据角色性格、背景、职业、目标匹配组织类型和定位
+2. 主角通常应有明确的组织归属（正派或中立组织），反派可归属敌对组织
+3. 组织的格言/宗旨应与角色的价值观有共鸣或冲突空间
+4. 无所属组织的角色（如自由人/独行侠/过客），organization_id 设为 null
 
 返回纯JSON数组：[{{"character_id":0,"organization_id":0,"role":"核心成员"}}]"""
 
+    user_prompt = f"""请将以下角色分配到最合适的组织中：
+
+【可用组织】
+{org_list}
+
+【待分配角色】
+{char_list}"""
+
     result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
         temperature=0.7,
         max_tokens=4096,
     )
@@ -852,7 +949,8 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
 
     org_result, oerr = await _safe_skill_call(engine, ai_client, "organization_generate", {
         "title": proj.title, "genre": proj.genre or "网文",
-        "world_info": f"{proj.world_location or ''} {proj.world_rules or ''}",
+        "synopsis": proj.synopsis or "暂无简介",
+        "world_info": _build_world_info(proj),
         "user_prompt": f"请为《{proj.title}》生成3-5个组织势力。",
     }, "组织")
     if oerr:
@@ -957,7 +1055,13 @@ async def _step_items(db, task, pid, proj, engine, ai_client):
 
 
 async def _step_outline(db, task, pid, proj, engine, ai_client):
-    """步骤8：大纲生成（默认3章，用户可选）"""
+    """步骤8：大纲生成（默认3章，用户可选）。
+
+    传递完整的上下文变量，兼容用户自定义模板中可能使用的各种变量名：
+    - 标准变量：world_info, characters_info, synopsis, chapter_count, user_prompt
+    - 用户自定义变量：time_period, location, atmosphere, rules, theme,
+      narrative_perspective, title, genre, mcp_references, requirements
+    """
     from app.models.outline import Outline
     from app.models.chapter import Chapter
     from app.models.world import WorldSetting
@@ -969,14 +1073,61 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
     chapter_count = str(task.chapter_count or 3)
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == pid))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
-    world_info = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds]) or f"{proj.world_location} {proj.world_rules}"
-    chars_info = "\n".join([f"- {c.name}({c.role}): {c.personality[:100]}" for c in chars]) or "暂无"
+
+    # 世界信息：完整四维度 + 最近10条详细设定
+    world_info_complete = _build_world_info(proj)
+    if worlds:
+        detail_text = "\n".join([f"- {w.name}({w.category or '其他'})：{w.content[:150]}" for w in worlds[:10]])
+        world_info_complete += f"\n\n【详细设定】\n{detail_text}"
+
+    # 角色信息：分层策略（核心角色全量、配角中等、远处仅名字）
+    char_parts = []
+    for c in chars[:15]:
+        is_core = c.role in ("主角", "反派")
+        if is_core:
+            lines = [f"- {c.name}（{c.role or '角色'}，{c.gender or ''}，{c.age or '?'}岁）"]
+            if c.identity: lines.append(f"  身份：{c.identity}")
+            if c.personality: lines.append(f"  性格：{c.personality}")
+            if c.background: lines.append(f"  背景：{c.background}")
+            if c.story_goal: lines.append(f"  目标：{c.story_goal}")
+            if c.motivation: lines.append(f"  动机：{c.motivation}")
+            if c.weakness: lines.append(f"  弱点：{c.weakness}")
+            if c.occupation: lines.append(f"  职业：{c.occupation}")
+            if c.ability: lines.append(f"  能力：{c.ability}")
+            char_parts.append("\n".join(lines))
+        else:
+            # 配角：中等信息
+            lines = [f"- {c.name}（{c.role or '配角'}，{c.gender or ''}）"]
+            if c.personality: lines.append(f"  性格：{c.personality[:120]}")
+            if c.occupation: lines.append(f"  职业：{c.occupation}")
+            if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
+            char_parts.append("\n".join(lines))
+    if len(chars) > 15:
+        char_parts.append(f"... 还有 {len(chars) - 15} 个角色（可用工具查询详情）")
+    chars_info = "\n\n".join(char_parts) if char_parts else "暂无"
 
     result, oerr = await _safe_skill_call(engine, ai_client, "outline_create", {
-        "world_info": world_info, "characters_info": chars_info,
-        "synopsis": proj.synopsis or "暂无简介", "chapter_count": chapter_count,
-        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲",
-    }, "大纲")
+        # 标准变量（文件模板用）
+        "world_info": world_info_complete,
+        "characters_info": chars_info,
+        "synopsis": proj.synopsis or "暂无简介",
+        "chapter_count": chapter_count,
+        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲。如果需要确认角色关系、组织详情、伏笔状态，可使用工具查询。",
+        # 用户自定义模板可能用的变量
+        "title": proj.title,
+        "genre": proj.genre or "网文",
+        "theme": proj.genre or "网文",
+        "narrative_perspective": proj.narrative_pov or "第三人称",
+        "time_period": proj.world_time_period or "",
+        "location": proj.world_location or "",
+        "atmosphere": proj.world_atmosphere or "",
+        "rules": proj.world_rules or "",
+        "mcp_references": "",
+        "requirements": "",
+    }, "大纲",
+        tools=get_chapter_tools(),
+        tool_executor=make_tool_executor(db, pid, int(chapter_count) + 1),
+    )
     if oerr:
         return oerr
 

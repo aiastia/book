@@ -3,6 +3,7 @@ import json
 import logging
 from app.api.routes.projects_pkg.base import *
 from app.core.database import async_session
+from app.services.chapter_tools import get_chapter_tools, make_tool_executor
 
 logger = logging.getLogger(__name__)
 
@@ -128,23 +129,75 @@ def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
 async def _project_context(db: AsyncSession, project_id: int, project: Project) -> dict:
     """收集项目的世界观/角色/组织上下文信息（生成大纲时复用）。
 
-    世界信息包含核心世界观（时间/地点/氛围/规则）+ 详细设定条目。
+    分层策略：近的全量、远的精简。
+    - 主角/反派 → 完整信息
+    - 最近章节涉及的配角 → 中等信息
+    - 其他角色 → 仅名字+定位
     """
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
     orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
-    detail = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds])
-    # 核心世界观（存于 Project 字段）
+
+    # 世界设定：核心四维度 + 最近10条详细设定
     core_parts = []
     if project.world_time_period: core_parts.append(f"时间背景：{project.world_time_period}")
     if project.world_location: core_parts.append(f"地理位置：{project.world_location}")
     if project.world_atmosphere: core_parts.append(f"氛围基调：{project.world_atmosphere}")
     if project.world_rules: core_parts.append(f"世界规则：{project.world_rules}")
     core = "\n".join(core_parts)
-    world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail) if core else (detail or "暂无")
-    chars_info = "\n".join([f"- {c.name}({c.role}): {c.personality[:100]}" for c in chars]) or "暂无"
-    orgs_info = "\n".join([f"- {o.name}（{o.org_type or '组织'}）" for o in orgs]) or "暂无"
-    # 名称集合（用于 _build_outline 兜底过滤）
+    detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
+    world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
+
+    # 角色：分层注入
+    # 查最近大纲中涉及的角色名（用于判断"最近活跃"）
+    recent_char_names = set()
+    try:
+        recent_outlines = (await db.execute(
+            select(Outline).where(Outline.project_id == project_id)
+            .order_by(Outline.chapter_number.desc()).limit(5)
+        )).scalars().all()
+        for o in recent_outlines:
+            if o.characters and isinstance(o.characters, list):
+                for c in o.characters:
+                    recent_char_names.add(str(c).strip() if isinstance(c, str) else c.get("name", ""))
+    except Exception:
+        pass
+
+    char_parts = []
+    for c in chars:
+        is_core = c.role in ("主角", "反派")
+        is_recent = c.name in recent_char_names or not recent_char_names  # 无大纲数据时全部中等
+
+        if is_core:
+            # 核心角色：完整信息
+            lines = [f"- {c.name}（{c.role}，{c.gender or ''}，{c.age or '?'}岁）"]
+            if c.identity: lines.append(f"  身份：{c.identity}")
+            if c.personality: lines.append(f"  性格：{c.personality}")
+            if c.background: lines.append(f"  背景：{c.background}")
+            if c.story_goal: lines.append(f"  目标：{c.story_goal}")
+            if c.motivation: lines.append(f"  动机：{c.motivation}")
+            if c.weakness: lines.append(f"  弱点：{c.weakness}")
+            if c.occupation: lines.append(f"  职业：{c.occupation}")
+            if c.ability: lines.append(f"  能力：{c.ability}")
+            char_parts.append("\n".join(lines))
+        elif is_recent:
+            # 近期活跃角色：中等信息
+            lines = [f"- {c.name}（{c.role}，{c.gender or ''}）"]
+            if c.personality: lines.append(f"  性格：{c.personality[:120]}")
+            if c.occupation: lines.append(f"  职业：{c.occupation}")
+            if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
+            char_parts.append("\n".join(lines))
+        else:
+            # 远处角色：仅名字
+            char_parts.append(f"- {c.name}（{c.role}）")
+
+    chars_info = "\n\n".join(char_parts) if char_parts else "暂无"
+
+    # 组织：全部显示但限制长度
+    orgs_info = "\n".join(
+        [f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}" for o in orgs]
+    ) or "暂无"
+
     char_names = {c.name for c in chars}
     org_names = {o.name for o in orgs}
     return {
@@ -153,6 +206,10 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project) 
         "organizations_info": orgs_info,
         "char_names": char_names,
         "org_names": org_names,
+        "time_period": project.world_time_period or "",
+        "location": project.world_location or "",
+        "atmosphere": project.world_atmosphere or "",
+        "rules": project.world_rules or "",
     }
 
 
@@ -163,10 +220,17 @@ async def generate_outlines(project_id: int, req: OutlineGenerateRequest, db: As
     engine, ai_client = await make_engine_and_client(db, user.id)
     result = await engine.execute_skill("outline_create", ai_client, {
         **ctx,
+        "title": project.title,
+        "genre": project.genre or "网文",
+        "theme": project.genre or "网文",
         "synopsis": project.synopsis or "暂无简介",
         "chapter_count": str(req.chapter_count),
-        "user_prompt": f"请为这部{project.genre or '网文'}生成{req.chapter_count}章大纲。题材：{project.genre}，简介：{project.synopsis}",
-    })
+        "narrative_perspective": project.narrative_pov or "第三人称",
+        "narrative_pov": project.narrative_pov or "第三人称",
+        "mcp_references": "",
+        "requirements": "",
+        "user_prompt": f"请为《{project.title}》生成{req.chapter_count}章大纲。如需确认角色关系、组织详情、伏笔状态，可使用工具查询。",
+    }, tools=get_chapter_tools(), tool_executor=make_tool_executor(db, project_id, req.chapter_count + 1))
     check_skill_error(result)
     outlines_data = result.get("json") or []
     if not isinstance(outlines_data, list):
@@ -224,10 +288,17 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
             await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
             result = await engine.execute_skill("outline_create", ai_client, {
                 **ctx,
+                "title": proj.title,
+                "genre": proj.genre or "网文",
+                "theme": proj.genre or "网文",
                 "synopsis": proj.synopsis or "暂无简介",
                 "chapter_count": str(payload["chapter_count"]),
-                "user_prompt": f"请为这部{proj.genre or '网文'}生成{payload['chapter_count']}章大纲。",
-            })
+                "narrative_perspective": proj.narrative_pov or "第三人称",
+                "narrative_pov": proj.narrative_pov or "第三人称",
+                "mcp_references": "",
+                "requirements": "",
+                "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。如需查询角色、组织、伏笔等，可使用工具。",
+            }, tools=get_chapter_tools(), tool_executor=make_tool_executor(task_db, payload["project_id"], payload["chapter_count"] + 1))
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return
@@ -395,18 +466,28 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     extra_req_text = ("\n".join(extra_req_parts) + "\n") if extra_req_parts else ""
 
     result = await engine.execute_skill("outline_continue", ai_client, {
-        "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无简介",
-        "chapter_count": str(req.chapter_count), "current_chapter_count": str(current_count),
-        "start_chapter": str(start_chapter), "end_chapter": str(end_chapter),
+        **ctx,
+        "title": proj.title,
+        "genre": proj.genre or "网文",
+        "theme": proj.genre or "网文",
+        "synopsis": proj.synopsis or "暂无简介",
+        "chapter_count": str(req.chapter_count),
+        "current_chapter_count": str(current_count),
+        "start_chapter": str(start_chapter),
+        "end_chapter": str(end_chapter),
         "total_planned_chapters": str(current_count + req.chapter_count),
-        "recent_outlines": recent_outlines_json, "existing_chapters": existing_chapters,
-        "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
-        "organizations_info": ctx["organizations_info"],
+        "recent_outlines": recent_outlines_json,
+        "existing_chapters": existing_chapters,
         "foreshadow_context": foreshadow_context,
-        "foreshadow_reminders": foreshadow_context,  # 兼容模板中的变量名
-        "narrative_pov": effective_pov, "narrative_perspective": effective_pov,
-        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
-    })
+        "foreshadow_reminders": foreshadow_context,
+        "narrative_pov": effective_pov,
+        "narrative_perspective": effective_pov,
+        "plot_stage_instruction": req.plot_stage or "",
+        "story_direction": req.story_direction or "",
+        "requirements": req.other_requirements or "",
+        "mcp_references": "",
+        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章的详情、角色关系或伏笔状态，可使用工具。\n{extra_req_text}",
+    }, tools=get_chapter_tools(), tool_executor=make_tool_executor(db, project_id, start_chapter))
     check_skill_error(result)
     outlines_data = result.get("json") or []
     if not isinstance(outlines_data, list):
@@ -545,18 +626,28 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
                 extra_req_parts.append(f"其他要求：{payload['other_requirements']}")
             extra_req_text = ("\n".join(extra_req_parts) + "\n") if extra_req_parts else ""
             result = await engine.execute_skill("outline_continue", ai_client, {
-                "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无简介",
-                "chapter_count": str(payload["chapter_count"]), "current_chapter_count": str(current_count),
-                "start_chapter": str(start_chapter), "end_chapter": str(end_chapter),
+                **ctx,
+                "title": proj.title,
+                "genre": proj.genre or "网文",
+                "theme": proj.genre or "网文",
+                "synopsis": proj.synopsis or "暂无简介",
+                "chapter_count": str(payload["chapter_count"]),
+                "current_chapter_count": str(current_count),
+                "start_chapter": str(start_chapter),
+                "end_chapter": str(end_chapter),
                 "total_planned_chapters": str(current_count + payload["chapter_count"]),
-                "recent_outlines": recent_outlines_json, "existing_chapters": existing_chapters,
-                "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
-                "organizations_info": ctx["organizations_info"],
+                "recent_outlines": recent_outlines_json,
+                "existing_chapters": existing_chapters,
                 "foreshadow_context": foreshadow_context,
                 "foreshadow_reminders": foreshadow_context,
-                "narrative_pov": effective_pov, "narrative_perspective": effective_pov,
-                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
-            })
+                "narrative_pov": effective_pov,
+                "narrative_perspective": effective_pov,
+                "plot_stage_instruction": payload.get("plot_stage") or "",
+                "story_direction": payload.get("story_direction") or "",
+                "requirements": payload.get("other_requirements") or "",
+                "mcp_references": "",
+                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章详情、角色关系或伏笔状态，可使用工具。\n{extra_req_text}",
+            }, tools=get_chapter_tools(), tool_executor=make_tool_executor(task_db, payload["project_id"], start_chapter))
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return

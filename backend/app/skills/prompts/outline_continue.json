@@ -4,6 +4,7 @@
   "description": "基于已有章节续写后续大纲",
   "category": "outline",
   "skill_type": "builtin",
+  "config": {"max_tokens": 32768},
   "parameters": {
     "type": "object",
     "properties": {}

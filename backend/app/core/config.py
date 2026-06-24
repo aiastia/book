@@ -20,13 +20,14 @@ class Settings(BaseSettings):
     AI_MODEL: str = "gpt-4o"
     AI_TEMPERATURE: float = 0.85
     AI_TOP_P: float = 0.9
-    AI_MAX_TOKENS: int = 4096
+    AI_MAX_TOKENS: int = 65536              # 单次请求最大输出 token 数（全局上限，覆盖 skill 配置）
+    AI_DEFAULT_MAX_TOKENS: int = 26384      # 默认输出 token 数（skill 未配置时使用）
 
     # AI 超时和重试配置（环境变量：MOYU_AI_TIMEOUT / MOYU_AI_MAX_RETRIES）
-    AI_TIMEOUT: int = 300               # 读写超时（秒），默认 5 分钟
-    AI_CONNECT_TIMEOUT: int = 60        # 连接超时（秒）
-    AI_MAX_RETRIES: int = 3             # SDK 层重试次数
-    AI_RETRY_DELAY: float = 2.0         # 重试基础间隔（秒），指数退避
+    AI_TIMEOUT: int = 600               # 读写超时（秒），默认 10 分钟（复杂提示词需要更长推理时间）
+    AI_CONNECT_TIMEOUT: int = 120        # 连接超时（秒）
+    AI_MAX_RETRIES: int = 2             # SDK 层重试次数（chat_json_retry 内部也会重试，减少叠加）
+    AI_RETRY_DELAY: float = 3.0         # 重试基础间隔（秒），指数退避
     AI_RETRY_MAX_DELAY: float = 30.0    # 重试最大间隔（秒）
 
     # 章节生成参数

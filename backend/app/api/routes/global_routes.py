@@ -340,6 +340,7 @@ class SkillCreateReq(BaseModel):
 class SkillUpdateReq(BaseModel):
     system_prompt: Optional[str] = None
     is_enabled: Optional[bool] = None
+    is_customized: Optional[bool] = None
     config: Optional[dict] = None
 
 
@@ -358,6 +359,10 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
     out = []
     for s in skills:
         user_cfg = await engine.get_user_config(s.id)
+        is_customized = user_cfg.get("is_customized", False) if user_cfg else False
+        snapshot = (user_cfg.get("system_prompt_snapshot") or "") if user_cfg else ""
+        # 系统版本是否已更新（快照 ≠ 当前系统版本）
+        system_updated = bool(is_customized and snapshot and snapshot != s.system_prompt)
         out.append({
             "id": s.id,
             "name": s.name,
@@ -366,11 +371,10 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
             "category": s.category,
             "skill_type": s.skill_type,
             "is_enabled": user_cfg["is_enabled"] if user_cfg else s.is_enabled,
-            "system_prompt": (
-                (user_cfg.get("config", {}) or {}).get("system_prompt")
-                if user_cfg and user_cfg.get("config")
-                else s.system_prompt
-            ),
+            "is_customized": is_customized,
+            "system_updated": system_updated,
+            "system_prompt": s.system_prompt,  # 始终返回系统版本
+            "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "") if user_cfg else "",
             "parameters": s.parameters,
             "config": s.config,
         })
@@ -379,7 +383,7 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
 
 @router.put("/skills/{skill_id}")
 async def update_skill(skill_id: int, req: SkillUpdateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """更新 Skill（用户级配置覆盖，不影响系统默认）。"""
+    """更新 Skill 用户级配置。is_customized=True 时保存自定义提示词并记录系统版本快照。"""
     from app.models.skill import Skill, SkillConfig
 
     result = await db.execute(select(Skill).where(Skill.id == skill_id))
@@ -395,10 +399,23 @@ async def update_skill(skill_id: int, req: SkillUpdateReq, db: AsyncSession = De
         db.add(cfg)
     if req.is_enabled is not None:
         cfg.is_enabled = req.is_enabled
+    if req.is_customized is not None:
+        cfg.is_customized = req.is_customized
+        # 开启自定义时，记录当前系统版本为快照（用于后续对比更新）
+        if req.is_customized and not cfg.system_prompt_snapshot:
+            cfg.system_prompt_snapshot = skill.system_prompt or ""
+        # 关闭自定义时，清除快照和自定义内容
+        if not req.is_customized:
+            cfg.system_prompt_snapshot = ""
+            cfg.config = {k: v for k, v in (cfg.config or {}).items() if k != "system_prompt"}
     if req.system_prompt is not None:
         merged = dict(cfg.config or {})
         merged["system_prompt"] = req.system_prompt
         cfg.config = merged
+        # 保存自定义提示词时自动标记为已自定义
+        if not cfg.is_customized:
+            cfg.is_customized = True
+            cfg.system_prompt_snapshot = skill.system_prompt or ""
     if req.config is not None:
         cfg.config = {**(cfg.config or {}), **req.config}
     await db.commit()
@@ -407,7 +424,7 @@ async def update_skill(skill_id: int, req: SkillUpdateReq, db: AsyncSession = De
 
 @router.post("/skills/{skill_id}/reset")
 async def reset_skill(skill_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """重置 Skill 到系统默认（删除用户级覆盖配置）。"""
+    """重置单个 Skill 到系统默认（删除用户级覆盖配置）。"""
     from app.models.skill import SkillConfig
 
     result = await db.execute(
@@ -418,6 +435,14 @@ async def reset_skill(skill_id: int, db: AsyncSession = Depends(get_db), user=De
         await db.delete(cfg)
         await db.commit()
     return {"ok": True}
+
+
+@router.post("/skills/reset-all")
+async def reset_all_skills(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """一键重置所有提示词为系统默认（清除所有用户自定义）。"""
+    from app.skills.builtin import force_reset_all_skills
+    await force_reset_all_skills(db)
+    return {"ok": True, "message": "所有提示词已重置为系统默认版本"}
 
 
 @router.post("/skills/create")

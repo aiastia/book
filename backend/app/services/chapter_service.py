@@ -460,27 +460,28 @@ class ChapterService:
 
         try:
             # 构建基本上下文（只取大纲概要，不加载全量数据）
-            context = {"chapter_number": chapter.chapter_number,
+            # 注意：所有值必须是字符串，SkillEngine 只替换 str 类型的变量
+            context = {"chapter_number": str(chapter.chapter_number),
                        "chapter_title": chapter.title or ""}
             if project:
                 context["project_title"] = project.title or ""
-                context["target_word_count"] = project.target_word_count or 4000
+                context["target_word_count"] = str(project.target_word_count or 4000)
                 context["narrative_pov"] = project.narrative_pov or "第三人称"
                 context["narrative_perspective"] = context["narrative_pov"]
             # 应用覆盖项
             if overrides:
                 if overrides.get("narrative_pov"):
-                    context["narrative_pov"] = overrides["narrative_pov"]
-                    context["narrative_perspective"] = overrides["narrative_pov"]
+                    context["narrative_pov"] = str(overrides["narrative_pov"])
+                    context["narrative_perspective"] = str(overrides["narrative_pov"])
                 if overrides.get("target_word_count"):
-                    context["target_word_count"] = overrides["target_word_count"]
+                    context["target_word_count"] = str(overrides["target_word_count"])
                 if overrides.get("style_config"):
                     import json as _json
                     context["writing_style"] = _json.dumps(overrides["style_config"], ensure_ascii=False)
                 if overrides.get("style_name"):
-                    context["style_name"] = overrides["style_name"]
+                    context["style_name"] = str(overrides["style_name"])
                 if overrides.get("style_custom_prompt"):
-                    context["style_custom_prompt"] = overrides["style_custom_prompt"]
+                    context["style_custom_prompt"] = str(overrides["style_custom_prompt"])
 
             # ===== Phase 1: Planner（判断需要哪些资料） =====
             use_legacy = (overrides or {}).get("use_legacy", False)
@@ -496,10 +497,13 @@ class ChapterService:
                         f"[planner] Planner 失败，回退旧流程: {e}")
                     use_legacy = True
 
+            # 章节生成始终提供工具（AI 可按需查询角色/物品/地点/伏笔/大纲等）
+            from app.services.chapter_tools import get_chapter_tools, make_tool_executor
+            chapter_tools = get_chapter_tools()
+            tool_exec = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
+
             if use_legacy:
                 # 回退：全量构建上下文 + 适配新 Writer prompt
-                # 新 prompt（chapter_generation_one_to_one_next 等）使用 {chapter_data} 单一变量，
-                # 需要将 build_chapter_context 的分散字段打包为一个格式化字符串。
                 context = await self.context_service.build_chapter_context(chapter, project)
                 if overrides:
                     if overrides.get("narrative_pov"):
@@ -509,20 +513,30 @@ class ChapterService:
                         context["target_word_count"] = overrides["target_word_count"]
                         context["word_count_requirement"] = f"目标{overrides['target_word_count']}字"
 
-                # 将完整上下文打包为 chapter_data（适配新 prompt 的单一变量格式）
-                chapter_data = self._format_legacy_context_as_data(context)
-                context["chapter_data"] = chapter_data
-                context["user_prompt"] = ""
+                chapter_data_lines = self._format_legacy_context_as_data(context)
+                context["chapter_data"] = chapter_data_lines
+                context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。"
 
                 result = await self.skill_engine.execute_skill(
                     skill_name, ai_client, context,
+                    tools=chapter_tools, tool_executor=tool_exec,
                 )
             else:
-                # ===== Phase 3: Writer（新流程，无工具调用） =====
+                # ===== Phase 3: Writer（新流程，有工具调用）=====
                 context["chapter_data"] = chapter_data
-                context["user_prompt"] = ""
+                context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。在写作过程中如需确认角色设定、物品归属、地点环境、伏笔状态等，可使用提供的工具查询。"
+
+                try:
+                    full_ctx = await self.context_service.build_chapter_context(chapter, project)
+                    for key, value in full_ctx.items():
+                        if key not in context:
+                            context[key] = str(value) if not isinstance(value, str) else value
+                except Exception:
+                    pass
+
                 result = await self.skill_engine.execute_skill(
                     skill_name, ai_client, context,
+                    tools=chapter_tools, tool_executor=tool_exec,
                 )
 
             if result.get("error"):

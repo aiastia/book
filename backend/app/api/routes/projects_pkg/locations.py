@@ -154,36 +154,42 @@ async def generate_locations(
     project_id: int, req: LocationGenerateReq,
     db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
 ):
-    """AI 批量生成地点。"""
+    """AI 批量生成地点（通过 SkillEngine 使用统一模板）。"""
     proj = await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
+
+    # 构建完整世界观上下文
+    world_parts = []
+    if proj.world_time_period:
+        world_parts.append(f"时间：{proj.world_time_period}")
+    if proj.world_location:
+        world_parts.append(f"地点：{proj.world_location}")
+    if proj.world_atmosphere:
+        world_parts.append(f"氛围：{proj.world_atmosphere}")
+    if proj.world_rules:
+        world_parts.append(f"规则：{proj.world_rules}")
+    world_info = "\n".join(world_parts) if world_parts else f"简介：{proj.synopsis or '暂无'}"
+
     # 父地点信息
-    parent_info = ""
+    parent_hint = ""
     if req.parent_location_id:
-        parent = (await db.execute(select(Location).where(Location.id == req.parent_location_id))).scalar_one_or_none()
+        parent = (await db.execute(
+            select(Location).where(Location.id == req.parent_location_id)
+        )).scalar_one_or_none()
         if parent:
-            parent_info = f"父级地点：{parent.name}（{parent.description[:100]}）"
+            parent_hint = f"\n父级地点：{parent.name}（{parent.description[:150]}）\n请生成此地点下的子区域。"
 
-    prompt = f"""你是网文世界观设定专家。为小说《{proj.title}》设计 {req.count} 个{('「' + req.location_type + '」类') if req.location_type else ''}地点。
+    user_prompt = f"请生成{req.count}个{('「' + req.location_type + '」类') if req.location_type else ''}地点。"
+    if req.user_prompt:
+        user_prompt += f"\n额外要求：{req.user_prompt}"
+    user_prompt += parent_hint
 
-题材：{proj.genre or '网文'}
-世界观：{proj.synopsis or '（未设定）'}
-{parent_info}
-{('额外要求：' + req.user_prompt) if req.user_prompt else ''}
+    result = await engine.execute_skill("locations_generate", ai_client, {
+        "title": proj.title,
+        "world_info": world_info,
+        "user_prompt": user_prompt,
+    })
 
-要求：
-1. 每个地点包含：name(名称)、location_type(类型：城市/区域/建筑/秘境/自然景观/国家/大陆)、description(100-200字)、atmosphere(氛围特色)、faction_control(控制势力)、importance(重要性：minor/normal/major/key)、danger_level(危险等级：safe/dangerous/forbidden/unknown)
-2. 重要地点(importance=major或key)至少1个
-3. 地点名要有网文特色，符合题材世界观
-4. 氛围描述要生动
-
-返回纯JSON数组：[{{"name":"","location_type":"","description":"","atmosphere":"","faction_control":"","importance":"normal","danger_level":"safe"}}]"""
-
-    result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.9,
-        max_tokens=8192,
-    )
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
     data = result.get("json") or []

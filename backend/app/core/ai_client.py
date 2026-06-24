@@ -87,7 +87,7 @@ class AIClient:
             "messages": messages,
             "temperature": temperature or settings.AI_TEMPERATURE,
             "top_p": top_p or settings.AI_TOP_P,
-            "max_tokens": max_tokens or 16384,
+            "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
         }
         if response_format:
             kwargs["response_format"] = response_format
@@ -129,7 +129,7 @@ class AIClient:
             "messages": messages,
             "temperature": temperature or settings.AI_TEMPERATURE,
             "top_p": top_p or settings.AI_TOP_P,
-            "max_tokens": max_tokens or 16384,
+            "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
             "stream": True,
         }
         stream = await self.client.chat.completions.create(**kwargs)

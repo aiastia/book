@@ -28,13 +28,28 @@ const categoryLabels: Record<string, string> = {
 async function onToggle(s: any) {
   try { await api.updateSkill(s.id, { is_enabled: !s.is_enabled }); await refresh() } catch (e: any) { msg.error('操作失败') }
 }
-function openEdit(s: any) { editing.value = s; editPrompt.value = s.system_prompt || '' }
+async function onToggleCustom(s: any) {
+  const newVal = !s.is_customized
+  try { await api.updateSkill(s.id, { is_customized: newVal }); await refresh(); msg.success(newVal ? '已开启自定义' : '已恢复系统默认') } catch (e: any) { msg.error('操作失败') }
+}
+async function onAcceptSystem(s: any) {
+  if (!await msg.confirm('确认用系统最新版本覆盖你的自定义版本？')) return
+  try { await api.updateSkill(s.id, { system_prompt: s.system_prompt, is_customized: true }); await refresh(); msg.success('已更新为系统版本') } catch (e: any) { msg.error('更新失败') }
+}
+function openEdit(s: any) {
+  editing.value = s
+  editPrompt.value = s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt
+}
 async function onSavePrompt() {
   try { await api.updateSkill(editing.value.id, { system_prompt: editPrompt.value }); editing.value = null; await refresh() } catch (e: any) { msg.error('保存失败') }
 }
 async function onReset(s: any) {
   if (!await msg.confirm('确认重置到系统默认？')) return
   try { await api.resetSkill(s.id); await refresh() } catch (e: any) { msg.error('重置失败') }
+}
+async function onResetAll() {
+  if (!await msg.confirm('确认将所有提示词重置为系统默认版本？这将清除所有你自定义过的提示词，不可恢复。')) return
+  try { await api.resetAllSkills(); await refresh(); msg.success('已全部重置') } catch (e: any) { msg.error('重置失败：' + formatError(e)) }
 }
 async function onDeleteCustom(s: any) {
   if (!await msg.confirm(`确认删除自定义 Skill「${s.display_name || s.name}」？此操作不可恢复。`)) return
@@ -134,6 +149,7 @@ const grouped = computed(() => {
   <PageHeader title="Skill 管理">
     <template #actions>
       <a-button type="primary" @click="openCreate">+ 安装 Skill</a-button>
+      <a-button danger @click="onResetAll">重置全部为系统默认</a-button>
     </template>
   </PageHeader>
   <div class="page-content">
@@ -154,11 +170,15 @@ const grouped = computed(() => {
           v-for="s in items" :key="s.id"
           hoverable
           class="skill-card"
-          :class="{ disabled: !s.is_enabled }"
+          :class="{ disabled: !s.is_enabled, customized: s.is_customized }"
         >
           <div class="skill-head">
             <div>
-              <div class="skill-name">{{ s.display_name || s.name }}</div>
+              <div class="skill-name">
+                {{ s.display_name || s.name }}
+                <a-tag v-if="s.is_customized" color="purple" size="small" style="margin-left:4px;">已自定义</a-tag>
+                <a-tag v-if="s.system_updated" color="orange" size="small" style="margin-left:4px;">系统已更新</a-tag>
+              </div>
               <a-tag
                 :color="s.skill_type === 'custom' ? 'warning' : 'default'"
                 size="small"
@@ -170,10 +190,16 @@ const grouped = computed(() => {
             <a-switch :checked="s.is_enabled" @change="onToggle(s)" />
           </div>
           <div class="skill-desc">{{ s.description || '暂无描述' }}</div>
-          <div v-if="s.system_prompt" class="skill-prompt">{{ (s.system_prompt || '').slice(0, 120) }}{{ (s.system_prompt || '').length > 120 ? '...' : '' }}</div>
+          <div v-if="s.system_prompt" class="skill-prompt">{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).slice(0, 120) }}{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).length > 120 ? '...' : '' }}</div>
+          <!-- 自定义开关 -->
+          <div class="skill-custom-row">
+            <span style="font-size:12px;color:#888;">自定义提示词</span>
+            <a-switch :checked="s.is_customized" size="small" @change="onToggleCustom(s)" />
+          </div>
           <div class="skill-actions">
-            <a-button size="small" @click="openEdit(s)">编辑提示词</a-button>
-            <a-button size="small" @click="onReset(s)">重置默认</a-button>
+            <a-button size="small" @click="openEdit(s)" :disabled="!s.is_customized && s.skill_type !== 'custom'">编辑提示词</a-button>
+            <a-button v-if="s.system_updated" size="small" type="primary" @click="onAcceptSystem(s)">更新为系统版本</a-button>
+            <a-button v-if="s.is_customized" size="small" @click="onReset(s)">重置默认</a-button>
             <a-button v-if="s.skill_type === 'custom'" size="small" danger @click="onDeleteCustom(s)">删除</a-button>
           </div>
         </a-card>
@@ -277,6 +303,8 @@ description: 描述
 .skill-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;}
 .skill-card{transition:all .2s;}
 .skill-card.disabled{opacity:.6;}
+.skill-card.customized{border-left:3px solid #722ED1;}
+.skill-custom-row{display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px dashed #E8E4DC;}
 .skill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
 .skill-name{font-size:15px;font-weight:600;margin-bottom:4px;}
 .skill-desc{font-size:13px;color:#888;margin-bottom:8px;line-height:1.5;}

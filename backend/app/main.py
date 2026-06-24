@@ -146,6 +146,9 @@ async def _auto_migrate():
         ("plot_analyses", "ADD COLUMN analysis_report TEXT DEFAULT ''"),
         # 第12批：组织成员后置分配步骤 + 移除地点/物品初始化步骤
         ("project_init_tasks", "ADD COLUMN assign_org_members_done INTEGER DEFAULT 0"),
+        # 第13批：提示词自定义开关
+        ("skill_configs", "ADD COLUMN is_customized BOOLEAN DEFAULT 0"),
+        ("skill_configs", "ADD COLUMN system_prompt_snapshot TEXT DEFAULT ''"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:
@@ -167,8 +170,14 @@ async def lifespan(app: FastAPI):
     # 初始化默认用户
     await _ensure_default_user()
     # 初始化内置 Skills（builtin.py 是唯一真相源，自动处理用户自定义版本）
+    # 设环境变量 MOYU_RESET_PROMPTS=1 启动可一键清除所有用户自定义提示词
     async with async_session() as db:
-        await init_builtin_skills(db)
+        if os.getenv("MOYU_RESET_PROMPTS") == "1":
+            from app.skills.builtin import force_reset_all_skills
+            await force_reset_all_skills(db)
+            print("[启动] ✅ 已清除所有用户自定义提示词，恢复为系统默认")
+        else:
+            await init_builtin_skills(db)
         existing_count = await db.scalar(select(func.count(Skill.id)))
         print(f"[启动] 提示词模板已就绪（数据库共 {existing_count or 0} 个 Skill）")
     # 同步 Skill 表到 PromptTemplate 版本管理表（首次部署 + 新增 Skill 自动同步）

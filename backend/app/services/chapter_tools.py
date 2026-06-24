@@ -3,15 +3,18 @@
 让 AI 在写作过程中按需主动查询数据库——查角色档案、伏笔状态、物品归属、前文剧情等。
 对标 MuMu 的 MCP 工具架构，但查询的是本地 DB 而非外部服务。
 
-工具列表：
+工具列表（11个）：
 1. query_character - 查角色完整档案
 2. query_character_relations - 查角色关系网络
 3. query_foreshadows - 查伏笔状态
 4. query_item - 查物品详情和归属
-5. query_chapter_summary - 查前文章节剧情
-6. query_organization - 查组织详情
-7. query_plot_timeline - 查剧情演进时间线（跨章因果链追溯）
-8. query_outline - 查大纲规划（计划 vs 实际对比）
+5. query_location - 查地点详情
+6. query_chapter_summary - 查前文章节剧情
+7. query_organization - 查组织详情
+8. query_career - 查职业体系详情
+9. query_world_setting - 查世界设定条目
+10. query_plot_timeline - 查剧情演进时间线（跨章因果链追溯）
+11. query_outline - 查大纲规划（计划 vs 实际对比）
 """
 import json
 import logging
@@ -28,6 +31,8 @@ from app.models.organization_member import OrganizationMember
 from app.models.chapter import Chapter
 from app.models.outline import Outline
 from app.models.plot_analysis import PlotAnalysis
+from app.models.career import Career
+from app.models.world import WorldSetting
 from app.services.foreshadow_service import ForeshadowService
 
 logger = logging.getLogger(__name__)
@@ -40,7 +45,7 @@ def get_chapter_tools() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "query_character",
-                "description": "按名字查询角色的完整档案（外貌/性格/背景/能力/动机/当前心理状态/所属组织）。写到某角色时调用，确认设定避免矛盾。",
+                "description": "按名字查询角色的完整档案（外貌/性格/背景/能力/动机/当前心理状态/所属组织/职业境界）。写到某角色时调用，确认设定避免矛盾。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -99,6 +104,20 @@ def get_chapter_tools() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "query_location",
+                "description": "按名字查询地点/场景详情（类型、描述、氛围、控制势力、危险等级）。写到新场景时确认地点设定避免描述矛盾。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "地点名（支持模糊匹配）"}
+                    },
+                    "required": ["name"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "query_chapter_summary",
                 "description": "查询指定章节的剧情摘要、关键情节、角色状态变化。回顾前文避免剧情矛盾时调用。",
                 "parameters": {
@@ -114,13 +133,41 @@ def get_chapter_tools() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "query_organization",
-                "description": "按名字查询组织/势力详情（类型、描述、势力值、所在地、成员数）。写势力冲突场景时调用。",
+                "description": "按名字查询组织/势力详情（类型、描述、势力值、所在地、成员名单、对外关系）。写势力冲突场景时调用。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "description": "组织名（支持模糊匹配）"}
                     },
                     "required": ["name"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_career",
+                "description": "按名字查询职业体系详情（类型、描述、进阶阶段、核心能力）。写角色使用能力或突破境界时确认设定。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "职业名（支持模糊匹配，如'丹修'可匹配'炼丹师'）"}
+                    },
+                    "required": ["name"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_world_setting",
+                "description": "按关键词查询世界设定条目（地理/历史/种族/势力/文化等）。写到涉及世界观细节时确认设定一致性。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keyword": {"type": "string", "description": "关键词（支持模糊匹配条目名或内容）"}
+                    },
+                    "required": ["keyword"]
                 }
             }
         },
@@ -195,11 +242,20 @@ def make_tool_executor(db: AsyncSession, project_id: int, chapter_number: int = 
             elif tool_name == "query_item":
                 return await _query_item(db, project_id, arguments.get("name", ""))
 
+            elif tool_name == "query_location":
+                return await _query_location(db, project_id, arguments.get("name", ""))
+
             elif tool_name == "query_chapter_summary":
                 return await _query_chapter_summary(db, project_id, arguments.get("chapter_number", 1))
 
             elif tool_name == "query_organization":
                 return await _query_organization(db, project_id, arguments.get("name", ""))
+
+            elif tool_name == "query_career":
+                return await _query_career(db, project_id, arguments.get("name", ""))
+
+            elif tool_name == "query_world_setting":
+                return await _query_world_setting(db, project_id, arguments.get("keyword", ""))
 
             elif tool_name == "query_plot_timeline":
                 return await _query_plot_timeline(db, project_id, chapter_number,
@@ -236,7 +292,24 @@ async def _query_character(db: AsyncSession, project_id: int, name: str) -> str:
     if not matched:
         return json.dumps({"error": f"未找到角色「{name}」"}, ensure_ascii=False)
     results = []
-    for c in matched[:3]:  # 最多返回3个匹配
+    for c in matched[:3]:
+        # 查询组织归属
+        org_name = ""
+        if c.organization_id:
+            org = (await db.execute(
+                select(Organization).where(Organization.id == c.organization_id)
+            )).scalar_one_or_none()
+            if org:
+                org_name = org.name
+        # 查询组织成员身份（可能属于多个组织）
+        org_members = (await db.execute(
+            select(OrganizationMember).where(
+                OrganizationMember.character_id == c.id,
+                OrganizationMember.status == "active"
+            )
+        )).scalars().all()
+        orgs_detail = [{"org": (await db.scalar(select(Organization.name).where(Organization.id == om.organization_id))) or "", "role": om.role or "成员"} for om in org_members[:5]]
+
         results.append({
             "name": c.name, "role": c.role or "", "gender": c.gender or "",
             "age": c.age or "", "status": c.status or "alive",
@@ -257,6 +330,8 @@ async def _query_character(db: AsyncSession, project_id: int, name: str) -> str:
             "character_change": (c.character_change or "")[:150],
             "tags": c.tags or [],
             "main_career_stage_desc": c.main_career_stage_desc or "",
+            "organization": org_name,
+            "organizations": orgs_detail,
         })
     return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
 
@@ -383,11 +458,30 @@ async def _query_organization(db: AsyncSession, project_id: int, name: str) -> s
                 OrganizationMember.status == "active"
             )
         )
+        # 查成员列表
+        members = (await db.execute(
+            select(OrganizationMember).where(
+                OrganizationMember.organization_id == o.id,
+                OrganizationMember.status == "active"
+            ).limit(10)
+        )).scalars().all()
+        member_list = []
+        for m in members:
+            ch = (await db.execute(select(Character).where(Character.id == m.character_id))).scalar_one_or_none()
+            member_list.append({"name": ch.name if ch else "?", "role": m.role or "成员"})
+        # 结构信息
+        extra = o.structure or {}
         results.append({
             "name": o.name, "org_type": o.org_type or "",
             "description": (o.description or "")[:200],
             "power_value": o.power_value or 50, "location": o.location or "",
-            "motto": o.motto or "", "member_count": member_count or 0,
+            "motto": o.motto or "", "color": o.color or "",
+            "member_count": member_count or 0,
+            "members": member_list,
+            "personality": extra.get("personality", ""),
+            "purpose": extra.get("purpose", ""),
+            "traits": extra.get("traits", []),
+            "relations": o.relations or [],
         })
     return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
 
@@ -569,3 +663,82 @@ async def _query_outline(db: AsyncSession, project_id: int, chapter_number: int)
         result["word_count"] = chapter.word_count or 0
 
     return json.dumps(result, ensure_ascii=False)
+
+
+async def _query_location(db: AsyncSession, project_id: int, name: str) -> str:
+    """查地点详情（类型、描述、氛围、控制势力、危险等级）。"""
+    if not name:
+        return json.dumps({"error": "请提供地点名"}, ensure_ascii=False)
+    locs = (await db.execute(
+        select(Location).where(Location.project_id == project_id)
+    )).scalars().all()
+    matched = [l for l in locs if name in l.name or l.name in name]
+    if not matched:
+        return json.dumps({"error": f"未找到地点「{name}」"}, ensure_ascii=False)
+    results = []
+    for l in matched[:3]:
+        parent_name = ""
+        if l.parent_location_id:
+            parent = (await db.execute(
+                select(Location).where(Location.id == l.parent_location_id)
+            )).scalar_one_or_none()
+            if parent:
+                parent_name = parent.name
+        results.append({
+            "name": l.name, "location_type": l.location_type or "",
+            "description": (l.description or "")[:200],
+            "atmosphere": l.atmosphere or "",
+            "faction_control": l.faction_control or "",
+            "geography": l.geography or "",
+            "importance": l.importance or "normal",
+            "danger_level": l.danger_level or "safe",
+            "parent_location": parent_name,
+            "first_appear_chapter": l.first_appear_chapter,
+        })
+    return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
+
+
+async def _query_career(db: AsyncSession, project_id: int, name: str) -> str:
+    """查职业体系详情（类型、描述、进阶阶段、核心能力）。"""
+    if not name:
+        return json.dumps({"error": "请提供职业名"}, ensure_ascii=False)
+    careers = (await db.execute(
+        select(Career).where(Career.project_id == project_id)
+    )).scalars().all()
+    matched = [c for c in careers if name in c.name or c.name in name]
+    if not matched:
+        return json.dumps({"error": f"未找到职业「{name}」"}, ensure_ascii=False)
+    results = []
+    for c in matched[:3]:
+        stages_preview = []
+        if c.stages and isinstance(c.stages, list):
+            for s in c.stages[:5]:
+                if isinstance(s, dict):
+                    stages_preview.append(f"{s.get('name','')}(Lv{s.get('level','?')})")
+        results.append({
+            "name": c.name, "career_type": c.career_type or "",
+            "category": c.category or "", "description": (c.description or "")[:200],
+            "stages": stages_preview,
+            "full_stages": c.stages or [],
+            "abilities": c.abilities or [],
+        })
+    return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
+
+
+async def _query_world_setting(db: AsyncSession, project_id: int, keyword: str) -> str:
+    """按关键词查询世界设定条目。"""
+    if not keyword:
+        return json.dumps({"error": "请提供关键词"}, ensure_ascii=False)
+    worlds = (await db.execute(
+        select(WorldSetting).where(WorldSetting.project_id == project_id)
+    )).scalars().all()
+    matched = [w for w in worlds if keyword in (w.name or "") or keyword in (w.content or "")]
+    if not matched:
+        return json.dumps({"error": f"未找到与「{keyword}」相关的世界设定"}, ensure_ascii=False)
+    results = []
+    for w in matched[:5]:
+        results.append({
+            "name": w.name, "category": w.category or "",
+            "content": (w.content or "")[:300],
+        })
+    return json.dumps(results, ensure_ascii=False)

@@ -4,6 +4,7 @@
   "description": "AI 生成初始章节大纲",
   "category": "outline",
   "skill_type": "builtin",
+  "config": {"max_tokens": 32768},
   "parameters": {
     "type": "object",
     "properties": {}

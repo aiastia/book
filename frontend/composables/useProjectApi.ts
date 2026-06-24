@@ -420,12 +420,17 @@ export function useProjectApi() {
   // ---- Skill 管理（全局接口，不依赖项目 ID） ----
   const listSkills = () => useApi<any[]>('/api/skills', { key: 'skills' })
 
-  function updateSkill(skillId: number, body: { system_prompt?: string; is_enabled?: boolean; config?: any }) {
+  function updateSkill(skillId: number, body: { system_prompt?: string; is_enabled?: boolean; is_customized?: boolean; config?: any }) {
     return apiPut(`/api/skills/${skillId}`, body)
   }
 
   function resetSkill(skillId: number) {
     return apiPost(`/api/skills/${skillId}/reset`, {})
+  }
+
+  /** 一键重置所有 Skill 为系统默认（清除所有用户自定义） */
+  function resetAllSkills() {
+    return apiPost('/api/skills/reset-all', {})
   }
 
   /** 用户自定义创建 Skill */
@@ -895,6 +900,7 @@ export function useProjectApi() {
     listSkills,
     updateSkill,
     resetSkill,
+    resetAllSkills,
     createSkill,
     deleteCustomSkill,
     // Prompt Template

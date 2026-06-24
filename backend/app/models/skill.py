@@ -32,6 +32,8 @@ class SkillConfig(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     skill_id = Column(Integer, ForeignKey("skills.id"), nullable=False)
     is_enabled = Column(Boolean, default=True)
-    config = Column(JSON, default=dict)  # 用户自定义配置覆盖
+    is_customized = Column(Boolean, default=False)  # 用户是否主动开启了自定义
+    config = Column(JSON, default=dict)  # 用户自定义配置覆盖（system_prompt 等）
+    system_prompt_snapshot = Column(Text, default="")  # 开启自定义时系统版本快照（用于对比）
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

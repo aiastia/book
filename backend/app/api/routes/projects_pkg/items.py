@@ -124,33 +124,38 @@ async def generate_items(
     project_id: int, req: ItemGenerateReq,
     db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
 ):
-    """AI 批量生成物品。"""
+    """AI 批量生成物品（通过 SkillEngine 使用统一模板）。"""
     proj = await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
+
     # 角色名供 AI 关联持有者
-    chars = (await db.execute(select(Character).where(Character.project_id == project_id).limit(20))).scalars().all()
-    char_names = ", ".join(c.name for c in chars) if chars else "无"
+    chars = (await db.execute(
+        select(Character).where(Character.project_id == project_id).limit(20)
+    )).scalars().all()
+    char_names = "、".join(c.name for c in chars) if chars else "暂无"
 
-    prompt = f"""你是网文物品设定专家。为小说《{proj.title}》设计 {req.count} 个{('「' + req.category + '」类') if req.category else ''}物品。
+    # 构建完整世界观上下文
+    world_parts = []
+    if proj.world_time_period:
+        world_parts.append(f"时间：{proj.world_time_period}")
+    if proj.world_location:
+        world_parts.append(f"地点：{proj.world_location}")
+    if proj.world_atmosphere:
+        world_parts.append(f"氛围：{proj.world_atmosphere}")
+    if proj.world_rules:
+        world_parts.append(f"规则：{proj.world_rules}")
+    world_info = "\n".join(world_parts) if world_parts else f"简介：{proj.synopsis or '暂无'}"
 
-题材：{proj.genre or '网文'}
-世界观：{proj.synopsis or '（未设定）'}
-主要角色：{char_names}
-{('额外要求：' + req.user_prompt) if req.user_prompt else ''}
+    user_prompt = f"请生成{req.count}个{('「' + req.category + '」类') if req.category else ''}物品。\n主要角色：{char_names}"
+    if req.user_prompt:
+        user_prompt += f"\n额外要求：{req.user_prompt}"
 
-要求：
-1. 每个物品包含：name(名称)、category(分类：装备/消耗/关键道具/材料/货币)、rarity(稀有度：common/uncommon/rare/epic/legendary/mythic)、item_type(细分类型)、description(100-200字描述)、attributes(属性效果JSON)、is_key_item(是否关键剧情道具0/1)
-2. 关键道具(is_key_item=1)至少1个，与主线相关
-3. 稀有度分布合理（普通多，神话少）
-4. 物品名要有网文特色，符合题材
+    result = await engine.execute_skill("items_generate", ai_client, {
+        "title": proj.title,
+        "world_info": world_info,
+        "user_prompt": user_prompt,
+    })
 
-返回纯JSON数组，格式：[{{"name":"","category":"","rarity":"","item_type":"","description":"","attributes":{{}},"is_key_item":0}}]"""
-
-    result = await ai_client.chat_json_retry(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.9,
-        max_tokens=8192,
-    )
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
     data = result.get("json") or []
