@@ -161,6 +161,9 @@ export function useProjectApi() {
   function generateWorld(body: { genre?: string; idea?: string }) {
     return apiPost<any>(`/api/projects/${pid()}/worlds/generate`, body, { timeout: 120000 })
   }
+  function reindexWorldVectors() {
+    return apiPost<{ ok: boolean; total: number; message: string }>(`/api/projects/${pid()}/worlds/reindex-vectors`, {}, { timeout: 10000 })
+  }
 
   // ---- 组织 ----
   function getOrganizations() {
@@ -308,6 +311,20 @@ export function useProjectApi() {
   function autoGenerateCharacter(body: { analysis_result?: any; specification?: string }) {
     return apiPost<any>(`/api/projects/${pid()}/characters/auto-generate`, body, { timeout: 60000 })
   }
+  function autoGenerateCharacterAsync(body: { analysis_result?: any; specification?: string }) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/characters/auto-generate-async`, body, { timeout: 10000 })
+  }
+
+  // ---- 角色变化日志 ----
+  function getCharacterChangeLogs(characterId: number) {
+    return useApi<any[]>(`/api/projects/${pid()}/characters/${characterId}/change-logs`, { key: `change-logs-${characterId}` })
+  }
+  function createCharacterChangeLog(characterId: number, body: { chapter_number: number; summary?: string; changed_fields?: Record<string, any> }) {
+    return apiPost<any>(`/api/projects/${pid()}/characters/${characterId}/change-logs`, body)
+  }
+  function deleteCharacterChangeLog(characterId: number, logId: number) {
+    return apiDelete(`/api/projects/${pid()}/characters/${characterId}/change-logs/${logId}`)
+  }
 
   // ---- 组织 AI 生成 ----
   function generateOrganization(body: { user_input?: string }) {
@@ -448,6 +465,31 @@ export function useProjectApi() {
   function deleteRelation(id: number) {
     return apiDelete(`/api/projects/${pid()}/relations/${id}`)
   }
+  function updateRelation(relationId: number, body: any) {
+    return apiPut(`/api/projects/${pid()}/relations/${relationId}`, body)
+  }
+
+  // ---- 关系变化日志 ----
+  function getRelationChangeLogs(relationId: number) {
+    return useApi<any[]>(`/api/projects/${pid()}/relations/${relationId}/change-logs`, { key: `rel-change-logs-${relationId}` })
+  }
+  function createRelationChangeLog(relationId: number, body: { chapter_number: number; summary?: string; changed_fields?: Record<string, any> }) {
+    return apiPost<any>(`/api/projects/${pid()}/relations/${relationId}/change-logs`, body)
+  }
+  function deleteRelationChangeLog(relationId: number, logId: number) {
+    return apiDelete(`/api/projects/${pid()}/relations/${relationId}/change-logs/${logId}`)
+  }
+
+  // ---- 关系类型管理 ----
+  function getRelationTypes() {
+    return useApi<any[]>(pid() ? `/api/projects/${pid()}/relations/types` : '/api/_skip', { key: `relation-types-${pid() || 'skip'}` })
+  }
+  function renameRelationType(oldName: string, newName: string) {
+    return apiPut(`/api/projects/${pid()}/relations/types/rename`, { old_name: oldName, new_name: newName })
+  }
+  function deleteRelationType(typeName: string) {
+    return apiDelete(`/api/projects/${pid()}/relations/types/${encodeURIComponent(typeName)}`)
+  }
 
   // ============ 记忆系统 ============
   function getMemories(params: { memory_type?: string; keyword?: string; limit?: number } = {}) {
@@ -539,6 +581,9 @@ export function useProjectApi() {
   function generateOrgMembers(orgId: number, body: { user_prompt?: string }) {
     return apiPost<{ count: number; members: any[] }>(`/api/projects/${pid()}/organizations/${orgId}/members/generate`, body, { timeout: 60000 })
   }
+  function generateAllOrgMembers() {
+    return apiPost<{ ok: boolean; total: number; created: number; results: any[] }>(`/api/projects/${pid()}/organizations/members/generate-all`, {}, { timeout: 300000 })
+  }
 
   // ============ 角色职业关联 ============
   function getCharCareers(params: { character_id?: number; career_id?: number } = {}) {
@@ -614,12 +659,14 @@ export function useProjectApi() {
   }
 
   // ============ #22 导出（全量JSON + TXT）============
+  /** 导出项目数据。format=txt 返回下载 URL（绝对路径）；format=json 返回数据对象。 */
   function exportProject(id: number, format: string = 'json') {
-    // TXT 导出走文件下载
+    const config = useRuntimeConfig()
+    const base = import.meta.client ? config.public.apiBase : config.apiBase
     if (format === 'txt') {
-      return `/api/projects/${id}/export?format=txt`
+      return `${base}/api/projects/${id}/export?format=txt`
     }
-    return null
+    return apiGet(`/api/projects/${id}/export?format=json`, { timeout: 30000 })
   }
   // ============ #23 拆书导入解析 ============
   function parseTxt(body: { text?: string; base64?: string }) {
@@ -699,6 +746,10 @@ export function useProjectApi() {
     batchGenerateCharactersAsync,
     autoAnalyzeCharacters,
     autoGenerateCharacter,
+    autoGenerateCharacterAsync,
+    getCharacterChangeLogs,
+    createCharacterChangeLog,
+    deleteCharacterChangeLog,
     // 世界观
     getWorlds,
     createWorld,
@@ -735,6 +786,14 @@ export function useProjectApi() {
     autoRebuildRelations,
     createRelation,
     deleteRelation,
+    updateRelation,
+    // 关系变化日志
+    getRelationChangeLogs,
+    createRelationChangeLog,
+    deleteRelationChangeLog,
+    getRelationTypes,
+    renameRelationType,
+    deleteRelationType,
     // 记忆系统
     getMemories,
     getMemoryStats,
@@ -744,6 +803,7 @@ export function useProjectApi() {
     clearMemories,
     searchMemories,
     reindexMemories,
+    reindexWorldVectors,
     // 职业体系
     getCareers,
     // 物品
@@ -767,6 +827,7 @@ export function useProjectApi() {
     updateOrgMember,
     removeOrgMember,
     generateOrgMembers,
+    generateAllOrgMembers,
     // 角色职业关联
     getCharCareers,
     createCharCareer,

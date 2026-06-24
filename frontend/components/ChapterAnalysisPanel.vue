@@ -111,11 +111,15 @@ const scoreLabels: Record<string, string> = {
 const reportScores = computed<Array<{ label: string; value: number }>>(() => {
   const report = analysis.value?.analysis_report || ''
   const items: Array<{ label: string; value: number }> = []
+  // 只取【整体评分】到「评分理由」之间的部分——评分理由正文里可能也含
+  // "维度名/数字" 形式的内容，绝不能让它污染评分卡片。
   const block = report.match(/【整体评分】[\s\S]*?(?=\n【|\n\s*\n|$)/)
   if (block) {
-    for (const line of block[0].split('\n')) {
-      if (line.includes('评分理由')) continue
-      const m = line.match(/^\s*([^:：]+)[:：]\s*([\d.]+)/)
+    // 在「评分理由」处截断：只解析它之前的分数行
+    let scorePart = block[0].split(/评分理由[:：]/)[0]
+    for (const line of scorePart.split('\n')) {
+      // 分数行格式固定为「  维度名: 8.5/10」，用 /10 锚定避免误匹配正文
+      const m = line.match(/^\s*([^:：]+)[:：]\s*([\d.]+)\s*\/\s*10/)
       if (m) {
         const label = m[1].trim()
         const value = parseFloat(m[2])
@@ -136,17 +140,62 @@ const scoreJustification = computed(() => {
   } else {
     text = analysis.value?.quality_scores?.score_justification || ''
   }
-  return text.replace(/；/g, '\n').replace(/;/g, '\n')
+  return splitJustification(text)
 })
+
+// 健壮地把评分理由切成多行：
+// 1) 统一全/半角分号为换行；
+// 2) 若已有足够换行则保留；
+// 3) 否则按「维度名（分）」或「英文维度名:」边界切分，兼容 AI 把内容挤成一行的写法。
+function splitJustification(raw: string): string {
+  if (!raw) return ''
+  // 统一分号 → 换行
+  let text = raw.replace(/；/g, '\n').replace(/;/g, '\n')
+  const lines = text.split('\n').map(s => s.trim()).filter(Boolean)
+  // 已有 2 行以上 + 每行较短 → 视为已正确分行
+  if (lines.length >= 2 && lines.every(l => l.length <= 220)) {
+    return lines.join('\n')
+  }
+  // 退化：整段拼接后按维度边界重新切分
+  const joined = lines.join('')
+  // 维度名清单（中文名 / 英文 key），长名优先匹配避免子串误判
+  const dims = [
+    '番茄追更比潜力', '番茄追更潜力', '番茄留存力', '番茄吸量力',
+    '世界观一致性', '剧情逻辑', '对话质量', '角色塑造', '文笔质量',
+    '节奏把控', '吸引力', '连贯性', '整体质量',
+    'bookmark_ratio', 'retention', 'attraction', 'world_consistency',
+    'plot_logic', 'dialogue_quality', 'character_depth', 'writing_quality',
+    'pacing', 'engagement', 'coherence', 'overall',
+  ]
+  // 维度名后跟「（数字）」或「:/：」即视为一段开头
+  // 兼容两种 AI 写法：pacing: 描述 / 节奏把控（7.5）：描述
+  const dimAlt = dims.map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
+  const re = new RegExp(`(${dimAlt})\\s*[（(]\\s*\\d|(${dimAlt})\\s*[:：]`, 'g')
+  // 标记每个维度起始位置
+  const marks: number[] = []
+  let mm: RegExpExecArray | null
+  while ((mm = re.exec(joined)) !== null) {
+    marks.push(mm.index)
+    if (mm.index === re.lastIndex) re.lastIndex++ // 避免零宽死循环
+  }
+  if (marks.length <= 1) return joined // 切不出多个维度，原样返回
+  const out: string[] = []
+  for (let i = 0; i < marks.length; i++) {
+    const seg = joined.slice(marks[i], marks[i + 1]).trim()
+    if (seg) out.push(seg)
+  }
+  return out.join('\n')
+}
 
 const useReportScores = computed(() => reportScores.value.length > 0)
 
-// 降级：从 quality_scores 构造评分卡（排除 score_justification）
+// 降级：从 quality_scores 构造评分卡（排除 score_justification，且只认已知维度，防脏字段）
 const qualityScoreCards = computed(() => {
   const qs = analysis.value?.quality_scores || {}
   return Object.entries(qs)
-    .filter(([k, v]) => k !== 'score_justification' && typeof v === 'number')
-    .map(([k, v]) => ({ key: k, label: scoreLabels[k] || k, value: v as number }))
+    .filter(([k, v]) => k !== 'score_justification' && k !== 'justification'
+      && typeof v === 'number' && k in scoreLabels)
+    .map(([k, v]) => ({ key: k, label: scoreLabels[k], value: v as number }))
 })
 
 // 统一评分数据源（reportScores 优先，降级 qualityScoreCards）

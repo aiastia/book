@@ -21,7 +21,8 @@ async function onExport(p: any, format: string = 'json') {
     if (format === 'txt') {
       // TXT 整书下载
       const token = (import.meta.client && localStorage.getItem('moyu_token')) || ''
-      const resp = await fetch(`/api/projects/${p.id}/export?format=txt`, {
+      const downloadUrl = api.exportProject(p.id, 'txt') as string
+      const resp = await fetch(downloadUrl, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!resp.ok) throw new Error('导出失败')

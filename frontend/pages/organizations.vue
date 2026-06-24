@@ -17,7 +17,7 @@ const showGen = ref(false)
 const showAdd = ref(false)
 const newOrg = reactive({ name: '', org_type: '', description: '' })
 const editing = ref<any>(null)
-const editForm = reactive({ name: '', org_type: '', description: '', power_value: 50, location: '', motto: '' })
+const editForm = reactive({ name: '', org_type: '', description: '', power_value: 50, location: '', motto: '', color: '' })
 const genCount = ref(3)
 const genReq = ref('')
 
@@ -61,7 +61,9 @@ async function loadMembers(orgId: number) {
 
 // 成员管理
 const showAddMember = ref(false)
-const newMember = reactive({ character_id: null as number | null, position: '', rank: 5, loyalty: 60, contribution: 30, joined_at: '', notes: '' })
+const showEditMember = ref(false)
+const editMemberId = ref<number | null>(null)
+const newMember = reactive({ character_id: null as number | null, position: '', rank: 5, loyalty: 60, contribution: 30, status: 'active', joined_at: '', notes: '' })
 const genMembersLoading = ref(false)
 async function onAddMember() {
   if (!newMember.character_id || !selectedOrgId.value) return
@@ -73,6 +75,20 @@ async function onAddMember() {
     await refresh()
     msg.success('已添加')
   } catch (e: any) { msg.error('添加失败：' + formatError(e)) }
+}
+function openEditMember(m: any) {
+  editMemberId.value = m.id
+  Object.assign(newMember, { character_id: m.character_id, position: m.position || '', rank: m.rank || 5, loyalty: m.loyalty || 50, contribution: m.contribution || 30, status: m.status || 'active', joined_at: m.joined_at || '', notes: m.notes || '' })
+  showEditMember.value = true
+}
+async function onSaveMember() {
+  if (!selectedOrgId.value || !editMemberId.value) return
+  try {
+    await api.updateOrgMember(selectedOrgId.value, editMemberId.value, { ...newMember })
+    showEditMember.value = false; editMemberId.value = null
+    await loadMembers(selectedOrgId.value); await refresh()
+    msg.success('已更新')
+  } catch (e: any) { msg.error('更新失败：' + formatError(e)) }
 }
 async function onRemoveMember(memberId: number) {
   if (!selectedOrgId.value) return
@@ -108,7 +124,7 @@ async function onAdd() {
 }
 function openEdit(o: any) {
   editing.value = o
-  Object.assign(editForm, { name: o.name, org_type: o.org_type || '', description: o.description || '', power_value: o.power_value || 50, location: o.location || '', motto: o.motto || '' })
+  Object.assign(editForm, { name: o.name, org_type: o.org_type || '', description: o.description || '', power_value: o.power_value || 50, location: o.location || '', motto: o.motto || '', color: o.color || '' })
 }
 async function onSave() {
   if (!selectedOrgId.value) return
@@ -122,20 +138,33 @@ async function onDelete(id: number) {
 }
 
 const memberColumns = [
-  { title: '角色', dataIndex: 'character_name', key: 'name' },
-  { title: '职位', dataIndex: 'position', key: 'position' },
-  { title: '等级', dataIndex: 'rank', key: 'rank', width: 60 },
-  { title: '忠诚', dataIndex: 'loyalty', key: 'loyalty', width: 70 },
-  { title: '贡献', dataIndex: 'contribution', key: 'contribution', width: 70 },
-  { title: '操作', key: 'actions', width: 70 },
+  { title: '姓名', dataIndex: 'character_name', key: 'name', width: 100 },
+  { title: '职位', dataIndex: 'position', key: 'position', width: 130 },
+  { title: '忠诚度', dataIndex: 'loyalty', key: 'loyalty', width: 80 },
+  { title: '贡献度', dataIndex: 'contribution', key: 'contribution', width: 80 },
+  { title: '状态', dataIndex: 'status', key: 'status', width: 70 },
+  { title: '加入时间', dataIndex: 'joined_at', key: 'joined', width: 90 },
+  { title: '操作', key: 'actions', width: 100 },
 ]
 function loyaltyColor(v: number) { return v >= 70 ? '#52A569' : v >= 40 ? '#D49A4E' : '#C75B5B' }
+const initAllLoading = ref(false)
+async function onInitAllMembers() {
+  if (!await msg.confirm('AI 将为所有尚无成员的组织自动分配成员（已有成员的跳过）。确认开始？')) return
+  initAllLoading.value = true
+  try {
+    const r = await api.generateAllOrgMembers()
+    await refresh()
+    msg.success(`完成：${r.created} 个新成员分配至 ${r.results.filter((x:any) => !x.skipped && !x.error).length} 个组织`)
+  } catch (e: any) { msg.error('失败：' + formatError(e)) }
+  finally { initAllLoading.value = false }
+}
 </script>
 
 <template>
   <PageHeader title="组织与势力">
     <template #actions>
       <a-button type="primary" :loading="generating" @click="showGen = true">AI 生成组织</a-button>
+      <a-button :loading="initAllLoading" @click="onInitAllMembers">🤖 一键分配全员</a-button>
       <a-button @click="showAdd = true">+ 添加</a-button>
     </template>
   </PageHeader>
@@ -182,8 +211,9 @@ function loyaltyColor(v: number) { return v >= 70 ? '#52A569' : v >= 40 ? '#D49A
             <a-descriptions :column="2" size="small" style="margin-top:10px;">
               <a-descriptions-item label="所在地">{{ selectedOrg.location || '—' }}</a-descriptions-item>
               <a-descriptions-item label="成员数">{{ selectedOrg.member_count || 0 }} 人</a-descriptions-item>
-              <a-descriptions-item label="宗旨" :span="2">{{ selectedOrg.motto || '—' }}</a-descriptions-item>
-              <a-descriptions-item label="简介" :span="2">{{ selectedOrg.description || '—' }}</a-descriptions-item>
+              <a-descriptions-item label="代表颜色" :span="2">{{ selectedOrg.color || '—' }}</a-descriptions-item>
+              <a-descriptions-item label="格言/口号" :span="2">{{ selectedOrg.motto || '—' }}</a-descriptions-item>
+              <a-descriptions-item label="组织目的/简介" :span="2">{{ selectedOrg.description || '—' }}</a-descriptions-item>
             </a-descriptions>
           </a-card>
           <!-- 成员表格 -->
@@ -195,12 +225,17 @@ function loyaltyColor(v: number) { return v >= 70 ? '#52A569' : v >= 40 ? '#D49A
             <a-table :columns="memberColumns" :data-source="members" :loading="loadingMembers" row-key="id" size="small" :pagination="false">
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'loyalty'">
-                  <span :style="{ color: loyaltyColor(record.loyalty), fontWeight: 600 }">{{ record.loyalty }}</span>
+                  <a-progress :percent="record.loyalty" :size="20" :show-info="false" stroke-color="#52A569" trail-color="#F0F0F0" />
+                  <span :style="{ color: loyaltyColor(record.loyalty), fontWeight: 600, fontSize:'12px' }">{{ record.loyalty }}%</span>
                 </template>
                 <template v-else-if="column.key === 'contribution'">
-                  <span :style="{ color: loyaltyColor(record.contribution) }">{{ record.contribution }}</span>
+                  <span :style="{ color: loyaltyColor(record.contribution), fontWeight: 600 }">{{ record.contribution }}%</span>
+                </template>
+                <template v-else-if="column.key === 'status'">
+                  <a-tag :color="record.status === 'active' ? 'green' : record.status === 'deceased' ? 'red' : record.status === 'expelled' ? 'orange' : 'default'" size="small">{{ { active: '在职', retired: '退隐', expelled: '驱逐', deceased: '已故' }[record.status] || record.status }}</a-tag>
                 </template>
                 <template v-else-if="column.key === 'actions'">
+                  <a-button type="link" size="small" @click="openEditMember(record)">编辑</a-button>
                   <a-button type="link" danger size="small" @click="onRemoveMember(record.id)">移除</a-button>
                 </template>
               </template>
@@ -226,18 +261,21 @@ function loyaltyColor(v: number) { return v >= 70 ? '#52A569' : v >= 40 ? '#D49A
       </a-form>
       <template #footer><a-button @click="showAdd = false">取消</a-button><a-button type="primary" @click="onAdd">添加</a-button></template>
     </a-modal>
-    <a-modal :open="!!editing" @update:open="(v:any) => { if(!v) editing = null }" title="编辑组织" width="480px" v-if="editing">
+    <a-modal :open="!!editing" @update:open="(v:any) => { if(!v) editing = null }" title="编辑组织" width="520px" v-if="editing">
       <a-form layout="vertical">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <a-form-item label="名称"><a-input v-model:value="editForm.name" /></a-form-item>
           <a-form-item label="类型"><a-input v-model:value="editForm.org_type" /></a-form-item>
         </div>
-        <a-form-item label="描述"><a-textarea v-model:value="editForm.description" :rows="3" /></a-form-item>
+        <a-form-item label="格言/口号"><a-input v-model:value="editForm.motto" placeholder="如：以血铸剑，以剑问道" /></a-form-item>
+        <a-form-item label="代表颜色">
+          <a-textarea v-model:value="editForm.color" :rows="1" placeholder="如：靛青色，象征庙宇的庄重、夜色的监控与水的平衡" />
+        </a-form-item>
+        <a-form-item label="组织目的/简介"><a-textarea v-model:value="editForm.description" :rows="3" /></a-form-item>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <a-form-item label="势力值(0-100)"><a-input-number v-model:value="editForm.power_value" :min="0" :max="100" style="width:100%" /></a-form-item>
           <a-form-item label="所在地"><a-input v-model:value="editForm.location" /></a-form-item>
         </div>
-        <a-form-item label="宗旨"><a-input v-model:value="editForm.motto" /></a-form-item>
       </a-form>
       <template #footer><a-button @click="editing = null">取消</a-button><a-button type="primary" @click="onSave">保存</a-button></template>
     </a-modal>
@@ -249,13 +287,36 @@ function loyaltyColor(v: number) { return v >= 70 ? '#52A569' : v >= 40 ? '#D49A
           </a-select>
         </a-form-item>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <a-form-item label="职位"><a-input v-model:value="newMember.position" /></a-form-item>
+          <a-form-item label="职位"><a-input v-model:value="newMember.position" placeholder="如：阁主/长老" /></a-form-item>
           <a-form-item label="等级(1-10)"><a-input-number v-model:value="newMember.rank" :min="1" :max="10" style="width:100%" /></a-form-item>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <a-form-item label="忠诚(0-100)"><a-input-number v-model:value="newMember.loyalty" :min="0" :max="100" style="width:100%" /></a-form-item>
           <a-form-item label="贡献(0-100)"><a-input-number v-model:value="newMember.contribution" :min="0" :max="100" style="width:100%" /></a-form-item>
         </div>
+        <a-form-item label="加入时间"><a-input v-model:value="newMember.joined_at" placeholder="如：第3章 / 十年前" /></a-form-item>
+      </a-form>
+    </a-modal>
+    <!-- 编辑成员 -->
+    <a-modal v-model:open="showEditMember" title="编辑成员" width="440px" @ok="onSaveMember">
+      <a-form layout="vertical">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <a-form-item label="职位"><a-input v-model:value="newMember.position" placeholder="如：阁主/长老" /></a-form-item>
+          <a-form-item label="等级(1-10)"><a-input-number v-model:value="newMember.rank" :min="1" :max="10" style="width:100%" /></a-form-item>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <a-form-item label="忠诚(0-100)"><a-input-number v-model:value="newMember.loyalty" :min="0" :max="100" style="width:100%" /></a-form-item>
+          <a-form-item label="贡献(0-100)"><a-input-number v-model:value="newMember.contribution" :min="0" :max="100" style="width:100%" /></a-form-item>
+        </div>
+        <a-form-item label="状态">
+          <a-select v-model:value="newMember.status">
+            <a-select-option value="active">在职</a-select-option>
+            <a-select-option value="retired">退隐</a-select-option>
+            <a-select-option value="expelled">驱逐</a-select-option>
+            <a-select-option value="deceased">已故</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item label="加入时间"><a-input v-model:value="newMember.joined_at" placeholder="如：第3章 / 十年前" /></a-form-item>
       </a-form>
     </a-modal>
   </div>

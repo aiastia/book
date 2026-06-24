@@ -74,8 +74,75 @@ const editForm = reactive({
 })
 const roleOptions = ['主角','配角','反派','路人']
 const arcOptions = ['成长','堕落','救赎','顿悟','平淡','']
+const statusLabels: Record<string, string> = { alive: '存活', dead: '死亡', missing: '失踪', retired: '退隐' }
 
-// 角色字段定义（显示用）
+// ===== 角色变化日志 =====
+const changeLogs = ref<any[]>([])
+const showChangeLogForm = ref(false)
+const newLog = reactive({ chapter_number: null as number | null, summary: '', changed_fields: {} as Record<string, any> })
+const trackableFields = [
+  { key: 'status', label: '状态' },
+  { key: 'personality', label: '性格' },
+  { key: 'mental_state', label: '当前心理' },
+  { key: 'appearance', label: '外貌' },
+  { key: 'ability', label: '能力' },
+  { key: 'arc_type', label: '变化类型' },
+  { key: 'speech_style', label: '说话风格' },
+  { key: 'main_career_stage_desc', label: '境界' },
+]
+async function loadChangeLogs(charId: number) {
+  const res = await api.getCharacterChangeLogs(charId)
+  const d = (res as any)?.data
+  changeLogs.value = (d?.value ?? d ?? []) as any[]
+}
+function openAddLog() {
+  newLog.chapter_number = null
+  newLog.summary = ''
+  newLog.changed_fields = {}
+  showChangeLogForm.value = true
+}
+async function onAddLog() {
+  const charId = logCharacter.value?.id
+  if (!charId || !newLog.chapter_number) { msg.warning('请输入章节号'); return }
+  try {
+    await api.createCharacterChangeLog(charId, {
+      chapter_number: newLog.chapter_number,
+      summary: newLog.summary,
+      changed_fields: newLog.changed_fields,
+    })
+    showChangeLogForm.value = false
+    await loadChangeLogs(charId)
+    msg.success('已添加变化记录')
+  } catch (e: any) { msg.error('添加失败：' + formatError(e)) }
+}
+async function onDeleteLog(logId: number) {
+  const charId = logCharacter.value?.id
+  if (!charId) return
+  if (!await msg.confirm('确认删除此变化记录？')) return
+  try {
+    await api.deleteCharacterChangeLog(charId, logId)
+    await loadChangeLogs(charId)
+    msg.success('已删除')
+  } catch (e: any) { msg.error('删除失败：' + formatError(e)) }
+}
+function toggleChangedField(key: string) {
+  if (newLog.changed_fields[key]) {
+    delete newLog.changed_fields[key]
+  } else {
+    newLog.changed_fields[key] = (editForm as any)[key] ?? ''
+  }
+}
+
+// ===== 独立人物日志弹窗 =====
+const showLogModal = ref(false)
+const logCharacter = ref<any>(null)
+
+function openChangeLog(c: any) {
+  logCharacter.value = c
+  showLogModal.value = true
+  loadChangeLogs(c.id)
+}
+
 const displayFields = [
   { key:'identity', label:'身份' },
   { key:'age', label:'年龄' },
@@ -112,10 +179,13 @@ async function onGenerate() {
       msg.success('批量生成任务已提交，可在右下角查看进度')
       setTimeout(() => refresh(), 5000)
     } else {
-      await api.generateCharacter({ role_type: genRole.value, extra })
-      await refresh()
+      // 单个生成也走异步任务，避免前台阻塞
+      const { task_id } = await api.batchGenerateCharactersAsync({ count: 1, requirements: `${genRole.value}。${extra}` })
+      const { trackTask } = useBackgroundTasks()
+      trackTask(task_id, 'characters', `生成${genRole.value}角色`)
       showGen.value = false
-      msg.success('角色生成完成')
+      msg.success('生成任务已提交，可在右下角查看进度')
+      setTimeout(() => refresh(), 5000)
     }
   } catch (e:any) { msg.error('生成失败：'+formatError(e)) }
   finally { generating.value = false }
@@ -153,6 +223,7 @@ function openEdit(c:any) {
       (editForm as any)[k] = c[k] ?? (editForm as any)[k]
     }
   })
+  loadChangeLogs(c.id)
 }
 async function onSave() {
   try {
@@ -169,9 +240,9 @@ async function onSave() {
     await refresh()
     editing.value = null
     msg.success('已保存')
-  }
-  catch (e:any) { msg.error('保存失败：'+formatError(e)) }
+  } catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
+
 async function onDelete(id:number) {
   if (!await msg.confirm('确认删除？')) return
   try { await api.deleteCharacter(id); await refresh(); msg.success('已删除') }
@@ -194,8 +265,9 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
             <span class="char-avatar">{{ (c.name||'?').charAt(0) }}</span>
             <span class="char-name">{{ c.name }}</span>
             <a-tag :color="roleColor[c.role]||'default'" size="small">{{ c.role }}</a-tag>
-            <a-tag v-if="c.status && c.status!=='alive'" size="small">{{ c.status }}</a-tag>
+            <a-tag v-if="c.status && c.status!=='alive'" size="small" :color="c.status==='dead'?'red':c.status==='missing'?'orange':'default'">{{ statusLabels[c.status] || c.status }}</a-tag>
             <div style="margin-left:auto">
+              <a-button type="link" size="small" @click="openChangeLog(c)">📋 日志</a-button>
               <a-button type="link" size="small" @click="openEdit(c)">编辑</a-button>
               <a-button type="link" danger size="small" @click="onDelete(c.id)">删除</a-button>
             </div>
@@ -211,18 +283,24 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
             <span v-else class="desc-value">{{ c[f.key] }}</span>
           </div>
           <!-- 主职业阶段 -->
-          <div v-if="c.main_career_id || (c.sub_careers && c.sub_careers.length)" class="desc-row career-row">
-            <span class="desc-label">修炼</span>
+          <div v-if="c.main_career_id" class="desc-row career-row">
+            <span class="desc-label">主修</span>
             <span class="desc-value">
-              <a-tag v-if="c.main_career_id" color="gold" size="small">
+              <a-tag color="gold" size="small">
                 {{ careerNameById(c.main_career_id) }}
-                <span v-if="c.main_career_stage_desc">{{ c.main_career_stage_desc }}</span>
-                <span v-else-if="c.main_career_stage && c.main_career_stage !== '0'">Lv.{{ c.main_career_stage }}</span>
+                <span v-if="c.main_career_stage_desc"> · {{ c.main_career_stage_desc }}</span>
+                <span v-else-if="c.main_career_stage && String(c.main_career_stage) !== '0'"> · Lv.{{ c.main_career_stage }}</span>
               </a-tag>
-              <a-tag v-for="(sc, i) in (c.sub_careers || [])" :key="i" color="cyan" size="small">
+            </span>
+          </div>
+          <!-- 副职业阶段 -->
+          <div v-if="(c.sub_careers || []).length" class="desc-row career-row">
+            <span class="desc-label">副修</span>
+            <span class="desc-value">
+              <a-tag v-for="(sc, i) in (c.sub_careers || [])" :key="i" color="cyan" size="small" style="margin-right:4px">
                 {{ sc.name || careerNameById(sc.career_id) }}
-                <span v-if="sc.stage_desc">{{ sc.stage_desc }}</span>
-                <span v-else-if="sc.stage && sc.stage !== '0'">Lv.{{ sc.stage }}</span>
+                <span v-if="sc.stage_desc"> · {{ sc.stage_desc }}</span>
+                <span v-else-if="sc.stage && String(sc.stage) !== '0'"> · Lv.{{ sc.stage }}</span>
               </a-tag>
             </span>
           </div>
@@ -287,14 +365,15 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
         <a-row :gutter="12">
           <a-col :span="8"><a-form-item label="姓名"><a-input v-model:value="editForm.name" /></a-form-item></a-col>
           <a-col :span="8"><a-form-item label="定位"><a-select v-model:value="editForm.role"><a-select-option v-for="r in roleOptions" :key="r" :label="r" :value="r" /></a-select></a-form-item></a-col>
-          <a-col :span="8"><a-form-item label="状态"><a-select v-model:value="editForm.status"><a-select-option label="存活" value="alive" /><a-select-option label="死亡" value="dead" /><a-select-option label="失踪" value="missing" /></a-select></a-form-item></a-col>
+          <a-col :span="8"><a-form-item label="状态"><a-select v-model:value="editForm.status"><a-select-option value="alive">存活</a-select-option><a-select-option value="dead">死亡</a-select-option><a-select-option value="missing">失踪</a-select-option><a-select-option value="retired">退隐</a-select-option></a-select></a-form-item></a-col>
         </a-row>
         <a-row :gutter="12">
-          <a-col :span="8"><a-form-item label="所属组织">
-            <a-select v-model:value="editForm.organization_id" allow-clear placeholder="选择组织">
+          <a-col :span="8"><a-form-item label="主组织">
+            <a-select v-model:value="editForm.organization_id" allow-clear placeholder="选择主组织">
               <a-select-option :value="null">无</a-select-option>
               <a-select-option v-for="o in (organizations || [])" :key="o.id" :value="o.id">{{ o.name }}</a-select-option>
             </a-select>
+            <div style="font-size:11px;color:#8C8C8C;margin-top:2px;">💡 角色可属于多个组织，在「<NuxtLink :to="`/projects/${currentProjectId}/organizations`" style="color:#4D8088;">组织与势力</NuxtLink>」页面管理</div>
           </a-form-item></a-col>
           <a-col :span="8"><a-form-item label="性别"><a-input v-model:value="editForm.gender" /></a-form-item></a-col>
           <a-col :span="8"><a-form-item label="年龄"><a-input v-model:value="editForm.age" /></a-form-item></a-col>
@@ -325,34 +404,19 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
 
         <!-- 副职业：多条修炼体系+境界（动态增删） -->
         <a-form-item label="副职业">
-          <div v-if="editForm.sub_careers.length" class="sub-career-header" style="display:flex;gap:12px;margin-bottom:4px;font-size:11px;color:#999;">
-            <span style="flex:1;padding-left:8px;">修炼体系</span>
-            <span style="width:140px;padding-left:8px;">境界</span>
-            <span style="width:32px;"></span>
-          </div>
           <div v-for="(sc, idx) in editForm.sub_careers" :key="idx">
             <a-row :gutter="12" style="margin-bottom:6px;align-items:center;">
-              <a-col :span="12"><a-select v-model:value="sc.career_id" allow-clear placeholder="修炼体系" size="small">
-                <a-select-option :value="null">未设定</a-select-option>
-                <a-select-option
-                  v-for="cr in availableSubCareers(idx)"
-                  :key="cr.id"
-                  :value="cr.id"
-                >{{ cr.name }}</a-select-option>
-              </a-select></a-col>
-              <a-col :span="10"><a-select
-                v-model:value="sc.stage_desc"
-                allow-clear
-                placeholder="境界"
-                size="small"
-                :disabled="!sc.career_id"
-              >
-                <a-select-option
-                  v-for="st in careerStages(sc.career_id)"
-                  :key="st.level"
-                  :value="st.name"
-                >{{ st.name }}</a-select-option>
-              </a-select></a-col>
+              <a-col :span="12">
+                <a-select v-model:value="sc.career_id" allow-clear placeholder="修炼体系">
+                  <a-select-option :value="null">未设定</a-select-option>
+                  <a-select-option v-for="cr in availableSubCareers(idx)" :key="cr.id" :value="cr.id">{{ cr.name }}</a-select-option>
+                </a-select>
+              </a-col>
+              <a-col :span="10">
+                <a-select v-model:value="sc.stage_desc" allow-clear placeholder="境界" :disabled="!sc.career_id">
+                  <a-select-option v-for="st in careerStages(sc.career_id)" :key="st.level" :value="st.name">{{ st.name }}</a-select-option>
+                </a-select>
+              </a-col>
               <a-col :span="2" style="text-align:right;">
                 <a-button size="small" danger type="link" @click="editForm.sub_careers.splice(idx, 1)">✕</a-button>
               </a-col>
@@ -387,6 +451,35 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
         <a-button type="primary" @click="onSave">保存</a-button>
       </div>
     </a-modal>
+
+    <!-- 人物日志独立弹窗 -->
+    <a-modal v-model:open="showLogModal" :title="`📋 ${logCharacter?.name || ''} 变化日志`" width="640px">
+      <div v-if="changeLogs.length" class="change-log-list">
+        <div v-for="log in changeLogs" :key="log.id" class="change-log-item">
+          <span class="log-chapter">第{{ log.chapter_number }}章</span>
+          <span class="log-fields">
+            <a-tag v-for="(v, k) in log.changed_fields" :key="k" size="small" color="blue">{{ trackableFields.find(f=>f.key===k)?.label || k }}: {{ v }}</a-tag>
+          </span>
+          <span v-if="log.summary" class="log-summary">{{ log.summary }}</span>
+          <a-button type="link" danger size="small" @click="onDeleteLog(log.id)" style="margin-left:auto">✕</a-button>
+        </div>
+      </div>
+      <a-empty v-else description="暂无变化记录" />
+      <div v-if="!showChangeLogForm" style="margin-top:12px;">
+        <a-button size="small" @click="openAddLog">＋ 添加变化</a-button>
+      </div>
+      <div v-else class="change-log-form">
+        <a-row :gutter="12">
+          <a-col :span="6"><a-form-item label="章节号"><a-input-number v-model:value="newLog.chapter_number" :min="1" style="width:100%" /></a-form-item></a-col>
+          <a-col :span="18"><a-form-item label="摘要"><a-input v-model:value="newLog.summary" placeholder="如：受伤后性格大变" /></a-form-item></a-col>
+        </a-row>
+        <a-form-item label="变更字段">
+          <a-checkable-tag v-for="f in trackableFields" :key="f.key" :checked="!!newLog.changed_fields[f.key]" @change="toggleChangedField(f.key)" style="margin:2px 4px;">{{ f.label }}</a-checkable-tag>
+        </a-form-item>
+        <a-button size="small" type="primary" @click="onAddLog">确认添加</a-button>
+        <a-button size="small" @click="showChangeLogForm = false" style="margin-left:8px">取消</a-button>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -403,4 +496,12 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
 .desc-label { color:#8C8C8C; min-width:60px; flex-shrink:0; }
 .desc-value { color:#2B2B2B; white-space:pre-wrap; }
 .desc-empty { color:#bbb; font-size:13px; text-align:center; padding:12px; }
+/* 变化日志 */
+.change-log-list { max-height: 200px; overflow-y: auto; margin-bottom: 8px; }
+.change-log-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f5f5f5; font-size: 12px; }
+.change-log-item:last-child { border-bottom: none; }
+.log-chapter { font-weight: 600; color: #4D8088; min-width: 50px; }
+.log-fields { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+.log-summary { color: #888; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-log-form { background: #fafafa; border: 1px solid #f0f0f0; border-radius: 8px; padding: 12px; margin: 8px 0; }
 </style>

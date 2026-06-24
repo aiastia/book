@@ -21,6 +21,8 @@ from app.core.auth import get_password_hash
 from app.core.database import Base, async_session, engine
 from app.models.user import User
 from app.models.skill import Skill
+from app.models.character_change_log import CharacterChangeLog  # 确保表在 create_all 前注册
+from app.models.relation_change_log import RelationChangeLog
 from app.skills.builtin import init_builtin_skills
 from app.skills.builtin import init_builtin_skills
 

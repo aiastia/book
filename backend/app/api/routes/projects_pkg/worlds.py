@@ -1,11 +1,76 @@
 """世界观 + 组织 + 职业体系"""
+import asyncio
 import json
+import logging
 from app.api.routes.projects_pkg.base import *
 from app.core.database import async_session
 from app.models.project import Project
 
 
 router = make_router()
+logger = logging.getLogger(__name__)
+
+
+# ===== 世界设定向量同步 =====
+
+async def _sync_world_memory(project_id: int, world_id: int, name: str, category: str, content: str, user_id: int):
+    """创建或更新世界观对应的向量记忆（供章节生成语义检索）。"""
+    try:
+        from app.models.story_memory import StoryMemory
+        from app.services.memory_vector_service import MemoryVectorService, _embed_one
+        async with async_session() as s:
+            title_prefix = f"[world:{world_id}]"
+            # 删除旧记忆（通过 title 前缀匹配）
+            old = (await s.execute(
+                select(StoryMemory).where(
+                    StoryMemory.project_id == project_id,
+                    StoryMemory.title.like(f"{title_prefix}%"),
+                )
+            )).scalars().all()
+            for o in old:
+                await s.delete(o)
+            # 创建新记忆
+            memory_text = f"【{category}】{name}\n{content}"
+            m = StoryMemory(
+                project_id=project_id, user_id=user_id,
+                memory_type="world", title=f"{title_prefix} {name}",
+                content=memory_text, importance=0.7,
+            )
+            s.add(m)
+            await s.commit()
+            await s.refresh(m)
+            # 向量化
+            try:
+                vec = await _embed_one(memory_text[:2000])
+                if vec:
+                    vs = MemoryVectorService()
+                    await vs.add_memory(
+                        user_id=user_id or 0, project_id=project_id, memory_id=m.id,
+                        content=memory_text, memory_type="world", title=m.title, importance=0.7,
+                    )
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"[world] 向量同步失败 world_id={world_id}: {e}")
+
+
+async def _delete_world_memory(project_id: int, world_id: int):
+    """删除世界观对应的向量记忆。"""
+    try:
+        from app.models.story_memory import StoryMemory
+        async with async_session() as s:
+            title_prefix = f"[world:{world_id}]"
+            old = (await s.execute(
+                select(StoryMemory).where(
+                    StoryMemory.project_id == project_id,
+                    StoryMemory.title.like(f"{title_prefix}%"),
+                )
+            )).scalars().all()
+            for o in old:
+                await s.delete(o)
+            await s.commit()
+    except Exception as e:
+        logger.warning(f"[world] 删除向量记忆失败 world_id={world_id}: {e}")
 
 
 # ============ 核心世界观（时间/地点/氛围/规则，存于 Project） ============
@@ -184,7 +249,7 @@ async def generate_world(project_id: int, req: dict, db: AsyncSession = Depends(
 
 @router.put("/{project_id}/worlds/{world_id}")
 async def update_world(project_id: int, world_id: int, req: WorldSettingCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    await get_user_project(db, project_id, user)  # 权限校验
+    await get_user_project(db, project_id, user)
     w = (await db.execute(select(WorldSetting).where(WorldSetting.id == world_id, WorldSetting.project_id == project_id))).scalar_one_or_none()
     if not w:
         raise HTTPException(404, "世界设定不存在")
@@ -196,13 +261,63 @@ async def update_world(project_id: int, world_id: int, req: WorldSettingCreate, 
 
 @router.delete("/{project_id}/worlds/{world_id}")
 async def delete_world(project_id: int, world_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    await get_user_project(db, project_id, user)  # 权限校验
+    await get_user_project(db, project_id, user)
     w = (await db.execute(select(WorldSetting).where(WorldSetting.id == world_id, WorldSetting.project_id == project_id))).scalar_one_or_none()
     if not w:
         raise HTTPException(404, "世界设定不存在")
     await db.delete(w)
     await db.commit()
+    # 删除对应向量记忆
+    asyncio.ensure_future(_delete_world_memory(project_id, world_id))
     return {"ok": True}
+
+
+@router.post("/{project_id}/worlds/reindex-vectors")
+async def reindex_world_relation_vectors(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """一键批量回填：将所有世界观设定 + 角色关系同步到向量库。
+    
+    后台异步执行，立即返回。
+    """
+    await get_user_project(db, project_id, user)
+    world_count = await db.scalar(
+        select(func.count(WorldSetting.id)).where(WorldSetting.project_id == project_id)
+    )
+    rel_count = await db.scalar(
+        select(func.count(CharacterRelation.id)).where(CharacterRelation.project_id == project_id)
+    )
+    total = (world_count or 0) + (rel_count or 0)
+    if total == 0:
+        return {"ok": True, "total": 0, "message": "没有需要同步的数据"}
+
+    async def _run():
+        from app.core.database import async_session as _as
+        synced = 0
+        async with _as() as task_db:
+            # 同步世界观
+            worlds = (await task_db.execute(
+                select(WorldSetting).where(WorldSetting.project_id == project_id)
+            )).scalars().all()
+            for w in worlds:
+                try:
+                    await _sync_world_memory(project_id, w.id, w.name, w.category, w.content, user.id)
+                    synced += 1
+                except Exception:
+                    pass
+            # 同步关系
+            from app.models.character import CharacterRelation as CR
+            rels = (await task_db.execute(
+                select(CR).where(CR.project_id == project_id)
+            )).scalars().all()
+            for r in rels:
+                try:
+                    await _sync_relation_memory(project_id, r.id, user.id)
+                    synced += 1
+                except Exception:
+                    pass
+        logger.info(f"[reindex] 项目 {project_id} 向量回填完成: {synced}/{total}")
+
+    asyncio.ensure_future(_run())
+    return {"ok": True, "total": total, "message": f"正在后台同步 {total} 条数据（{world_count} 个世界观 + {rel_count} 条关系）"}
 
 
 # ============ 组织 ============

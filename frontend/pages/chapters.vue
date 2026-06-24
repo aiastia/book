@@ -244,7 +244,8 @@ async function onExportTxt() {
     const token = localStorage.getItem('moyu_token')
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
-    const res = await fetch(`/api/projects/${currentProjectId.value}/export?format=txt`, { headers })
+    const downloadUrl = api.exportProject(currentProjectId.value!, 'txt') as string
+    const res = await fetch(downloadUrl, { headers })
     if (!res.ok) throw new Error(`导出失败：${res.status}`)
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
@@ -766,7 +767,7 @@ async function onPlanSaved() {
             </div>
           </template>
           <div class="ch-list">
-            <div v-for="c in group.chapters" :key="c.id" class="ch-row" @click="openEditor(c)">
+            <div v-for="c in group.chapters" :key="c.id" class="ch-row">
               <div class="ch-row-icon">📄</div>
               <div class="ch-row-main">
                 <div class="ch-row-head">
@@ -801,7 +802,7 @@ async function onPlanSaved() {
 
       <!-- 默认扁平列表 -->
       <div v-else class="ch-list">
-        <div v-for="c in pagedChapters" :key="c.id" class="ch-row" @click="openEditor(c)">
+        <div v-for="c in pagedChapters" :key="c.id" class="ch-row">
           <div class="ch-row-icon">📄</div>
           <div class="ch-row-main">
             <div class="ch-row-head">

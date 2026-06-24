@@ -6,6 +6,52 @@ from app.core.database import async_session
 router = make_router()
 
 
+async def _sync_org_membership(db: AsyncSession, project_id: int, character_id: int, organization_id: int | None):
+    """统一组织关系：当角色设了 organization_id 时，自动同步到 OrganizationMember 表。
+    
+    改为非破坏性：仅 upsert 主组织记录，不删除角色在其他组织中的成员关系。
+    角色可以通过组织管理页面属于多个组织。
+    """
+    from app.models.organization_member import OrganizationMember
+    from sqlalchemy import delete as sa_delete
+    
+    # 清理该角色在此主组织下的旧成员记录（如果有）
+    if organization_id:
+        await db.execute(
+            sa_delete(OrganizationMember).where(
+                OrganizationMember.project_id == project_id,
+                OrganizationMember.character_id == character_id,
+                OrganizationMember.organization_id == organization_id,
+            )
+        )
+        # 用角色定位作为默认职位提示
+        char = await db.scalar(select(Character.role).where(Character.id == character_id))
+        default_position = "" if (char or "").strip() in ("主角", "配角", "反派", "路人", "") else (char or "")
+        member = OrganizationMember(
+            project_id=project_id,
+            organization_id=organization_id,
+            character_id=character_id,
+            position=default_position,
+            rank=5,
+            loyalty=50,
+            contribution=20,
+            status="active",
+            source="character_fk",
+        )
+        db.add(member)
+        await db.flush()
+    # 如果 organization_id 被清空，删除该角色的所有 OrganizationMember 记录中被标记为 character_fk 来源的
+    # （保留从组织页面手动添加的记录）
+    else:
+        await db.execute(
+            sa_delete(OrganizationMember).where(
+                OrganizationMember.project_id == project_id,
+                OrganizationMember.character_id == character_id,
+                OrganizationMember.source == "character_fk",
+            )
+        )
+
+
 def _normalize_sub_occupations(data: dict) -> str:
     """从 AI 返回中提取副职业，归一为分号分隔字符串。"""
     raw = data.get("sub_occupations") or data.get("secondary_occupations") or []
@@ -50,6 +96,7 @@ async def create_character(project_id: int, req: CharacterCreate, db: AsyncSessi
     db.add(char)
     await db.commit()
     await db.refresh(char)
+    await _sync_org_membership(db, project_id, char.id, char.organization_id)
     return {"id": char.id, "name": char.name}
 
 
@@ -132,6 +179,7 @@ async def update_character(project_id: int, character_id: int, req: CharacterCre
     for key, value in req.model_dump().items():
         setattr(c, key, value)
     await db.commit()
+    await _sync_org_membership(db, project_id, character_id, c.organization_id)
     return {"ok": True}
 
 
@@ -140,6 +188,15 @@ async def delete_character(project_id: int, character_id: int, db: AsyncSession 
     c = (await db.execute(select(Character).where(Character.id == character_id, Character.project_id == project_id))).scalar_one_or_none()
     if not c:
         raise HTTPException(404, "角色不存在")
+    # 清理组织成员记录
+    from app.models.organization_member import OrganizationMember
+    from sqlalchemy import delete as sa_delete
+    await db.execute(
+        sa_delete(OrganizationMember).where(
+            OrganizationMember.project_id == project_id,
+            OrganizationMember.character_id == character_id,
+        )
+    )
     await db.delete(c)
     await db.commit()
     return {"ok": True}
@@ -220,7 +277,13 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
         all_career_map = {c.name: c.id for c in all_careers}
         career_by_id = {c.id: c for c in all_careers}
         def _default_stage(career_obj):
+            """根据职业的阶段列表返回合理的默认境界名。
+            不再只是取第一个——如果 AI 已通过批量生成分配了 stage_desc 就用它，
+            否则取第二个阶段（第一个通常是入门，第二个更有辨识度）。
+            """
             stages = career_obj.stages or []
+            if len(stages) >= 2:
+                return stages[1].get("name", stages[0].get("name", ""))
             return stages[0].get("name", "") if stages else ""
         for item in chars_data:
             if not isinstance(item, dict) or not item.get("name"):
@@ -318,6 +381,8 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
                             break
                 if org_id:
                     char_obj.organization_id = org_id
+                    # 同步到 OrganizationMember 表（统一真相来源）
+                    await _sync_org_membership(db, project_id, char_obj.id, org_id)
                     break  # 只设第一个匹配的组织为主组织
     
     await db.commit()
@@ -425,3 +490,159 @@ async def auto_generate_character(project_id: int, req: AutoCharacterGenerateReq
     ))
     await db.commit()
     return {"character": char_data}
+
+
+@router.post("/{project_id}/characters/auto-generate-async")
+async def auto_generate_character_async(project_id: int, req: AutoCharacterGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步自动生成角色：立即返回 task_id，后台执行。"""
+    await get_user_project(db, project_id, user)
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run_auto_gen(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="generating", message="AI 正在生成角色...")
+        async with async_session() as task_db:
+            class MockReq:
+                analysis_result = payload.get("analysis_result", {})
+                specification = payload.get("specification", "")
+            result = await auto_generate_character(
+                payload["project_id"], MockReq(), task_db,
+                type("U", (), {"id": payload["user_id"]})(),
+            )
+            if isinstance(result, dict):
+                await tracker.complete(message="角色生成完成")
+            else:
+                await tracker.fail("角色生成失败")
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="characters",
+        title="自动生成角色",
+        payload={"project_id": project_id, "user_id": user.id,
+                 "analysis_result": req.analysis_result, "specification": req.specification},
+        runner=_run_auto_gen,
+    )
+    return {"task_id": task_id}
+
+
+@router.post("/{project_id}/characters/sync-org-memberships")
+async def sync_org_memberships(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """一键回填：将所有角色已有的 organization_id 同步到 OrganizationMember 表。
+    
+    建立统一的角色↔组织关系来源。新创建/编辑的角色会自动同步。
+    """
+    await get_user_project(db, project_id, user)
+    chars = (await db.execute(
+        select(Character).where(
+            Character.project_id == project_id,
+            Character.organization_id.isnot(None),
+        )
+    )).scalars().all()
+    synced = 0
+    for c in chars:
+        try:
+            await _sync_org_membership(db, project_id, c.id, c.organization_id)
+            synced += 1
+        except Exception:
+            pass
+    return {"ok": True, "count": synced, "total": len(chars)}
+
+
+# ============ 角色变化日志 ============
+
+class ChangeLogCreate(BaseModel):
+    chapter_number: int
+    summary: str = ""
+    changed_fields: dict = {}
+
+
+@router.get("/{project_id}/characters/{character_id}/change-logs")
+async def list_change_logs(
+    project_id: int, character_id: int,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """列出角色的所有变化日志（按章节号升序）"""
+    await get_user_project(db, project_id, user)
+    from app.models.character_change_log import CharacterChangeLog
+    logs = (await db.execute(
+        select(CharacterChangeLog).where(
+            CharacterChangeLog.project_id == project_id,
+            CharacterChangeLog.character_id == character_id,
+        ).order_by(CharacterChangeLog.chapter_number.asc())
+    )).scalars().all()
+    return [l.to_dict() for l in logs]
+
+
+@router.post("/{project_id}/characters/{character_id}/change-logs")
+async def create_change_log(
+    project_id: int, character_id: int, req: ChangeLogCreate,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """添加一条角色变化日志，自动保存当前角色完整快照"""
+    await get_user_project(db, project_id, user)
+    from app.models.character_change_log import CharacterChangeLog
+    char = (await db.execute(
+        select(Character).where(Character.id == character_id, Character.project_id == project_id)
+    )).scalar_one_or_none()
+    if not char:
+        raise HTTPException(404, "角色不存在")
+    # 生成快照：复制当前 Character 的所有字段值
+    snapshot = {c.name: getattr(char, c.name) for c in char.__table__.columns
+                if c.name not in ('created_at', 'updated_at')}
+    # JSON 字段转为可序列化形式
+    for k, v in snapshot.items():
+        if isinstance(v, (list, dict)):
+            snapshot[k] = v
+    log = CharacterChangeLog(
+        project_id=project_id,
+        character_id=character_id,
+        chapter_number=req.chapter_number,
+        changed_fields=req.changed_fields or {},
+        snapshot=snapshot,
+        summary=req.summary or "",
+    )
+    db.add(log)
+    await db.commit()
+    await db.refresh(log)
+    return log.to_dict()
+
+
+@router.delete("/{project_id}/characters/{character_id}/change-logs/{log_id}")
+async def delete_change_log(
+    project_id: int, character_id: int, log_id: int,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """删除一条变化日志"""
+    await get_user_project(db, project_id, user)
+    from app.models.character_change_log import CharacterChangeLog
+    log = (await db.execute(
+        select(CharacterChangeLog).where(
+            CharacterChangeLog.id == log_id,
+            CharacterChangeLog.project_id == project_id,
+            CharacterChangeLog.character_id == character_id,
+        )
+    )).scalar_one_or_none()
+    if not log:
+        raise HTTPException(404, "日志不存在")
+    await db.delete(log)
+    await db.commit()
+    return {"ok": True}
+
+
+async def get_character_state_at_chapter(db: AsyncSession, project_id: int, character_id: int, chapter_number: int) -> dict | None:
+    """获取角色在指定章节之前的「当时状态」快照。
+    
+    chapter_number 为当前要生成的章节号。返回 < chapter_number 的最新快照。
+    无快照则返回 None（调用方用 Character 当前字段作为初始状态）。
+    """
+    from app.models.character_change_log import CharacterChangeLog
+    log = (await db.execute(
+        select(CharacterChangeLog).where(
+            CharacterChangeLog.project_id == project_id,
+            CharacterChangeLog.character_id == character_id,
+            CharacterChangeLog.chapter_number < chapter_number,
+        ).order_by(CharacterChangeLog.chapter_number.desc()).limit(1)
+    )).scalar_one_or_none()
+    return log.snapshot if log else None

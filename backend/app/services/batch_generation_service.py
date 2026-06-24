@@ -265,6 +265,8 @@ async def run_batch_generation(task_id: int):
                         continue
                     success = True
                     completed += 1
+                    # 刷新项目总字数
+                    await _refresh_project_wc(project_id)
                     logger.info(f"[batch] 第{ch_num}章生成完成 ({completed}/{len(chapter_ids)})")
                     break
             except Exception as e:
@@ -352,6 +354,20 @@ async def run_batch_generation(task_id: int):
     # 全部完成
     await _mark_status(task_id, "completed",
                        f"批量完成（{completed}/{len(chapter_ids)} 章）")
+
+
+async def _refresh_project_wc(project_id: int):
+    """汇总项目所有章节字数，更新 project.current_word_count（独立 session）。"""
+    from app.models.project import Project
+    from sqlalchemy import func as sa_func
+    async with async_session() as db:
+        total = (await db.execute(
+            select(sa_func.coalesce(sa_func.sum(Chapter.word_count), 0)).where(Chapter.project_id == project_id)
+        )).scalar() or 0
+        proj = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if proj:
+            proj.current_word_count = total
+            await db.commit()
 
 
 async def _update_progress(task_id, idx, chapter_id, ch_num, attempt, message):

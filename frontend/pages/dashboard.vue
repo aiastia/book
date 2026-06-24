@@ -38,11 +38,12 @@ const cards = computed(() => [
   { label: '大纲', value: stats.value.outlines, icon: '📋', suffix: '' },
 ])
 
+const chapterStatusText: Record<string, string> = { draft: '草稿', generating: '创作中', completed: '已完成' }
 const recentChapters = computed(() =>
   (chapters.value || []).slice(0, 5).map((c: any) => ({
     title: `第 ${c.chapter_number} 章 · ${c.title || '无标题'}`,
     meta: `${c.word_count || 0} 字`,
-    badge: c.status || '草稿',
+    badge: chapterStatusText[c.status] || c.status || '草稿',
     type: c.status === 'completed' ? 'success' : 'warning',
   })),
 )

@@ -23,6 +23,8 @@ from app.models.organization_member import OrganizationMember
 from app.models.character_career import CharacterCareer
 from app.models.batch_generation_task import BatchGenerationTask
 from app.models.regeneration_task import RegenerationTask
+from app.models.character_change_log import CharacterChangeLog
+from app.models.relation_change_log import RelationChangeLog
 
 __all__ = [
     "User", "Project", "WorldSetting", "Character", "CharacterRelation",
@@ -30,5 +32,5 @@ __all__ = [
     "StoryMemory", "PromptTemplate", "PromptVersion", "Skill", "SkillConfig",
     "AIModelConfig", "GenerationHistory", "WritingStyle", "Career", "ProjectInitTask",
     "BackgroundTask", "Item", "Location", "OrganizationMember", "CharacterCareer",
-    "BatchGenerationTask", "RegenerationTask",
+    "BatchGenerationTask", "RegenerationTask", "CharacterChangeLog", "RelationChangeLog",
 ]

@@ -63,3 +63,4 @@ docker-compose.override.yml
 *.log
 tmp/
 node_modules
+backend/moyu.db

@@ -37,7 +37,7 @@ async def org_tree(
         select(Organization).where(Organization.project_id == project_id)
         .order_by(Organization.tree_level.asc(), Organization.id.asc())
     )).scalars().all()
-    # 统计每个组织的实际成员数
+    # 统计每个组织的成员数
     member_counts = {}
     if orgs:
         from sqlalchemy import func
@@ -111,7 +111,7 @@ async def list_members(
     project_id: int, org_id: int,
     db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
 ):
-    """列出组织成员（含角色名）。"""
+    """列出组织成员（含角色名）。角色↔组织关系已统一到 OrganizationMember 表。"""
     await get_user_project(db, project_id, user)
     members = (await db.execute(
         select(OrganizationMember).where(
@@ -119,7 +119,6 @@ async def list_members(
             OrganizationMember.project_id == project_id,
         ).order_by(OrganizationMember.rank.desc())
     )).scalars().all()
-    # 角色名映射
     char_ids = [m.character_id for m in members]
     char_map = {}
     if char_ids:
@@ -198,18 +197,12 @@ class OrgMembersGenerateReq(BaseModel):
     user_prompt: str = ""
 
 
-@router.post("/{project_id}/organizations/{org_id}/members/generate")
-async def generate_members(
-    project_id: int, org_id: int, req: OrgMembersGenerateReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
-):
-    """AI 为组织生成成员（基于现有角色池）。"""
-    proj = await get_user_project(db, project_id, user)
+async def _generate_members_for_org(db: AsyncSession, project_id: int, org_id: int, user_prompt: str = "", user_id: int = None) -> list[dict]:
+    """AI 为一个组织生成成员的核心逻辑（供单组织和批量端点复用）。"""
     org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalar_one_or_none()
     if not org:
-        raise HTTPException(404, "组织不存在")
-    engine, ai_client = await make_engine_and_client(db, user.id)
-    # 可用角色（排除已在组织的）
+        return []
+    engine, ai_client = await make_engine_and_client(db, user_id)
     existing_char_ids = [m.character_id for m in (await db.execute(
         select(OrganizationMember).where(OrganizationMember.organization_id == org_id)
     )).scalars().all()]
@@ -220,7 +213,7 @@ async def generate_members(
         ).limit(30)
     )).scalars().all()
     if not chars:
-        raise HTTPException(400, "没有可用角色（所有角色已加入或无角色）")
+        return []
     char_list = "\n".join(f"- ID:{c.id} {c.name}（{c.role or '角色'}）" for c in chars)
 
     prompt = f"""为组织《{org.name}》（类型：{org.org_type or '组织'}）分配成员。
@@ -228,19 +221,18 @@ async def generate_members(
 组织简介：{org.description[:200] if org.description else '无'}
 可选角色：
 {char_list}
-{('额外要求：' + req.user_prompt) if req.user_prompt else ''}
+{('额外要求：' + user_prompt) if user_prompt else ''}
 
 要求：
 1. 从可选角色中选择 3-8 个加入此组织
-2. 每个成员包含：character_id(必须是可选角色ID)、position(职位，如宗主/长老/护法/内门弟子)、rank(等级1-10)、loyalty(忠诚度0-100)、contribution(贡献度0-100)、status("active")
+2. 每个成员包含：character_id(必须是可选角色ID)、position(职位)、rank(等级1-10)、loyalty(忠诚度0-100)、contribution(贡献度0-100)、status("active")
 3. 职位要符合组织类型，等级和忠诚度要合理
 
 返回纯JSON数组：[{{"character_id":0,"position":"","rank":5,"loyalty":60,"contribution":40,"status":"active"}}]"""
 
     result = await ai_client.chat_json_retry(
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.8,
-        max_tokens=4096,
+        temperature=0.8, max_tokens=4096,
     )
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
@@ -253,21 +245,140 @@ async def generate_members(
     for m in data:
         if not isinstance(m, dict) or m.get("character_id") not in char_id_set:
             continue
-        try:
-            mem = OrganizationMember(
-                project_id=project_id, organization_id=org_id,
-                character_id=int(m["character_id"]),
-                position=str(m.get("position", ""))[:100],
-                rank=int(m.get("rank", 1)),
-                loyalty=int(m.get("loyalty", 50)),
-                contribution=int(m.get("contribution", 30)),
-                status="active",
-                source="ai",
-            )
-            db.add(mem)
-            await db.flush()
-            created.append(mem.to_dict())
-        except Exception as e:
-            logger.warning(f"[org_member] 解析单条失败: {e}")
+        cid = int(m["character_id"])
+        mem = OrganizationMember(
+            project_id=project_id, organization_id=org_id,
+            character_id=cid,
+            position=str(m.get("position", ""))[:100],
+            rank=int(m.get("rank", 1)),
+            loyalty=int(m.get("loyalty", 50)),
+            contribution=int(m.get("contribution", 30)),
+            status="active", source="ai",
+        )
+        db.add(mem)
+        # 同步角色的所属组织（如果角色还没有主组织，以此为默认）
+        char = await db.get(Character, cid)
+        if char and not char.organization_id:
+            char.organization_id = org_id
+        await db.flush()
+        created.append(mem.to_dict())
     await db.commit()
+    return created
+
+
+@router.post("/{project_id}/organizations/{org_id}/members/generate")
+async def generate_members(
+    project_id: int, org_id: int, req: OrgMembersGenerateReq,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """AI 为组织生成成员（基于现有角色池）。"""
+    await get_user_project(db, project_id, user)
+    created = await _generate_members_for_org(db, project_id, org_id, req.user_prompt, user.id)
+    if not created and not (await db.scalar(select(func.count(OrganizationMember.id)).where(OrganizationMember.organization_id == org_id))):
+        raise HTTPException(400, "没有可用角色（所有角色已加入或无角色）")
     return {"count": len(created), "members": created}
+
+
+@router.post("/{project_id}/organizations/members/generate-all")
+async def generate_all_members(
+    project_id: int, req: OrgMembersGenerateReq = None,
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+):
+    """一键初始化：为所有组织批量 AI 分配成员。
+    
+    遍历项目中所有组织，对每个尚未有成员的组织调用 AI 分配。
+    返回每个组织的生成结果汇总。
+    """
+    await get_user_project(db, project_id, user)
+    req = req or OrgMembersGenerateReq()
+    orgs = (await db.execute(
+        select(Organization).where(Organization.project_id == project_id)
+    )).scalars().all()
+    if not orgs:
+        return {"ok": True, "total": 0, "results": []}
+
+    # 所有角色
+    chars = (await db.execute(
+        select(Character).where(Character.project_id == project_id)
+    )).scalars().all()
+    if not chars:
+        return {"ok": True, "total": len(orgs), "results": [], "message": "没有可用角色"}
+
+    # 一次 AI 调用分完所有组织，避免逐个调用导致第一个组织抢走所有好角色
+    org_list = "\n".join(
+        f"- 组织ID:{o.id} 名称:{o.name} 类型:{o.org_type or '组织'} 简介:{(o.description or '')[:100]}"
+        for o in orgs
+    )
+    char_list = "\n".join(
+        f"- ID:{c.id} 姓名:{c.name} 定位:{c.role or '角色'} 性格:{(c.personality or '')[:60]}"
+        for c in chars
+    )
+
+    engine, ai_client = await make_engine_and_client(db, user.id)
+    prompt = f"""将所有角色合理分配到各组织。每个角色至少分配到一个最匹配的组织。
+{('额外要求：' + req.user_prompt) if req.user_prompt else ''}
+
+组织列表：
+{org_list}
+
+角色列表：
+{char_list}
+
+要求：
+1. 根据角色定位、性格与组织特征，将每个角色分配到最合适的组织
+2. 每个角色至少分配到一个组织，一个角色可以属于多个组织
+3. 为每个角色的每个组织身份指定：position(职位)、rank(等级1-10)、loyalty(忠诚度0-100)、contribution(贡献度0-100)
+4. 职位要贴合组织类型和角色定位，核心成员等级高、忠诚高
+
+返回JSON对象：
+{{"assignments":[{{"character_id":1,"organization_id":2,"position":"长老","rank":8,"loyalty":85,"contribution":60,"status":"active","is_primary":true}}]}}"""
+
+    result = await ai_client.chat_json_retry(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.8, max_tokens=8192,
+    )
+    if result.get("error"):
+        raise HTTPException(500, f"AI 生成失败: {result['error']}")
+    data = result.get("json") or {}
+    assignments = data.get("assignments", []) if isinstance(data, dict) else []
+    if isinstance(data, list):
+        assignments = data
+
+    org_id_set = {o.id for o in orgs}
+    char_id_set = {c.id for c in chars}
+    results = []
+    by_org: dict[int, int] = {}
+
+    for a in assignments:
+        if not isinstance(a, dict):
+            continue
+        oid = int(a.get("organization_id", 0))
+        cid = int(a.get("character_id", 0))
+        if oid not in org_id_set or cid not in char_id_set:
+            continue
+        # 创建成员记录
+        mem = OrganizationMember(
+            project_id=project_id, organization_id=oid,
+            character_id=cid,
+            position=str(a.get("position", ""))[:100],
+            rank=int(a.get("rank", 5)),
+            loyalty=int(a.get("loyalty", 50)),
+            contribution=int(a.get("contribution", 30)),
+            status="active", source="ai",
+        )
+        db.add(mem)
+        by_org[oid] = by_org.get(oid, 0) + 1
+        # 同步角色的所属组织（主组织）
+        if a.get("is_primary"):
+            char = await db.get(Character, cid)
+            if char and not char.organization_id:
+                char.organization_id = oid
+
+    await db.commit()
+
+    for o in orgs:
+        cnt = by_org.get(o.id, 0)
+        results.append({"org_id": o.id, "org_name": o.name, "count": cnt})
+
+    total = sum(r["count"] for r in results)
+    return {"ok": True, "total": total, "results": results}

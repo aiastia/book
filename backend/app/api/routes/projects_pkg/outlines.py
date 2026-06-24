@@ -9,22 +9,115 @@ logger = logging.getLogger(__name__)
 
 router = make_router()
 
+# 组织名关键词：用于兜底判断 characters 中的名称是否实为组织
+_ORG_KEYWORDS = ("议会", "帮", "派", "门", "宗", "盟", "阁", "会", "部", "团", "社", "局", "庭", "族", "学院", "教会", "帝国", "王国", "殿", "堂", "塔")
 
-def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0) -> Outline:
+
+def _extract_names(lst: list) -> list:
+    """从列表中提取 (名称, 类型) 对，兼容字符串和 {name:...} 两种格式。"""
+    result = []
+    for ch in (lst or []):
+        if isinstance(ch, dict):
+            name = (ch.get("name") or "").strip()
+            ctype = (ch.get("type") or "").strip().lower()
+        elif isinstance(ch, str):
+            name = ch.strip()
+            ctype = ""
+        else:
+            continue
+        if name:
+            result.append((name, ctype))
+    return result
+
+
+def _dedup(lst: list) -> list:
+    """去重保序。"""
+    seen, out = set(), []
+    for x in lst:
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def _clean_scene(scene) -> dict:
+    """规范化单个场景对象：确保含 scene_title/scene_desc/emotion。"""
+    if not isinstance(scene, dict):
+        s = str(scene).strip()
+        return {"scene_title": s, "scene_desc": "", "emotion": ""} if s else {}
+    title = (scene.get("scene_title") or scene.get("title") or "").strip()
+    desc = (scene.get("scene_desc") or scene.get("description") or scene.get("desc") or "").strip()
+    emo = (scene.get("emotion") or scene.get("emotional_tone") or "").strip()
+    if not (title or desc or emo):
+        return {}
+    return {"scene_title": title or "场景", "scene_desc": desc, "emotion": emo}
+
+
+def _separate_chars_orgs(raw_chars: list, raw_orgs: list, char_names: set, org_names: set) -> tuple:
+    """分离角色与组织：把误塞进 characters 的组织移到 organizations。
+
+    判断逻辑（优先级从高到低）：
+    1. 明确标记 type=organization → 组织
+    2. 在已知组织名集合中 → 组织
+    3. 不在已知角色集合 + 含组织关键词（议会/帮/派...）→ 组织
+    4. 其余 → 角色
+    """
+    char_pairs = _extract_names(raw_chars)
+    org_pairs = _extract_names(raw_orgs)
+
+    final_orgs = [name for name, _ in org_pairs]
+    final_chars = []
+
+    for name, ctype in char_pairs:
+        if ctype == "organization":
+            final_orgs.append(name)
+            continue
+        if name in org_names:
+            final_orgs.append(name)
+            continue
+        # 已知角色集合不为空时，不在其中的 + 含组织关键词 → 归为组织
+        if char_names and name not in char_names and any(kw in name for kw in _ORG_KEYWORDS):
+            final_orgs.append(name)
+            continue
+        final_chars.append(name)
+
+    return _dedup(final_chars), _dedup(final_orgs)
+
+
+def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
+                  char_names: set = None, org_names: set = None) -> Outline:
     """从 AI 返回的 item 构造 Outline 对象（复用）。
 
     index 用于 AI 没返回 chapter_number 时自动编号（1-based）。
+    char_names/org_names 用于兜底过滤：AI 可能把组织塞进 characters，
+    或把临时称呼（如"男孩"）当成角色，这里自动校正。
     """
     ch_num = item.get("chapter_number")
     if not isinstance(ch_num, int) or ch_num < 1:
         ch_num = index + 1  # AI 没返回或非法时，用序号
+
+    # ===== 兜底清洗 =====
+    raw_chars = item.get("characters", []) if isinstance(item.get("characters"), list) else []
+    raw_orgs = item.get("organizations", []) if isinstance(item.get("organizations"), list) else []
+    final_chars, final_orgs = _separate_chars_orgs(raw_chars, raw_orgs, char_names or set(), org_names or set())
+
+    # 规范化场景：过滤掉只有标题没有描述的空场景
+    raw_scenes = item.get("scenes", []) if isinstance(item.get("scenes"), list) else []
+    clean_scenes = [c for c in (_clean_scene(sc) for sc in raw_scenes) if c]
+
+    # 回写清洗后的值到 item（structure 会同步更新）
+    item = dict(item)  # 浅拷贝，不修改原始
+    item["characters"] = final_chars
+    item["organizations"] = final_orgs
+    item["scenes"] = clean_scenes
+
     return Outline(
         project_id=project_id,
         chapter_number=ch_num + offset,
         title=str(item.get("title", f"第{ch_num}章"))[:200],
         summary=str(item.get("summary", ""))[:2000],
-        scenes=item.get("scenes", []) if isinstance(item.get("scenes"), list) else [],
-        characters=item.get("characters", []) if isinstance(item.get("characters"), list) else [],
+        scenes=clean_scenes,
+        characters=final_chars,
         key_points=item.get("key_points", []) if isinstance(item.get("key_points"), list) else [],
         emotion=str(item.get("emotion", ""))[:100],
         goal=str(item.get("goal", ""))[:200],
@@ -33,12 +126,13 @@ def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0)
 
 
 async def _project_context(db: AsyncSession, project_id: int, project: Project) -> dict:
-    """收集项目的世界观/角色上下文信息（生成大纲时复用）。
+    """收集项目的世界观/角色/组织上下文信息（生成大纲时复用）。
 
     世界信息包含核心世界观（时间/地点/氛围/规则）+ 详细设定条目。
     """
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
+    orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
     detail = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds])
     # 核心世界观（存于 Project 字段）
     core_parts = []
@@ -49,7 +143,17 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project) 
     core = "\n".join(core_parts)
     world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail) if core else (detail or "暂无")
     chars_info = "\n".join([f"- {c.name}({c.role}): {c.personality[:100]}" for c in chars]) or "暂无"
-    return {"world_info": world_info, "characters_info": chars_info}
+    orgs_info = "\n".join([f"- {o.name}（{o.org_type or '组织'}）" for o in orgs]) or "暂无"
+    # 名称集合（用于 _build_outline 兜底过滤）
+    char_names = {c.name for c in chars}
+    org_names = {o.name for o in orgs}
+    return {
+        "world_info": world_info,
+        "characters_info": chars_info,
+        "organizations_info": orgs_info,
+        "char_names": char_names,
+        "org_names": org_names,
+    }
 
 
 @router.post("/{project_id}/outlines/generate")
@@ -70,7 +174,7 @@ async def generate_outlines(project_id: int, req: OutlineGenerateRequest, db: As
     created = []
     created_outline_objs = []
     for idx, item in enumerate(outlines_data):
-        o = _build_outline(project_id, item, index=idx)
+        o = _build_outline(project_id, item, index=idx, char_names=ctx["char_names"], org_names=ctx["org_names"])
         db.add(o)
         created_outline_objs.append(o)
         created.append(item)
@@ -132,7 +236,7 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
             if isinstance(outlines_data, list):
                 created_objs = []
                 for idx, item in enumerate(outlines_data):
-                    o = _build_outline(payload["project_id"], item, index=idx)
+                    o = _build_outline(payload["project_id"], item, index=idx, char_names=ctx["char_names"], org_names=ctx["org_names"])
                     task_db.add(o)
                     created_objs.append(o)
                 await task_db.flush()
@@ -297,6 +401,7 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         "total_planned_chapters": str(current_count + req.chapter_count),
         "recent_outlines": recent_outlines_json, "existing_chapters": existing_chapters,
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
+        "organizations_info": ctx["organizations_info"],
         "foreshadow_context": foreshadow_context,
         "foreshadow_reminders": foreshadow_context,  # 兼容模板中的变量名
         "narrative_pov": effective_pov, "narrative_perspective": effective_pov,
@@ -308,7 +413,7 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         raise HTTPException(500, "AI 返回的大纲格式不正确")
     created = []
     for item in outlines_data:
-        db.add(_build_outline(project_id, item))
+        db.add(_build_outline(project_id, item, char_names=ctx["char_names"], org_names=ctx["org_names"]))
         created.append(item)
     await db.commit()
 
@@ -316,6 +421,9 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     # 从新生成的大纲中提取角色名，与已有角色对比，找出未注册的角色
     existing_chars = {c.name for c in (await db.execute(
         select(Character).where(Character.project_id == project_id)
+    )).scalars().all()}
+    existing_org_names = {o.name for o in (await db.execute(
+        select(Organization).where(Organization.project_id == project_id)
     )).scalars().all()}
     new_characters = set()
     for item in outlines_data:
@@ -333,6 +441,8 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
                 continue
             # 只关注角色，跳过组织
             if ctype == "organization":
+                continue
+            if name in existing_org_names:
                 continue
             if name and name not in existing_chars:
                 new_characters.add(name)
@@ -422,6 +532,7 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
                 "total_planned_chapters": str(current_count + payload["chapter_count"]),
                 "recent_outlines": recent_outlines_json, "existing_chapters": existing_chapters,
                 "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
+                "organizations_info": ctx["organizations_info"],
                 "foreshadow_context": foreshadow_context,
                 "foreshadow_reminders": foreshadow_context,
                 "narrative_pov": effective_pov, "narrative_perspective": effective_pov,
@@ -434,7 +545,7 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             outlines_data = result.get("json") or []
             if isinstance(outlines_data, list):
                 for item in outlines_data:
-                    task_db.add(_build_outline(payload["project_id"], item))
+                    task_db.add(_build_outline(payload["project_id"], item, char_names=ctx["char_names"], org_names=ctx["org_names"]))
                 await task_db.commit()
             await tracker.complete(message=f"续写完成（{len(outlines_data)}章）")
 
@@ -482,6 +593,7 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
         "outline_summary": outline.summary or "", "target_chapter_count": str(req.target_chapter_count),
         "project_title": proj.title, "project_genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
+        "organizations_info": ctx["organizations_info"],
         "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{req.target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_tone(情感基调)、narrative_goal(叙事目标)、conflict_type(冲突类型)。返回JSON数组。",
     })
     check_skill_error(result)

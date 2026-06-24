@@ -263,7 +263,8 @@ class ForeshadowService:
         # 自动创建规划的伏笔
         created = []
         for item in planned:
-            fs = await self.create({
+            # 分离基础字段和扩展字段（扩展字段进 structure JSON）
+            base_fields = {
                 "title": item.get("title", ""),
                 "content": item.get("content", ""),
                 "foreshadow_type": item.get("foreshadow_type", ""),
@@ -272,7 +273,20 @@ class ForeshadowService:
                 "plant_chapter_number": item.get("plant_chapter_number"),
                 "target_resolve_chapter_number": item.get("target_resolve_chapter_number"),
                 "priority": item.get("priority", 5),
-            })
+            }
+            # 扩展字段存入 structure（含关联角色、暗示文本、重要性等）
+            extension_keys = {
+                "importance", "strength", "concealment", "is_long_term",
+                "hint_text", "notes", "design_reason",
+                "related_characters",
+                "auto_remind", "include_in_context", "remind_before_chapters",
+            }
+            structure = {}
+            for k in extension_keys:
+                if k in item and item[k] is not None:
+                    structure[k] = item[k]
+            base_fields["structure"] = structure
+            fs = await self.create(base_fields)
             created.append({
                 "id": fs.id,
                 "title": fs.title,
@@ -281,6 +295,7 @@ class ForeshadowService:
                 "plant_chapter_number": fs.plant_chapter_number,
                 "target_resolve_chapter_number": fs.target_resolve_chapter_number,
                 "priority": fs.priority,
+                "structure": fs.structure,
             })
         return created
 

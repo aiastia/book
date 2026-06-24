@@ -537,7 +537,22 @@ async def regenerate_chapter(project_id: int, chapter_id: int, req: ChapterRegen
     outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
     outline_info = "\n".join([f"第{o.chapter_number}章 {o.title}: {o.summary}" for o in outlines if o.chapter_number == chapter.chapter_number]) or "暂无"
-    characters_info = "\n".join([f"- {c.name}({c.role}): {c.personality[:100]}" for c in chars]) or "暂无"
+    # 使用章节前的历史角色状态，避免未来信息泄露
+    from app.api.routes.projects_pkg.characters import get_character_state_at_chapter
+    char_lines = []
+    for c in chars:
+        snapshot = await get_character_state_at_chapter(db, project_id, c.id, chapter.chapter_number)
+        s = snapshot if snapshot else {}
+        personality = str(s.get('personality', c.personality))[:100]
+        status = str(s.get('status', c.status))
+        mental = str(s.get('mental_state', c.mental_state))[:40]
+        extra = ""
+        if status and status != "alive":
+            extra += f" 状态:{status}"
+        if mental:
+            extra += f" 心理:{mental}"
+        char_lines.append(f"- {c.name}({c.role}){extra}: {personality}")
+    characters_info = "\n".join(char_lines) or "暂无"
     style_str = json.dumps(proj.writing_style or {}, ensure_ascii=False) if proj.writing_style else ""
 
     engine, ai_client = await make_engine_and_client(db, user.id)

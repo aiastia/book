@@ -19,6 +19,7 @@ async def list_foreshadows(project_id: int, status: str = None, db: AsyncSession
         "plant_chapter_number": f.plant_chapter_number, "actual_plant_chapter": f.actual_plant_chapter,
         "target_resolve_chapter_number": f.target_resolve_chapter_number, "actual_resolve_chapter": f.actual_resolve_chapter,
         "priority": f.priority,
+        "structure": f.structure or {},
     } for f in fs_list]
 
 
@@ -168,7 +169,7 @@ async def sync_from_analysis(
 
 
 def _fs_dict(f, current_chapter, service):
-    """伏笔字典（含紧急度）。"""
+    """伏笔字典（含紧急度 + 扩展字段）。"""
     return {
         "id": f.id, "title": f.title, "content": f.content,
         "foreshadow_type": f.foreshadow_type, "status": f.status,
@@ -177,6 +178,7 @@ def _fs_dict(f, current_chapter, service):
         "target_resolve_chapter_number": f.target_resolve_chapter_number,
         "actual_resolve_chapter": f.actual_resolve_chapter,
         "priority": f.priority,
+        "structure": f.structure or {},
         "urgency_level": service.get_urgency_level(f, current_chapter),
     }
 

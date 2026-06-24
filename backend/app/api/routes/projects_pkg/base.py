@@ -65,6 +65,7 @@ class ProjectUpdate(BaseModel):
     narrative_pov: Optional[str] = None
     writing_style: Optional[dict] = None
     status: Optional[str] = None
+    target_word_count: Optional[int] = None
 
 
 class ChapterCreate(BaseModel):
@@ -134,6 +135,7 @@ class ForeshadowCreate(BaseModel):
     plant_chapter_number: Optional[int] = None
     target_resolve_chapter_number: Optional[int] = None
     priority: int = 5
+    structure: dict = {}  # 扩展字段（重要性0-1/强度/隐藏度/暗示文本/关联角色等）
 
 
 class WorldSettingCreate(BaseModel):

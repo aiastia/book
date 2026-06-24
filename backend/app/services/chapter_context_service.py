@@ -429,19 +429,26 @@ class ChapterContextService:
                         pa_parts.append("上章改进建议（本章注意）：" + "；".join(sugs[:2]))
                     prev_analysis_summary = "\n".join(p for p in pa_parts if p.strip())
 
-            # 角色当前状态（从最近分析的角色状态 + 角色模型的 mental_state）
+            # 角色当前状态（优先用该章节前的历史快照，避免未来信息泄露）
             _chars = (await self.db.execute(
                 select(Character).where(Character.project_id == self.project_id)
             )).scalars().all()
+            from app.api.routes.projects_pkg.characters import get_character_state_at_chapter
             char_states_parts = []
             for char in _chars[:8]:  # 主要角色
+                # 尝试获取章节前的历史快照
+                snapshot = await get_character_state_at_chapter(self.db, self.project_id, char.id, chapter.chapter_number)
+                state = snapshot if snapshot else {}
                 state_parts = [char.name]
-                if char.mental_state:
-                    state_parts.append(f"心理：{char.mental_state[:40]}")
-                if char.status and char.status != "alive":
-                    state_parts.append(f"状态：{char.status}")
-                if hasattr(char, 'main_career_stage') and char.main_career_stage:
-                    state_parts.append(f"境界：第{char.main_career_stage}阶")
+                mental = state.get('mental_state', char.mental_state)
+                status = state.get('status', char.status)
+                stage = state.get('main_career_stage_desc', '') or str(state.get('main_career_stage', getattr(char, 'main_career_stage', '') or ''))
+                if mental:
+                    state_parts.append(f"心理：{str(mental)[:40]}")
+                if status and str(status) != "alive":
+                    state_parts.append(f"状态：{status}")
+                if stage and str(stage) not in ('0', '', 'None'):
+                    state_parts.append(f"境界：{stage}")
                 if len(state_parts) > 1:
                     char_states_parts.append("（" + "，".join(state_parts[1:]) + "）")
             if char_states_parts:
@@ -674,31 +681,44 @@ class ChapterContextService:
             core_chars = core_chars[:MAX_FULL_CHARS]
 
         chars_info_parts = []
-        # 核心角色：完整信息
+        from app.api.routes.projects_pkg.characters import get_character_state_at_chapter
+        # 核心角色：完整信息（对于有变化日志的角色，使用章节前的历史快照）
         for c in core_chars:
+            snapshot = await get_character_state_at_chapter(self.db, self.project_id, c.id, chapter.chapter_number)
+            s = snapshot if snapshot else {}
+            # 以下字段优先取快照值（如果快照中有），否则取当前 Character 值
+            _st = s.get('status', c.status)
+            _ms = s.get('mental_state', c.mental_state)
+            _ap = s.get('appearance', c.appearance)
+            _pe = s.get('personality', c.personality)
+            _bg = s.get('background', c.background)
+            _ab = s.get('ability', c.ability)
+            _oc = s.get('occupation', c.occupation)
+            _od = s.get('occupation_detail', c.occupation_detail)
+            _oi = s.get('organization_id', c.organization_id)
             parts = [f"【{c.name}】{c.role}，{c.gender}，{c.age}岁"]
-            # 状态/心理（对标原项目 current_state）
-            if c.status and c.status != "alive":
-                parts.append(f"  状态：{c.status}")
-            if c.mental_state:
-                parts.append(f"  当前心理：{c.mental_state}")
-            if c.appearance:
-                parts.append(f"  外貌：{c.appearance[:120]}")
-            if c.personality:
-                parts.append(f"  性格：{c.personality[:120]}")
-            if c.background:
-                parts.append(f"  背景：{c.background[:120]}")
-            if c.ability:
-                parts.append(f"  能力：{c.ability[:120]}")
-            if c.occupation:
-                parts.append(f"  职业：{c.occupation}")
-            if c.occupation_detail:
-                parts.append(f"  职业阶段：{str(c.occupation_detail)[:200]}")
+            if _st and str(_st) != "alive":
+                parts.append(f"  状态：{_st}")
+            if _ms:
+                parts.append(f"  当前心理：{str(_ms)[:60]}")
+            if _ap:
+                parts.append(f"  外貌：{str(_ap)[:120]}")
+            if _pe:
+                parts.append(f"  性格：{str(_pe)[:120]}")
+            if _bg:
+                parts.append(f"  背景：{str(_bg)[:120]}")
+            if _ab:
+                parts.append(f"  能力：{str(_ab)[:120]}")
+            if _oc:
+                parts.append(f"  职业：{str(_oc)[:80]}")
+            if _od:
+                parts.append(f"  职业阶段：{str(_od)[:200]}")
             # 组织归属
-            if c.organization_id and c.organization_id in org_map:
-                org = org_map[c.organization_id]
+            org_id = _oi or c.organization_id
+            if org_id and org_id in org_map:
+                org = org_map[org_id]
                 parts.append(f"  所属组织：{org.name}({org.org_type or ''})")
-            # 关系网络（来自关系表，比 JSON 文本更准确）
+            # 关系网络
             rels_text = rel_map.get(c.id)
             if rels_text:
                 parts.append(f"  关系网络：{'；'.join(rels_text[:5])}")

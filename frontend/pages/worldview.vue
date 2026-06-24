@@ -12,6 +12,7 @@ const { data: worlds, refresh: refreshWorlds } = await api.getWorlds()
 const { data: worldCore, refresh: refreshCore } = await api.getWorldCore()
 
 const genAll = ref(false)
+const reindexingWorlds = ref(false)
 const editingCore = ref(false)
 const editingBasic = ref(false)
 const basicForm = reactive({ title:'', synopsis:'', genre:'', narrative_pov:'', target_word_count:100000 })
@@ -19,7 +20,7 @@ const genres = ['玄幻','都市','科幻','言情','历史','武侠','游戏','
 
 function openEditBasic() {
   const p = project.value || {}
-  Object.assign(basicForm, { title:p.title||'', synopsis:p.synopsis||'', genre:p.genre||'', narrative_pov:p.narrative_pov||'第三人称', target_word_count:p.target_word_count||100000 })
+  Object.assign(basicForm, { title:p.title||'', synopsis:p.synopsis||'', genre:p.genre||'', narrative_pov:p.narrative_pov||'第三人称', target_word_count:p.target_word_count ?? 100000 })
   editingBasic.value = true
 }
 async function onSaveBasic() {
@@ -79,12 +80,21 @@ async function onAdd() {
   try { await api.createWorld({ ...newWorld }); showAdd.value = false; newWorld.name=''; newWorld.content=''; await refreshWorlds() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
+async function onReindexWorldVectors() {
+  reindexingWorlds.value = true
+  try {
+    const r = await api.reindexWorldVectors()
+    msg.success(r.message || `已提交 ${r.total} 条数据的向量同步`)
+  } catch (e: any) { msg.error('同步失败：' + formatError(e)) }
+  finally { reindexingWorlds.value = false }
+}
 </script>
 
 <template>
   <div class="world-page">
     <div class="page-actions">
       <a-button @click="openEditBasic">编辑基础信息</a-button>
+      <a-button :loading="reindexingWorlds" @click="onReindexWorldVectors">🔄 回填向量索引</a-button>
       <a-button :loading="genAll" @click="onGenCore">AI 重新生成世界观</a-button>
       <a-button @click="openEditCore">编辑世界观</a-button>
       <a-button @click="onGenDetail" :loading="genAll">AI 生成详细设定</a-button>

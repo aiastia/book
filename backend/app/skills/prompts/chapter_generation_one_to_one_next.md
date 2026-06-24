@@ -12,48 +12,9 @@
 这一章里，至少有一个角色会因为上一章的事而做出点什么——可能是一个选择，也可能是一个做了一半停下来的动作，也可能是一句说了一半咽回去的话。不需要每个人都有反应，有一个人有就够了。
 </task>
 
-<outline>
-这章大概发生了这些事，你照着写，但允许角色走神：
-
-{chapter_outline}
-</outline>
-
-<previous_chapter_summary>
-上一章发生了什么，你心里有数就行，写的时候别复述，让人物的行为和反应自然体现出来：
-{previous_chapter_summary}
-</previous_chapter_summary>
-
-<previous_chapter>
-上一章结尾是这么写的，你从这儿接上：
-{previous_chapter_content}
-</previous_chapter>
-
-<characters>
-这些角色会在本章出场。记住他们的身份和说话方式，别让他们所有人一个调调：
-{characters_info}
-
-⚠️ 角色名必须使用上方给出的准确名字，不允许擅自改名、缩略或用别名替代。
-</characters>
-
-<careers>
-如果本章涉及角色的职业能力，可以参考这些设定，但别一次性全倒出来，用到什么自然带出什么：
-{chapter_careers}
-</careers>
-
-<foreshadow_reminders>
-有几件前面挖的坑，该填的填，该推进的推进：
-{foreshadow_reminders}
-</foreshadow_reminders>
-
-<memory>
-这些是相关的背景记忆，人物可能想起来也可能想不起来，取决于情境：
-{relevant_memories}
-</memory>
-
-<quality_feedback priority="P3">
-{quality_trends}
-</quality_feedback>
-
+<data>
+{chapter_data}
+</data>
 
 <commercial_design priority="P0">
 【商业爽点机制 - 本章必须体现至少一项】
@@ -80,7 +41,7 @@
 
 剧情往前走，但这个"走"是从人物的行为里自然出来的。人物做了什么，后面就会有后果。这个后果可以隔很远才到，但不能没有。
 
-别按模板写。承接、冲突、变化要交错在一起，别让人能猜到下一段要干嘛。有时候连续三段一个节奏，有时候突然变。
+别按模板写。承接、冲突、变化要交错在一起，别让人能猜到你下一段要干嘛。有时候连续三段一个节奏，有时候突然变。
 
 角色做事不需要总是"合理"。允许犹豫，允许选错，允许做了再后悔。如果角色做了特别反常的事，让读者能从情境里感受到压力，别直接解释。
 

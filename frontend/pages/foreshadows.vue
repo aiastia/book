@@ -18,7 +18,27 @@ const form = reactive({
   target_resolve_chapter_number: null as number | null,
   resolve_chapter_number: null as number | null,
   priority: 5,
+  // 扩展字段（存 structure JSON）
+  importance: 0.7,
+  strength: 5,
+  concealment: 7,
+  is_long_term: false,
+  hint_text: '',
+  notes: '',
+  related_characters: [] as string[],
+  auto_remind: true,
+  include_in_context: true,
+  remind_before_chapters: 3,
 })
+const characterOptions = ref<Array<{ name: string; role: string; label: string }>>([])
+
+// 加载角色候选
+async function loadCharacterOptions() {
+  try {
+    const list = await api.getCharacters() as any[] || []
+    characterOptions.value = list.map(c => ({ name: c.name, role: c.role || '', label: c.role ? `${c.name}（${c.role}）` : c.name }))
+  } catch (e) { console.warn('加载角色失败', e) }
+}
 
 // 状态映射
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -43,10 +63,9 @@ const stats = computed(() => {
   const total = list.length
   const planted = list.filter((f: any) => ['planted', 'resolving', 'resolved'].includes(f.status)).length
   const resolved = list.filter((f: any) => f.status === 'resolved').length
-  // 长线伏笔：跨度 >= 10 章或标注为主线
+  // 长线伏笔：标注为 is_long_term = true
   const longTerm = list.filter((f: any) => {
-    const span = (f.target_resolve_chapter_number || 0) - (f.plant_chapter_number || 0)
-    return f.foreshadow_type === '主线' || span >= 10
+    return (f.structure?.is_long_term) || f.foreshadow_type === '主线'
   }).length
   return { total, planted, resolved, longTerm }
 })
@@ -76,18 +95,50 @@ function openAdd() {
     id: 0, title: '', content: '', foreshadow_type: '主线', status: 'pending',
     plant_chapter_number: null, target_resolve_chapter_number: null,
     resolve_chapter_number: null, priority: 5,
+    importance: 0.7, strength: 5, concealment: 7, is_long_term: false,
+    hint_text: '', notes: '', related_characters: [],
+    auto_remind: true, include_in_context: true, remind_before_chapters: 3,
   })
+  loadCharacterOptions()
   showAdd.value = true
 }
 function openEdit(f: any) {
   editItem.value = f
-  Object.assign(form, { ...f })
+  const s = f.structure || {}
+  Object.assign(form, {
+    ...f,
+    importance: s.importance ?? 0.7,
+    strength: s.strength ?? 5,
+    concealment: s.concealment ?? 7,
+    is_long_term: s.is_long_term ?? false,
+    hint_text: s.hint_text ?? '',
+    notes: s.notes ?? '',
+    related_characters: s.related_characters ?? [],
+    auto_remind: s.auto_remind ?? true,
+    include_in_context: s.include_in_context ?? true,
+    remind_before_chapters: s.remind_before_chapters ?? 3,
+  })
+  loadCharacterOptions()
   showAdd.value = true
 }
 async function onSave() {
   try {
-    if (editItem.value) await api.updateForeshadow(form.id, { ...form })
-    else await api.createForeshadow({ ...form })
+    const body: any = { ...form }
+    // 把扩展字段打包进 structure
+    body.structure = {
+      importance: form.importance,
+      strength: form.strength,
+      concealment: form.concealment,
+      is_long_term: form.is_long_term,
+      hint_text: form.hint_text,
+      notes: form.notes,
+      related_characters: form.related_characters,
+      auto_remind: form.auto_remind,
+      include_in_context: form.include_in_context,
+      remind_before_chapters: form.remind_before_chapters,
+    }
+    if (editItem.value) await api.updateForeshadow(form.id, body)
+    else await api.createForeshadow(body)
     showAdd.value = false
     await refresh()
     msg.success(editItem.value ? '已更新' : '已添加')
@@ -160,14 +211,23 @@ async function onSyncFromAnalysis() {
 const columns = [
   { title: '状态', dataIndex: 'status', key: 'status', width: 100, fixed: 'left' as const },
   { title: '标题', dataIndex: 'title', key: 'title', width: 180 },
-  { title: '内容', dataIndex: 'content', key: 'content', ellipsis: true },
-  { title: '分类', dataIndex: 'foreshadow_type', key: 'foreshadow_type', width: 90 },
+  { title: '内容', dataIndex: 'content', key: 'content', ellipsis: true, width: 200 },
+  { title: '分类', dataIndex: 'foreshadow_type', key: 'foreshadow_type', width: 80 },
+  { title: '关联角色', dataIndex: 'related_characters', key: 'chars', width: 130 },
   { title: '埋设章', dataIndex: 'plant_chapter_number', key: 'plant', width: 80, sorter: (a: any, b: any) => (a.plant_chapter_number || 9999) - (b.plant_chapter_number || 9999) },
-  { title: '目标回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 100, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
-  { title: '实际回收章', dataIndex: 'actual_resolve_chapter', key: 'actual_resolve', width: 100, sorter: (a: any, b: any) => (a.actual_resolve_chapter || 9999) - (b.actual_resolve_chapter || 9999) },
-  { title: '重要性', dataIndex: 'priority', key: 'priority', width: 130, sorter: (a: any, b: any) => a.priority - b.priority },
-  { title: '操作', key: 'actions', width: 200, fixed: 'right' as const },
+  { title: '回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 80, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
+  { title: '重要性', dataIndex: 'priority', key: 'priority', width: 120, sorter: (a: any, b: any) => a.priority - b.priority },
+  { title: '操作', key: 'actions', width: 220, fixed: 'right' as const },
 ]
+// 辅助: 从 record 拿到安全的结构体字段
+function sField(rec: any, key: string, def: any = '') {
+  return (rec.structure || {})[key] ?? def
+}
+function getRelatedChars(rec: any): string[] {
+  const s = rec.structure || {}
+  const r = s.related_characters || []
+  return Array.isArray(r) ? r : []
+}
 const filteredData = computed(() => {
   let list = foreshadows.value || []
   if (filterStatus.value) list = list.filter((f: any) => f.status === filterStatus.value)
@@ -267,6 +327,13 @@ const filteredData = computed(() => {
           </span>
           <span v-else style="color: #B5C7CB">—</span>
         </template>
+        <template v-else-if="column.key === 'chars'">
+          <template v-if="getRelatedChars(record).length">
+            <a-tag v-for="(c, i) in getRelatedChars(record).slice(0, 2)" :key="i" color="purple" size="small" style="margin:1px">{{ c }}</a-tag>
+            <a-tag v-if="getRelatedChars(record).length > 2" size="small" color="default">+{{ getRelatedChars(record).length - 2 }}</a-tag>
+          </template>
+          <span v-else style="color:#ccc">—</span>
+        </template>
         <template v-else-if="column.key === 'priority'">
           <a-rate :value="Math.ceil((record.priority || 0) / 2)" disabled :count="5" style="font-size: 12px" />
           <span class="priority-num">{{ record.priority }}/10</span>
@@ -284,37 +351,93 @@ const filteredData = computed(() => {
   </div>
 
   <!-- 添加/编辑弹窗 -->
-  <a-modal v-model:open="showAdd" :title="editItem ? '编辑伏笔' : '添加伏笔'" width="560px">
-    <a-form layout="vertical">
-      <a-form-item label="标题">
-        <a-input v-model:value="form.title" />
-      </a-form-item>
+  <a-modal v-model:open="showAdd" :title="editItem ? '编辑伏笔' : '添加伏笔'" width="680px" :destroy-on-close="true">
+    <a-form layout="vertical" class="fs-form">
+      <!-- 基础 -->
+      <a-form-item label="标题"><a-input v-model:value="form.title" /></a-form-item>
       <a-form-item label="内容描述">
-        <a-textarea v-model:value="form.content" :rows="3" />
+        <a-textarea v-model:value="form.content" :rows="3" placeholder="伏笔详细描述（至少30字）" />
       </a-form-item>
-      <div class="form-row3">
-        <a-form-item label="类型">
-          <a-select v-model:value="form.foreshadow_type">
-            <a-select-option v-for="(v, k) in typeMap" :key="k" :value="k">{{ v.label }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="状态">
-          <a-select v-model:value="form.status">
-            <a-select-option v-for="(v, k) in statusMap" :key="k" :value="k">{{ v.label }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item label="重要性">
-          <a-input-number v-model:value="form.priority" :min="1" :max="10" style="width: 100%" />
-        </a-form-item>
-      </div>
-      <div class="form-row2">
-        <a-form-item label="埋设章节">
-          <a-input-number v-model:value="form.plant_chapter_number" :min="1" style="width: 100%" />
-        </a-form-item>
-        <a-form-item label="目标回收章节">
-          <a-input-number v-model:value="form.target_resolve_chapter_number" :min="1" style="width: 100%" />
-        </a-form-item>
-      </div>
+
+      <!-- 分类 + 状态 + 重要性 -->
+      <a-row :gutter="12">
+        <a-col :span="8">
+          <a-form-item label="分类"><a-select v-model:value="form.foreshadow_type" :options="Object.entries(typeMap).map(([k,v])=>({value:k,label:v.label}))" /></a-form-item>
+        </a-col>
+        <a-col :span="8">
+          <a-form-item label="状态"><a-select v-model:value="form.status" :options="Object.entries(statusMap).map(([k,v])=>({value:k,label:v.label}))" /></a-form-item>
+        </a-col>
+        <a-col :span="8">
+          <a-form-item label="重要性 1-10" tooltip="结构重要性标尺：10=核心悬念, 7=重大转折, 5=支线线索, 3=章节呼应, 1=小彩蛋">
+            <a-input-number v-model:value="form.priority" :min="1" :max="10" style="width:100%" />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+      <!-- 章节号 -->
+      <a-row :gutter="12">
+        <a-col :span="12">
+          <a-form-item label="计划埋入章节"><a-input-number v-model:value="form.plant_chapter_number" :min="1" style="width:100%" /></a-form-item>
+        </a-col>
+        <a-col :span="12">
+          <a-form-item label="计划回收章节"><a-input-number v-model:value="form.target_resolve_chapter_number" :min="1" style="width:100%" /></a-form-item>
+        </a-col>
+      </a-row>
+
+      <!-- 文学重要性 + 强度 + 隐藏度 -->
+      <a-row :gutter="12">
+        <a-col :span="8">
+          <a-form-item label="文学重要性 0-1" tooltip="对主题/人物弧光的叙事价值。0.5=一般, 0.7=显著, 0.9+=核心主题级">
+            <a-input-number v-model:value="form.importance" :min="0" :max="1" :step="0.05" style="width:100%" />
+          </a-form-item>
+        </a-col>
+        <a-col :span="8">
+          <a-form-item label="强度 1-10" tooltip="读者意识到的可能性。1=几乎不可察觉, 5=有心人能注意, 10=明显">
+            <a-input-number v-model:value="form.strength" :min="1" :max="10" style="width:100%" />
+          </a-form-item>
+        </a-col>
+        <a-col :span="8">
+          <a-form-item label="隐藏度 1-10" tooltip="伏笔被掩盖的程度。10=完全藏于细节, 1=直接明示">
+            <a-input-number v-model:value="form.concealment" :min="1" :max="10" style="width:100%" />
+          </a-form-item>
+        </a-col>
+      </a-row>
+
+      <!-- 关联角色 -->
+      <a-form-item label="关联角色">
+        <a-select v-model:value="form.related_characters" mode="tags" placeholder="选择或输入角色名，回车添加"
+          :options="characterOptions.map(c => ({ value: c.name, label: c.label }))"
+          option-filter-prop="label" :token-separators="[',', '，', '、']" style="width:100%" />
+        <div class="field-hint">可从已有角色选择，也可直接输入新名字</div>
+      </a-form-item>
+
+      <!-- 暗示文本 -->
+      <a-form-item label="暗示文本" tooltip="伏笔在正文中的具体暗示语句（1-2句话，可直接用于正文）">
+        <a-textarea v-model:value="form.hint_text" :rows="2" placeholder="例：镜中的影像仅供参考，但当镜中人比你先微笑时，请立刻远离" />
+      </a-form-item>
+
+      <!-- 备注 -->
+      <a-form-item label="备注">
+        <a-textarea v-model:value="form.notes" :rows="2" placeholder="补充说明：设计意图、与主线的交汇点等" />
+      </a-form-item>
+
+      <!-- AI 辅助设置 -->
+      <a-row :gutter="12">
+        <a-col :span="6">
+          <a-form-item label="长线伏笔"><a-switch v-model:checked="form.is_long_term" /></a-form-item>
+        </a-col>
+        <a-col :span="6">
+          <a-form-item label="自动提醒"><a-switch v-model:checked="form.auto_remind" /></a-form-item>
+        </a-col>
+        <a-col :span="6">
+          <a-form-item label="含在上下文"><a-switch v-model:checked="form.include_in_context" /></a-form-item>
+        </a-col>
+        <a-col :span="6">
+          <a-form-item label="提前N章提醒">
+            <a-input-number v-model:value="form.remind_before_chapters" :min="1" :max="10" style="width:100%" />
+          </a-form-item>
+        </a-col>
+      </a-row>
     </a-form>
     <template #footer>
       <a-button @click="showAdd = false">取消</a-button>
@@ -363,4 +486,6 @@ const filteredData = computed(() => {
 .priority-num { font-size: 11px; color: #8C8C8C; margin-left: 4px; }
 .form-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .form-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fs-form { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+.field-hint { font-size: 11px; color: #999; margin-top: 2px; }
 </style>

@@ -1,11 +1,14 @@
 """章节生成服务 - 核心逻辑链路"""
 import json
+import re
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models.chapter import Chapter
 from app.models.project import Project
 from app.models.outline import Outline
+from app.models.character import Character
+from app.models.world import WorldSetting
 from app.models.plot_analysis import PlotAnalysis
 from app.models.story_memory import StoryMemory
 from app.models.generation_history import GenerationHistory
@@ -60,6 +63,14 @@ def generate_analysis_summary(analysis_data: dict) -> str:
         # 评分理由（AI 必填的逐维度说明）：分号转成换行，每维度独占一行
         justification = scores.get("score_justification") or scores.get("justification")
         if justification:
+            # 兜底：AI 可能误用英文 key（如 pacing/attraction）作为维度标题，
+            # 这里统一替换成中文名，确保前端展示一致。
+            for key, label in _SCORE_ORDER:
+                justification = re.sub(
+                    rf'\b{re.escape(key)}\b(?=\s*[:：])',
+                    label,
+                    justification,
+                )
             # 中英文分号转换行，让每维度理由独占一行更易读
             formatted = justification.replace("；", "\n  ").replace(";", "\n  ")
             lines.append(f"  评分理由: \n  {formatted.strip()}")
@@ -203,20 +214,233 @@ class ChapterService:
                     base_url=config.base_url,
                     api_key=config.api_key,
                     model=config.model,
+                    provider=config.provider or config.backend_type or "openai",
+                    embedding_model=config.embedding_model or "",
                 )
         return AIClient()
+
+    async def _run_planner_and_fetch(
+        self, chapter: Chapter, project: Project,
+        base_context: dict, ai_client: AIClient,
+    ) -> str:
+        """Phase 1+2: Planner 判断需求 → Fetcher 按需查询 → 返回 <data> 文本块。"""
+        import json as _json
+        from app.services.memory_vector_service import MemoryVectorService
+
+        # === Phase 1: Planner ===
+        planner_context = {
+            "chapter_number": str(chapter.chapter_number),
+            "chapter_title": chapter.title or "",
+            "target_word_count": str(base_context.get("target_word_count", 3000)),
+            "user_prompt": "",
+        }
+        plan_result = await self.skill_engine.execute_skill(
+            "chapter_planner", ai_client, planner_context,
+        )
+        plan_json = plan_result.get("json") or {}
+        needs = plan_json.get("need", [])
+        if not isinstance(needs, list) or not needs:
+            raise RuntimeError("Planner 返回空的 need 列表")
+
+        # === Phase 2: Fetcher ===
+        parts = []
+        chapter_num = chapter.chapter_number
+        # 预加载常用数据（避免重复查询）
+        chars_cache = None
+        outlines_cache = None
+
+        for need in needs:
+            need = need.strip()
+            parts.append(f"<!-- {need} -->")
+            try:
+                if need.startswith("角色:"):
+                    name = need[3:].strip()
+                    if name == "all":
+                        chars = await self._list_chapter_characters(chapter)
+                        parts.append("<characters>")
+                        for c in chars:
+                            parts.append(f"  [{c.name}] 定位:{c.role} 性格:{c.personality[:120]} 背景:{c.background[:120]} 能力:{c.ability[:100]} 说话风格:{c.speech_style[:80]}")
+                        parts.append("</characters>")
+                    else:
+                        info = await self._query_character(name)
+                        parts.append(f"<character name=\"{name}\">{info}</character>")
+                elif need.startswith("关系:"):
+                    name = need[3:].strip()
+                    info = await self._query_relations(name)
+                    parts.append(f"<relations of=\"{name}\">{info}</relations>")
+                elif need.startswith("前章:"):
+                    n = int(need[3:].strip())
+                    info = await self._query_chapter_summary(n)
+                    parts.append(f"<chapter_summary ch=\"{n}\">{info}</chapter_summary>")
+                elif need == "大纲":
+                    ol = await self._get_outline_for_chapter(chapter_num)
+                    if ol:
+                        parts.append(f"<outline>{ol}</outline>")
+                elif need.startswith("伏笔"):
+                    filt = need[3:] if len(need) > 2 else "all"
+                    ftext = await self._query_foreshadows_text(filt, chapter_num)
+                    parts.append(f"<foreshadows>{ftext}</foreshadows>")
+                elif need.startswith("组织:"):
+                    name = need[3:].strip()
+                    info = await self._query_organization(name)
+                    parts.append(f"<organization name=\"{name}\">{info}</organization>")
+                elif need.startswith("时间线"):
+                    q = need[4:].strip() if len(need) > 4 else ""
+                    info = await self._query_timeline(q, chapter_num)
+                    parts.append(f"<timeline query=\"{q}\">{info}</timeline>")
+                elif need == "世界观":
+                    wtext = await self._get_world_settings_text()
+                    if wtext:
+                        parts.append(f"<world>{wtext}</world>")
+                elif need == "回忆":
+                    vs = MemoryVectorService(ai_client)
+                    ol_text = ""
+                    if chapter.outline_id:
+                        from sqlalchemy import select as _s
+                        ol = (await self.db.execute(
+                            _s(Outline).where(Outline.id == chapter.outline_id)
+                        )).scalar_one_or_none()
+                        if ol:
+                            ol_text = (ol.summary or ol.title or "")[:500]
+                    recalled = await vs.build_context_for_generation(
+                        user_id=self.user_id, project_id=self.project_id,
+                        current_chapter=chapter_num,
+                        chapter_outline=ol_text,
+                        top_k=3,
+                    )
+                    if recalled:
+                        parts.append(f"<memories>{recalled[:1500]}</memories>")
+            except Exception as e:
+                parts.append(f"(查询失败: {e})")
+
+        return "\n\n".join(parts)
+
+    async def _list_chapter_characters(self, chapter: Chapter) -> list:
+        """获取本章涉及的角色列表。"""
+        from app.models.outline import Outline
+        names = set()
+        # 从大纲取
+        if chapter.outline_id:
+            ol = (await self.db.execute(
+                select(Outline).where(Outline.id == chapter.outline_id)
+            )).scalar_one_or_none()
+            if ol and ol.characters:
+                for c in ol.characters:
+                    if isinstance(c, str):
+                        names.add(c)
+                    elif isinstance(c, dict):
+                        names.add(c.get("name", ""))
+        if not names:
+            # 回退：所有角色
+            chars = (await self.db.execute(
+                select(Character).where(Character.project_id == self.project_id)
+            )).scalars().all()
+            return chars[:8]
+        chars = (await self.db.execute(
+            select(Character).where(
+                Character.project_id == self.project_id,
+                Character.name.in_(list(names)),
+            )
+        )).scalars().all()
+        return chars or []
+
+    async def _query_character(self, name: str) -> str:
+        from app.services.chapter_tools import _query_character
+        return await _query_character(self.db, self.project_id, name)
+
+    async def _query_relations(self, name: str) -> str:
+        from app.services.chapter_tools import _query_relations
+        return await _query_relations(self.db, self.project_id, name)
+
+    async def _query_chapter_summary(self, chapter_num: int) -> str:
+        from app.services.chapter_tools import _query_chapter_summary
+        return await _query_chapter_summary(self.db, self.project_id, chapter_num)
+
+    async def _get_outline_for_chapter(self, chapter_num: int) -> str:
+        ol = (await self.db.execute(
+            select(Outline).where(
+                Outline.project_id == self.project_id,
+                Outline.chapter_number == chapter_num,
+            )
+        )).scalars().first()
+        if not ol:
+            return ""
+        parts = [f"标题: {ol.title}"]
+        if ol.summary:
+            parts.append(f"概要: {ol.summary[:300]}")
+        if ol.key_points:
+            kps = ", ".join(str(k)[:80] for k in ol.key_points[:5])
+            parts.append(f"情节点: {kps}")
+        if ol.goal:
+            parts.append(f"写作目标: {ol.goal[:150]}")
+        if ol.emotion:
+            parts.append(f"情绪基调: {ol.emotion}")
+        return " | ".join(parts)
+
+    async def _query_foreshadows_text(self, filt: str, ch_num: int) -> str:
+        service = ForeshadowService(self.db, self.project_id)
+        if "must" in filt:
+            flist = await service.get_must_resolve_foreshadows(ch_num)
+        elif "upcoming" in filt:
+            flist = await service.get_pending_resolve_foreshadows(ch_num, 5)
+        else:
+            flist = await service.list_all(status="planted") + await service.list_all(status="pending")
+        if not flist:
+            return "无"
+        lines = []
+        for f in flist[:10]:
+            lines.append(f"- [{f.foreshadow_type or '?'}] {f.title}: {(f.content or '')[:100]}")
+        return "\n".join(lines)
+
+    async def _query_organization(self, name: str) -> str:
+        from app.services.chapter_tools import _query_organization
+        return await _query_organization(self.db, self.project_id, name)
+
+    async def _query_timeline(self, query: str, ch_num: int) -> str:
+        from app.services.chapter_tools import _query_plot_timeline
+        kw = query.strip()
+        return await _query_plot_timeline(
+            self.db, self.project_id, ch_num,
+            keyword=kw if kw else "",
+            from_chapter=max(1, ch_num - 20),
+            to_chapter=ch_num - 1,
+        )
+
+    async def _get_world_settings_text(self) -> str:
+        from app.models.world import WorldSetting
+        p = (await self.db.execute(
+            select(Project).where(Project.id == self.project_id)
+        )).scalar_one_or_none()
+        parts = []
+        if p:
+            if p.world_time_period:
+                parts.append(f"时间: {p.world_time_period[:200]}")
+            if p.world_location:
+                parts.append(f"地点: {p.world_location[:200]}")
+            if p.world_atmosphere:
+                parts.append(f"氛围: {p.world_atmosphere[:200]}")
+            if p.world_rules:
+                parts.append(f"规则: {p.world_rules[:200]}")
+        ws = (await self.db.execute(
+            select(WorldSetting).where(WorldSetting.project_id == self.project_id)
+        )).scalars().all()
+        for w in ws[:5]:
+            parts.append(f"[{w.category}] {w.name}: {w.content[:150]}")
+        return "\n".join(parts) if parts else ""
+
 
     async def generate_chapter(
         self, chapter_id: int, ai_client: AIClient = None,
         overrides: dict = None,
     ) -> dict:
-        """非流式生成章节
+        """非流式生成章节（Planner + Writer 两阶段流程）
 
         overrides: 批量生成等场景的可选覆盖项，支持键：
             - narrative_pov / narrative_perspective: 叙事视角
             - target_word_count: 目标字数（int）
             - style_config: 写作风格配置 dict（从 WritingStyle.config 取）
             - style_name: 风格名（展示用）
+            - use_legacy: 设为 True 回退旧 tool-calling 流程
         """
         chapter, project = await self._get_chapter_and_project(chapter_id)
         await self._validate_generation(chapter)
@@ -229,20 +453,21 @@ class ChapterService:
         await self.db.commit()
 
         try:
-            # 构建上下文
-            context = await self.context_service.build_chapter_context(chapter, project)
-            # 应用批量覆盖项（narrative_pov / target_word_count / writing_style）
+            # 构建基本上下文（只取大纲概要，不加载全量数据）
+            context = {"chapter_number": chapter.chapter_number,
+                       "chapter_title": chapter.title or ""}
+            if project:
+                context["project_title"] = project.title or ""
+                context["target_word_count"] = project.target_word_count or 3000
+                context["narrative_pov"] = project.narrative_pov or "第三人称"
+                context["narrative_perspective"] = context["narrative_pov"]
+            # 应用覆盖项
             if overrides:
                 if overrides.get("narrative_pov"):
                     context["narrative_pov"] = overrides["narrative_pov"]
                     context["narrative_perspective"] = overrides["narrative_pov"]
-                if overrides.get("narrative_perspective") and not overrides.get("narrative_pov"):
-                    context["narrative_pov"] = overrides["narrative_perspective"]
-                    context["narrative_perspective"] = overrides["narrative_perspective"]
                 if overrides.get("target_word_count"):
-                    twc = overrides["target_word_count"]
-                    context["target_word_count"] = twc
-                    context["word_count_requirement"] = f"目标{twc}字，不少于{int(twc*0.8)}字"
+                    context["target_word_count"] = overrides["target_word_count"]
                 if overrides.get("style_config"):
                     import json as _json
                     context["writing_style"] = _json.dumps(overrides["style_config"], ensure_ascii=False)
@@ -250,28 +475,46 @@ class ChapterService:
                     context["style_name"] = overrides["style_name"]
                 if overrides.get("style_custom_prompt"):
                     context["style_custom_prompt"] = overrides["style_custom_prompt"]
-            context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。"
-            # 将新增的关键事件信息合并到模板已有字段，确保 AI 能用到
-            prev_events = context.get("prev_key_events", "")
-            if prev_events and prev_events != "暂无":
-                existing = context.get("recent_chapters_context", "")
-                context["recent_chapters_context"] = (existing + "\n\n" + prev_events).strip("\n")
-            # 世界设定注入（让 AI 知道故事发生在什么世界）
-            world_setting = context.get("world_setting", "")
-            if world_setting and world_setting != "暂无世界设定":
-                existing2 = context.get("recent_chapters_context", "")
-                context["recent_chapters_context"] = (existing2 + "\n\n" + world_setting).strip("\n")
 
-            # 构建工具调用系统（让 AI 按需查询角色/伏笔/物品等）
-            from app.services.chapter_tools import get_chapter_tools, make_tool_executor
-            tools = get_chapter_tools()
-            tool_executor = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
+            # ===== Phase 1: Planner（判断需要哪些资料） =====
+            use_legacy = (overrides or {}).get("use_legacy", False)
+            chapter_data = ""
+            if not use_legacy:
+                try:
+                    chapter_data = await self._run_planner_and_fetch(
+                        chapter, project, context, ai_client
+                    )
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"[planner] Planner 失败，回退旧流程: {e}")
+                    use_legacy = True
 
-            # 执行 Skill（带工具调用）
-            result = await self.skill_engine.execute_skill(
-                skill_name, ai_client, context,
-                tools=tools, tool_executor=tool_executor,
-            )
+            if use_legacy:
+                # 回退：全量构建上下文 + tool calling（旧流程）
+                context = await self.context_service.build_chapter_context(chapter, project)
+                if overrides:
+                    if overrides.get("narrative_pov"):
+                        context["narrative_pov"] = overrides["narrative_pov"]
+                        context["narrative_perspective"] = overrides["narrative_pov"]
+                    if overrides.get("target_word_count"):
+                        context["target_word_count"] = overrides["target_word_count"]
+                        context["word_count_requirement"] = f"目标{overrides['target_word_count']}字"
+                context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。"
+                from app.services.chapter_tools import get_chapter_tools, make_tool_executor
+                tools = get_chapter_tools()
+                tool_executor = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
+                result = await self.skill_engine.execute_skill(
+                    skill_name, ai_client, context,
+                    tools=tools, tool_executor=tool_executor,
+                )
+            else:
+                # ===== Phase 3: Writer（新流程，无工具调用） =====
+                context["chapter_data"] = chapter_data
+                context["user_prompt"] = ""
+                result = await self.skill_engine.execute_skill(
+                    skill_name, ai_client, context,
+                )
 
             if result.get("error"):
                 chapter.status = "draft"
@@ -638,13 +881,15 @@ class ChapterService:
                     chapter_id=chapter.id,
                     chapter_number=chapter.chapter_number,
                 )
+                # 自动生成 CharacterChangeLog
+                await self._create_character_change_logs(analysis_data, chapter.chapter_number)
             except Exception:
                 pass
             await _report(92, "正在更新角色关系...")
 
             # 增量更新角色关系（分析结果里若提到关系变化）
             try:
-                await self._update_relations_from_analysis(analysis_data)
+                await self._update_relations_from_analysis(analysis_data, chapter.chapter_number)
             except Exception:
                 pass
             await _report(96, "正在更新角色职业阶段...")
@@ -906,13 +1151,76 @@ class ChapterService:
         if updated:
             await self.db.commit()
 
-    async def _update_relations_from_analysis(self, analysis_data: dict):
-        """根据剧情分析结果，增量更新角色关系（轻量，不调 AI）。
+    async def _create_character_change_logs(self, analysis_data: dict, chapter_number: int):
+        """根据分析结果中 character_states 的变化，自动创建 CharacterChangeLog。
+        
+        只记录 analysis 中明确提到的变化字段（survival_status/mental_change/relation_change 等），
+        不记录完整快照（快照留给用户手动添加时保存）。
+        """
+        from app.models.character_change_log import CharacterChangeLog
+        char_states = analysis_data.get("character_states", [])
+        if not char_states:
+            return
+        chars = (await self.db.execute(
+            select(Character).where(Character.project_id == self.project_id)
+        )).scalars().all()
+        name_map = {c.name: c for c in chars}
+        created = 0
+        for state in char_states:
+            if not isinstance(state, dict):
+                continue
+            name = state.get("character") or state.get("character_name") or state.get("name")
+            if not name:
+                continue
+            char = name_map.get(name) or next((c for c in chars if name in c.name or c.name in name), None)
+            if not char:
+                continue
+            # 提取变化字段
+            changed = {}
+            survival = state.get("survival_status") or state.get("status_change")
+            mental = state.get("mental_change") or state.get("state_after") or state.get("current_state")
+            relation = state.get("relation_change")
+            arc = state.get("arc_progress") or state.get("arc_stage")
+            ability = state.get("ability_change")
+            career = state.get("career_changes")
+            
+            if survival: changed["status"] = str(survival)[:50]
+            if mental: changed["mental_state"] = str(mental)[:50]
+            if relation: changed["relation"] = str(relation)[:80]
+            if arc: changed["arc"] = str(arc)[:80]
+            if ability: changed["ability"] = str(ability)[:80]
+            if career: changed["career"] = str(career)[:80]
+            if not changed:
+                continue
+            # 构建摘要
+            summary_parts = [f"{name}"]
+            for k, v in changed.items():
+                field_label = {"status":"状态","mental_state":"心理","relation":"关系","arc":"角色弧","ability":"能力","career":"职业"}.get(k, k)
+                summary_parts.append(f"{field_label}→{v[:20]}")
+            summary = "；".join(summary_parts)
+            # 保存当前快照
+            snapshot = {c.name: getattr(char, c.name) for c in char.__table__.columns
+                       if c.name not in ('created_at', 'updated_at')}
+            self.db.add(CharacterChangeLog(
+                project_id=self.project_id,
+                character_id=char.id,
+                chapter_number=chapter_number,
+                changed_fields=changed,
+                snapshot=snapshot,
+                summary=f"第{chapter_number}章：{summary}",
+            ))
+            created += 1
+        if created:
+            await self.db.commit()
+
+    async def _update_relations_from_analysis(self, analysis_data: dict, chapter_number: int = 0):
+        """根据剧情分析结果，增量更新角色关系并写入 RelationChangeLog。
 
         若分析返回 character_states 里含 relation_change，或顶层 relation_changes，
-        解析出涉及的角色对和关系类型，upsert 到 CharacterRelation 表。
+        解析出涉及的角色对和关系类型，记录变化日志后 upsert 到 CharacterRelation 表。
         """
         from app.models.character import CharacterRelation
+        from app.models.relation_change_log import RelationChangeLog
 
         # 收集关系变化项
         rel_changes = list(analysis_data.get("relation_changes") or [])
@@ -932,11 +1240,14 @@ class ChapterService:
             return
         name_map = {c.name: c for c in chars}
 
-        # 已有关系（避免重复）
+        # 已有关系
         existing = (await self.db.execute(
             select(CharacterRelation).where(CharacterRelation.project_id == self.project_id)
         )).scalars().all()
-        existing_keys = {(r.from_character_id, r.to_character_id, r.relation_type) for r in existing}
+        existing_map: dict[tuple, CharacterRelation] = {}
+        for r in existing:
+            existing_map[(r.from_character_id, r.to_character_id)] = r
+            existing_map[(r.to_character_id, r.from_character_id)] = r
 
         updated = 0
         for ch in rel_changes:
@@ -945,25 +1256,78 @@ class ChapterService:
             desc = str(ch.get("change") or ch.get("description") or "")
             if not desc:
                 continue
-            # 从描述里尝试匹配两个角色名
             mentioned = [c for c in chars if c.name in desc]
             if len(mentioned) < 2:
                 continue
             a, b = mentioned[0], mentioned[1]
-            # 简单推断关系类型（取描述里较短的词）
-            rtype = desc[:20] if len(desc) <= 20 else "关系变化"
-            key = (a.id, b.id, rtype)
-            rev_key = (b.id, a.id, rtype)
-            if key in existing_keys or rev_key in existing_keys:
-                continue
-            self.db.add(CharacterRelation(
-                project_id=self.project_id,
-                from_character_id=a.id, to_character_id=b.id,
-                relation_type=rtype, description=desc[:200],
-                status="active",
-            ))
-            existing_keys.add(key)
-            updated += 1
+            key = (a.id, b.id)
+            existing_rel = existing_map.get(key)
+            
+            if existing_rel:
+                # 记录变化日志
+                old_intimacy = existing_rel.intimacy or 0
+                # 尝试从描述中推断亲密度变化
+                intimacy_delta = 0
+                desc_lower = desc.lower()
+                if any(kw in desc_lower for kw in ('增进', '亲近', '好感', '信任', '和解', '结盟', '同盟', '朋友')):
+                    intimacy_delta = 10
+                elif any(kw in desc_lower for kw in ('恶化', '疏远', '背叛', '仇恨', '敌对', '决裂', '反目')):
+                    intimacy_delta = -10
+                new_intimacy = max(-100, min(100, old_intimacy + intimacy_delta))
+                
+                if intimacy_delta != 0:
+                    old_snapshot = {c.name: getattr(existing_rel, c.name) for c in existing_rel.__table__.columns
+                                   if c.name not in ('created_at', 'updated_at')}
+                    existing_rel.intimacy = new_intimacy
+                    # 更新 relation_type 如果描述里有明确关系词
+                    relation_keywords = {'师徒': '师徒', '恋人': '恋人', '父子': '父子', '母女': '母女',
+                                         '兄弟': '兄弟', '姐妹': '姐妹', '宿敌': '宿敌', '同盟': '同盟',
+                                         '同门': '同门', '雇佣': '雇佣', '救命': '救命恩人', '仇敌': '仇敌'}
+                    for kw, rtype in relation_keywords.items():
+                        if kw in desc:
+                            existing_rel.relation_type = rtype
+                            break
+                    self.db.add(RelationChangeLog(
+                        project_id=self.project_id,
+                        relation_id=existing_rel.id,
+                        chapter_number=chapter_number,
+                        changed_fields={"intimacy": {"old": old_intimacy, "new": new_intimacy}},
+                        snapshot={c.name: getattr(existing_rel, c.name) for c in existing_rel.__table__.columns
+                                 if c.name not in ('created_at', 'updated_at')},
+                        summary=f"第{chapter_number}章：{a.name}与{b.name}{desc[:80]}",
+                    ))
+                    updated += 1
+            else:
+                # 不存在的关系，新建
+                rtype = "相识"
+                relation_keywords = {'师徒': '师徒', '恋人': '恋人', '父子': '父子', '母女': '母女',
+                                     '兄弟': '兄弟', '姐妹': '姐妹', '宿敌': '宿敌', '同盟': '同盟',
+                                     '同门': '同门', '雇佣': '雇佣', '救命': '救命恩人', '仇敌': '仇敌'}
+                for kw, rtype_kw in relation_keywords.items():
+                    if kw in desc:
+                        rtype = rtype_kw
+                        break
+                rel = CharacterRelation(
+                    project_id=self.project_id,
+                    from_character_id=a.id, to_character_id=b.id,
+                    relation_type=rtype, description=desc[:200],
+                    intimacy=0, status="active",
+                )
+                self.db.add(rel)
+                await self.db.flush()
+                # 记录新增日志
+                self.db.add(RelationChangeLog(
+                    project_id=self.project_id,
+                    relation_id=rel.id,
+                    chapter_number=chapter_number,
+                    changed_fields={"relation_type": rtype},
+                    snapshot={c.name: getattr(rel, c.name) for c in rel.__table__.columns
+                             if c.name not in ('created_at', 'updated_at')},
+                    summary=f"第{chapter_number}章：{a.name}与{b.name}建立{rtype}关系",
+                ))
+                existing_map[key] = rel
+                updated += 1
+                
         if updated:
             await self.db.commit()
 

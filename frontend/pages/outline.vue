@@ -15,9 +15,34 @@ const showGen = ref(false)
 const editing = ref<any>(null)
 const editForm = reactive({
   title: '', summary: '', emotion: '', goal: '',
-  key_points_text: '', characters_text: '', organizations_text: '',
+  key_points_text: '',
+  characters: [] as string[],       // 涉及角色（多选 + 可手输新名）
+  organizations: [] as string[],    // 涉及组织（多选 + 可手输新名）
   extraFields: [] as Array<{ key: string; value: string }>,
 })
+// 角色 / 组织候选列表（供下拉多选）
+const characterOptions = ref<Array<{ name: string; role: string; label: string }>>([])
+const organizationOptions = ref<Array<{ name: string; org_type: string; label: string }>>([])
+async function loadCharacterOptions() {
+  try {
+    const list = await api.getCharacters() as any[] || []
+    characterOptions.value = list.map(c => ({
+      name: c.name,
+      role: c.role || '',
+      label: c.role ? `${c.name}（${c.role}）` : c.name,
+    }))
+  } catch (e) { console.warn('加载角色失败', e) }
+}
+async function loadOrganizationOptions() {
+  try {
+    const list = await api.getOrganizations() as any[] || []
+    organizationOptions.value = list.map(o => ({
+      name: o.name,
+      org_type: o.org_type || '',
+      label: o.org_type ? `${o.name}（${o.org_type}）` : o.name,
+    }))
+  } catch (e) { console.warn('加载组织失败', e) }
+}
 // 添加自定义额外字段
 const newFieldKey = ref('')
 function addExtraField() {
@@ -88,6 +113,7 @@ const FIELD_LABELS: Record<string, string> = {
   hook_type: '钩子类型',
   chapter_breath: '叙事节奏',
   foreshadow_plant: '伏笔埋设',
+  foreshadow_advance: '伏笔推进',
   plot_summary: '剧情摘要',
   emotional_tone: '情感基调',
   narrative_goal: '叙事目标',
@@ -236,9 +262,11 @@ async function onGenerateNewChars() {
   generatingChars.value = true
   try {
     for (const name of newCharNames.value) {
-      await api.autoGenerateCharacter({ specification: `请生成一个名为「${name}」的角色` })
+      const { task_id } = await api.autoGenerateCharacterAsync({ specification: `请生成一个名为「${name}」的角色` })
+      const { trackTask } = useBackgroundTasks()
+      trackTask(task_id, 'characters', `生成角色「${name}」`)
     }
-    msg.success(`已生成 ${newCharNames.value.length} 个新角色`)
+    msg.success(`${newCharNames.value.length} 个角色生成任务已提交，可在右下角查看进度`)
     showNewChars.value = false
     newCharNames.value = []
   } catch (e: any) { msg.error('角色生成失败：' + formatError(e)) }
@@ -263,18 +291,20 @@ function openEdit(o: any) {
     emotion: o.emotion || '',
     goal: o.goal || '',
     key_points_text: (o.key_points || []).join('\n'),
-    characters_text: chars.join('、'),
-    organizations_text: orgs.join('、'),
+    characters: [...chars],
+    organizations: [...orgs],
     extraFields: extras,
   })
   newFieldKey.value = ''
+  // 异步加载角色/组织候选（供下拉选择）
+  loadCharacterOptions()
+  loadOrganizationOptions()
 }
 async function onSave() {
   try {
     // 保留原 structure 数据，不丢数据
     const orig = editing.value
     const origStructure = parseStructure(orig)
-    const organizations = editForm.organizations_text.split(/[、,，\s]+/).filter(s => s.trim())
     // 把额外字段合并进 structure（覆盖同名字段）
     const extraObj: Record<string, any> = {}
     for (const f of editForm.extraFields) {
@@ -287,13 +317,15 @@ async function onSave() {
       emotion: editForm.emotion,
       goal: editForm.goal,
       key_points: editForm.key_points_text.split('\n').filter(s => s.trim()),
-      characters: editForm.characters_text.split(/[、,，\s]+/).filter(s => s.trim()),
+      characters: [...editForm.characters],
+      organizations: [...editForm.organizations],
       scenes: getScenes(orig),  // 保留原 scenes
       structure: {
         ...origStructure,
         title: editForm.title, summary: editForm.summary,
         emotion: editForm.emotion, goal: editForm.goal,
-        organizations,
+        characters: [...editForm.characters],
+        organizations: [...editForm.organizations],
         ...extraObj,
       },
       chapter_number: orig.chapter_number,
@@ -346,7 +378,7 @@ async function deleteExpansion() {
 
     <div v-if="outlines && outlines.length" class="outline-list">
       <div v-for="o in outlines" :key="o.id" class="outline-item">
-        <!-- 标题区 -->
+        <!-- 标题区（仅保留展开/收起等只读操作，编辑删除下移以防误点）-->
         <div class="item-head">
           <span class="item-no">第{{ o.chapter_number }}{{ unitLabel }}</span>
           <span class="item-title">{{ o.title || '无标题' }}</span>
@@ -356,9 +388,7 @@ async function deleteExpansion() {
           </template>
           <div class="item-actions">
             <a-button v-if="isOneToMany" type="link" size="small" @click="openExpand(o)">{{ o.has_chapters ? '查看' : '展开' }}</a-button>
-            <a-button type="link" size="small" @click="toggleExpand(o.id)">{{ expandedItems.has(o.id) ? '收起' : '展开' }}</a-button>
-            <a-button type="link" size="small" @click="openEdit(o)">编辑</a-button>
-            <a-button type="link" danger size="small" @click="onDelete(o.id)">删除</a-button>
+            <a-button type="link" size="small" @click="toggleExpand(o.id)">{{ expandedItems.has(o.id) ? '收起详情' : '展开详情' }}</a-button>
           </div>
         </div>
 
@@ -432,6 +462,14 @@ async function deleteExpansion() {
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- 底部操作行：编辑在左，删除独立放最右（物理隔离防误点）-->
+        <div class="item-footer">
+          <div class="footer-left">
+            <a-button type="text" size="small" @click="openEdit(o)">✏️ 编辑</a-button>
+          </div>
+          <a-button type="text" danger size="small" @click="onDelete(o.id)">🗑 删除</a-button>
         </div>
       </div>
     </div>
@@ -511,8 +549,34 @@ async function deleteExpansion() {
         <a-form-item label="梗概"><a-textarea v-model:value="editForm.summary" :rows="4" /></a-form-item>
         <a-form-item label="情节要点（每行一个）"><a-textarea v-model:value="editForm.key_points_text" :rows="3" placeholder="每行一个关键情节点" /></a-form-item>
         <a-row :gutter="12">
-          <a-col :span="12"><a-form-item label="涉及角色（用、分隔）"><a-input v-model:value="editForm.characters_text" placeholder="角色A、角色B、角色C" /></a-form-item></a-col>
-          <a-col :span="12"><a-form-item label="涉及组织（用、分隔）"><a-input v-model:value="editForm.organizations_text" placeholder="组织A、组织B" /></a-form-item></a-col>
+          <a-col :span="12">
+            <a-form-item label="涉及角色">
+              <a-select
+                v-model:value="editForm.characters"
+                mode="tags"
+                placeholder="选择或输入角色名，回车添加"
+                :options="characterOptions.map(c => ({ value: c.name, label: c.label }))"
+                option-filter-prop="label"
+                :token-separators="[',', '，', '、']"
+                style="width:100%"
+              />
+              <div class="field-hint">可从已有角色选择，也可直接输入新名字</div>
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="涉及组织">
+              <a-select
+                v-model:value="editForm.organizations"
+                mode="tags"
+                placeholder="选择或输入组织名，回车添加"
+                :options="organizationOptions.map(o => ({ value: o.name, label: o.label }))"
+                option-filter-prop="label"
+                :token-separators="[',', '，', '、']"
+                style="width:100%"
+              />
+              <div class="field-hint">可从已有组织选择，也可直接输入新名字</div>
+            </a-form-item>
+          </a-col>
         </a-row>
         <a-row :gutter="12">
           <a-col :span="12"><a-form-item label="情感基调"><a-input v-model:value="editForm.emotion" /></a-form-item></a-col>
@@ -599,6 +663,8 @@ async function deleteExpansion() {
 .item-title { font-size: 15px; font-weight: 600; color: #2B2B2B; flex: 1; }
 .item-actions { display: flex; flex-shrink: 0; }
 .item-body { padding: 12px 16px; }
+.item-footer { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-top: 1px solid #F5F2EB; background: #FBFAF7; }
+.footer-left { display: flex; gap: 4px; }
 .content-section { margin-bottom: 12px; }
 .content-section:last-child { margin-bottom: 0; }
 .section-label { font-size: 12px; font-weight: 600; color: #8C8C8C; margin-bottom: 6px; }

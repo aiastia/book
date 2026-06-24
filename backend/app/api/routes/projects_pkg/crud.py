@@ -21,6 +21,15 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
         select(Project).where(Project.user_id == user.id).order_by(Project.updated_at.desc())
     )
     projects = result.scalars().all()
+    # 批量取每个项目的当前总字数（单次 group-by 查询，避免 N+1）
+    word_sums = {}
+    if projects:
+        rows = await db.execute(
+            select(Chapter.project_id, func.coalesce(func.sum(Chapter.word_count), 0))
+            .where(Chapter.project_id.in_([p.id for p in projects]))
+            .group_by(Chapter.project_id)
+        )
+        word_sums = {r[0]: r[1] for r in rows.all()}
     return [
         {
             "id": p.id,
@@ -29,7 +38,7 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
             "synopsis": (p.synopsis or "")[:100],
             "status": p.status,
             "target_word_count": p.target_word_count,
-            "current_word_count": p.current_word_count,
+            "current_word_count": word_sums.get(p.id, 0),
             "chapter_count": p.chapter_count,
             "cover_url": p.cover_url,
             "created_at": p.created_at.isoformat() if p.created_at else None,
@@ -42,6 +51,11 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
 @router.get("/{project_id}")
 async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     p = await get_user_project(db, project_id, user)
+    # 动态计算当前总字数（从 chapters 表 sum，不依赖可能从未更新的 current_word_count 列）
+    word_sum = await db.scalar(
+        select(func.coalesce(func.sum(Chapter.word_count), 0))
+        .where(Chapter.project_id == project_id)
+    )
     return {
         "id": p.id,
         "title": p.title,
@@ -49,7 +63,7 @@ async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user=
         "synopsis": p.synopsis or "",
         "status": p.status,
         "target_word_count": p.target_word_count,
-        "current_word_count": p.current_word_count,
+        "current_word_count": word_sum,
         "chapter_count": p.chapter_count,
         "narrative_pov": p.narrative_pov,
         "outline_mode": p.outline_mode or "one_to_one",
@@ -112,7 +126,8 @@ async def export_project(
     from app.models.outline import Outline
     from app.models.character import Character, CharacterRelation
     from app.models.world import WorldSetting
-    from app.models.organization import Organization, OrganizationMember
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
     from app.models.foreshadow import Foreshadow
     from app.models.career import Career
     from app.models.item import Item
@@ -192,7 +207,8 @@ async def import_project(req: dict, db: AsyncSession = Depends(get_db), user=Dep
     from app.models.outline import Outline
     from app.models.character import Character, CharacterRelation
     from app.models.world import WorldSetting
-    from app.models.organization import Organization, OrganizationMember
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
     from app.models.foreshadow import Foreshadow
     from app.models.career import Career
     from app.models.item import Item

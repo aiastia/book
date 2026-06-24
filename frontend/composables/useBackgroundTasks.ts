@@ -72,12 +72,12 @@ export function useBackgroundTasks() {
           tasks.value.push({ ...st, _source: 'generic' })
         }
       }
-      // 清理已完成/失败的（保留 10 秒供用户看结果）
+      // 已完成/失败/取消的任务保留在列表中，不自动移除（用户手动关闭）
       const now = Date.now()
       tasks.value = tasks.value.filter(t => {
+        if (t._dismissed) return false  // 仅移除被用户主动关闭的
         if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
           if (!t._doneAt) t._doneAt = now
-          return now - t._doneAt < 10000
         }
         return true
       })
@@ -127,8 +127,10 @@ export function useBackgroundTasks() {
     } finally {
       polling = false
     }
-    // 无活跃任务则停止轮询
-    if (!legacyTaskId.value && tasks.value.length === 0) {
+    // 无活跃任务（无 pending/running）则停止轮询
+    const hasActive = tasks.value.some(t => t.status === 'pending' || t.status === 'running')
+      || legacyTaskStatus.value?.status === 'running' || legacyTaskStatus.value?.status === 'pending'
+    if (!legacyTaskId.value && !hasActive) {
       stopPolling()
     }
   }
@@ -164,7 +166,9 @@ export function useBackgroundTasks() {
   }
 
   async function dismissTask(id: number | string) {
-    tasks.value = tasks.value.filter(t => t.id !== id)
+    // 标记为已关闭（不立即从数组移除，交给 refreshTasks 过滤）
+    const t = tasks.value.find(t => t.id === id)
+    if (t) t._dismissed = true
     // legacy task: 清除 localStorage
     if (typeof id === 'string' && id.startsWith('legacy-')) {
       if (import.meta.client) {
