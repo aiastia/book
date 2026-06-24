@@ -218,6 +218,10 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
         main_career_map = {c.name: c.id for c in all_careers if c.career_type == 'main'}
         sub_career_map = {c.name: c.id for c in all_careers if c.career_type == 'sub'}
         all_career_map = {c.name: c.id for c in all_careers}
+        career_by_id = {c.id: c for c in all_careers}
+        def _default_stage(career_obj):
+            stages = career_obj.stages or []
+            return stages[0].get("name", "") if stages else ""
         for item in chars_data:
             if not isinstance(item, dict) or not item.get("name"):
                 continue
@@ -240,6 +244,14 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
                             if occ in cname or cname in occ:
                                 char_obj.main_career_id = cid
                                 break
+                if char_obj.main_career_id:
+                    ai_stage = str(item.get("main_career_stage", "")).strip()
+                    if ai_stage:
+                        char_obj.main_career_stage_desc = ai_stage
+                    elif not char_obj.main_career_stage_desc:
+                        c_obj = career_by_id.get(char_obj.main_career_id)
+                        if c_obj:
+                            char_obj.main_career_stage_desc = _default_stage(c_obj)
             # 副职业匹配
             sub_names = set()
             subs_raw = item.get("sub_occupations") or []
@@ -247,10 +259,12 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
                 subs_raw = [s.strip() for s in subs_raw.replace("，", ",").replace("/", ",").split(",") if s.strip()]
             for sn in subs_raw:
                 sub_names.add(str(sn).strip())
-            # occupation 中非主职业部分也作为副职业候选
             for occ in occ_parts:
                 if not char_obj.main_career_id or all_career_map.get(occ) != char_obj.main_career_id:
                     sub_names.add(occ)
+            ai_sub_stages = item.get("sub_career_stages") or []
+            if isinstance(ai_sub_stages, str):
+                ai_sub_stages = [s.strip() for s in ai_sub_stages.split(",") if s.strip()]
             sub_list = []
             for sn in sub_names:
                 cid = None
@@ -266,7 +280,17 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
                             cname = cn
                             break
                 if cid and cid != char_obj.main_career_id:
-                    sub_list.append({"career_id": cid, "name": cname, "stage_desc": ""})
+                    # 找对应的 AI 境界
+                    stage = ""
+                    sub_names_list = list(sub_names)
+                    idx = sub_names_list.index(sn) if sn in sub_names_list else -1
+                    if 0 <= idx < len(ai_sub_stages):
+                        stage = str(ai_sub_stages[idx]).strip()
+                    if not stage:
+                        c_obj = career_by_id.get(cid)
+                        if c_obj:
+                            stage = _default_stage(c_obj)
+                    sub_list.append({"career_id": cid, "name": cname, "stage_desc": stage})
             char_obj.sub_careers = sub_list
     
     # 组织匹配

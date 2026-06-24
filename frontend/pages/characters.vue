@@ -323,8 +323,13 @@ const roleColor: Record<string,string> = { '主角':'error', '反派':'warning',
           </a-form-item></a-col>
         </a-row>
 
-        <!-- 副职业：多条修炼体系+境界（动态增删，排除主职业及已选副职业） -->
+        <!-- 副职业：多条修炼体系+境界（动态增删） -->
         <a-form-item label="副职业">
+          <div v-if="editForm.sub_careers.length" class="sub-career-header" style="display:flex;gap:12px;margin-bottom:4px;font-size:11px;color:#999;">
+            <span style="flex:1;padding-left:8px;">修炼体系</span>
+            <span style="width:140px;padding-left:8px;">境界</span>
+            <span style="width:32px;"></span>
+          </div>
           <div v-for="(sc, idx) in editForm.sub_careers" :key="idx">
             <a-row :gutter="12" style="margin-bottom:6px;align-items:center;">
               <a-col :span="12"><a-select v-model:value="sc.career_id" allow-clear placeholder="修炼体系" size="small">

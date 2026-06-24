@@ -89,6 +89,14 @@ class SkillEngine:
         for key, value in context.items():
             if isinstance(value, str):
                 system_prompt = system_prompt.replace(f"{{{key}}}", value)
+        # 别名兼容：自定义 prompt 可能用简短变量名（如 {content} 而非 {chapter_content}）
+        _aliases = {
+            "content": context.get("chapter_content", context.get("content", "")),
+            "title": context.get("chapter_title", context.get("title", "")),
+        }
+        for key, value in _aliases.items():
+            if isinstance(value, str) and f"{{{key}}}" in system_prompt:
+                system_prompt = system_prompt.replace(f"{{{key}}}", value)
 
         messages = [
             {"role": "system", "content": system_prompt},

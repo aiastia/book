@@ -293,20 +293,31 @@ def _locate_in_content(content: str, text: str) -> tuple[int, int]:
         if pos >= 0:
             return pos, min(len(longest), 40)
 
-    # 6. difflib 滑动窗口模糊匹配（最后一个兜底策略）
-    if len(text) >= 4 and len(content) >= 10:
-        window = min(len(text) * 3, 120)  # 滑动窗口大小
-        step = max(1, window // 3)
-        best_ratio = 0.0
-        best_pos = -1
-        for start in range(0, max(1, len(content) - window + 1), step):
-            snippet = content[start:start + window]
-            ratio = difflib.SequenceMatcher(None, text, snippet).ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_pos = start
-        if best_ratio >= 0.5 and best_pos >= 0:
-            return best_pos, min(len(text), 60)
+    # 6. 最长公共子串匹配（比滑动窗口更精准，适合中文）
+    if len(text) >= 3 and len(content) >= 5:
+        sm = difflib.SequenceMatcher(None, text, content)
+        match = sm.find_longest_match(0, len(text), 0, len(content))
+        if match.size >= 3:  # 至少匹配3个字符
+            return match.b, match.size
+        # 如果最长匹配太短，尝试去掉所有标点后再找
+        text_no_punct = _PUNCT_RE.sub("", text)
+        content_no_punct = _PUNCT_RE.sub("", content)
+        if text_no_punct != text and len(text_no_punct) >= 3:
+            sm2 = difflib.SequenceMatcher(None, text_no_punct, content_no_punct)
+            match2 = sm2.find_longest_match(0, len(text_no_punct), 0, len(content_no_punct))
+            if match2.size >= 3:
+                # 映射回原文位置：在 content_no_punct 中找 content 里的位置
+                pos_in_stripped = match2.b
+                orig_pos = 0
+                stripped_pos = 0
+                for i, ch in enumerate(content):
+                    if stripped_pos >= pos_in_stripped:
+                        orig_pos = i
+                        break
+                    if not _PUNCT_RE.match(ch):
+                        stripped_pos += 1
+                    orig_pos = i + 1
+                return orig_pos, match2.size
 
     return -1, 0
 
@@ -392,7 +403,21 @@ async def get_annotations(
             change = cs.get("mental_change") or cs.get("ability_change") or ""
             if not name:
                 continue
+            # 角色名定位：精确匹配 → 去姓匹配 → 单字匹配（处理 AI 用错名的情况，如霜璃↔苏璃）
             pos = content.find(name)
+            if pos < 0 and len(name) >= 2:
+                # 尝试去掉第一个字（姓）匹配
+                pos = content.find(name[1:])
+            if pos < 0 and len(name) >= 2:
+                # 尝试任意两字组合
+                for i in range(len(name) - 1):
+                    sub = name[i:i+2]
+                    pos = content.find(sub)
+                    if pos >= 0:
+                        break
+            if pos < 0:
+                # 最后用通用定位
+                pos, _ = _locate_in_content(content, name)
             annotations.append({
                 "type": "character_event",
                 "title": f"{name} 状态变化", "content": change or cs.get("status", ""),

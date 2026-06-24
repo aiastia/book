@@ -67,6 +67,7 @@ const currentPage = ref(1)
 const pageSizeOptions = ['20', '50', '100']
 
 // ===== 生成门槛逻辑 =====
+// 规则：前一章有内容但未分析时，禁止后续生成
 const chapterGenerateGateMap = computed(() => {
   const list = chapters.value || []
   const sorted = [...list].sort((a: any, b: any) => a.chapter_number - b.chapter_number)
@@ -75,6 +76,7 @@ const chapterGenerateGateMap = computed(() => {
   for (let i = 0; i < sorted.length; i++) {
     const ch = sorted[i]
     const missing: number[] = []
+    let needAnalyze: number | null = null
 
     for (let j = 0; j < i; j++) {
       const prev = sorted[j]
@@ -83,8 +85,18 @@ const chapterGenerateGateMap = computed(() => {
       }
     }
 
+    // 检查紧邻的前一章：有内容但未分析 → 阻止
+    if (i > 0) {
+      const prevCh = sorted[i - 1]
+      if (prevCh.word_count >= 50 && !prevCh.analyzed) {
+        needAnalyze = prevCh.chapter_number
+      }
+    }
+
     if (missing.length > 0) {
       map[ch.id] = { canGenerate: false, reason: `需要先完成前置章节：第 ${missing.join('、')} 章` }
+    } else if (needAnalyze !== null) {
+      map[ch.id] = { canGenerate: false, reason: `请先分析第 ${needAnalyze} 章，再生成后续章节` }
     } else {
       map[ch.id] = { canGenerate: true, reason: '' }
     }
@@ -762,7 +774,11 @@ async function onPlanSaved() {
                   <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
                   <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
                   <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
-                  <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small">🔒 需前置章节</a-tag>
+                  <a-tag v-if="c.word_count >= 50 && c.analyzed" color="cyan" size="small">📊 已分析</a-tag>
+                  <a-tag v-if="c.word_count >= 50 && !c.analyzed" color="orange" size="small">⏳ 待分析</a-tag>
+                  <a-tooltip v-if="!canGenerateChapter(c)" :title="getGenerateDisabledReason(c)">
+                    <a-tag color="warning" size="small">🔒 {{ getGenerateDisabledReason(c).includes('分析') ? '需先分析前章' : '需前置章节' }}</a-tag>
+                  </a-tooltip>
                 </div>
                 <div v-if="c.content_preview" class="ch-row-preview">{{ c.content_preview }}{{ c.word_count > 150 ? '…' : '' }}</div>
                 <div v-else-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
@@ -793,10 +809,14 @@ async function onPlanSaved() {
               <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
               <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
               <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
+              <a-tag v-if="c.word_count >= 50 && c.analyzed" color="cyan" size="small">📊 已分析</a-tag>
+              <a-tag v-if="c.word_count >= 50 && !c.analyzed" color="orange" size="small">⏳ 待分析</a-tag>
               <a-tag v-if="c.quality_alert?.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
               <a-tag v-if="c.quality_alert?.includes('low_score')" color="orange" size="small">低分</a-tag>
               <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
-              <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small" :title="getGenerateDisabledReason(c)">🔒 需前置章节</a-tag>
+              <a-tooltip v-if="!canGenerateChapter(c)" :title="getGenerateDisabledReason(c)">
+                <a-tag color="warning" size="small">🔒 {{ getGenerateDisabledReason(c).includes('分析') ? '需先分析前章' : '需前置章节' }}</a-tag>
+              </a-tooltip>
             </div>
             <div v-if="c.content_preview" class="ch-row-preview">{{ c.content_preview }}{{ c.word_count > 150 ? '…' : '' }}</div>
             <div v-else-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>

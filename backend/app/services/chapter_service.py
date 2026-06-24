@@ -460,19 +460,20 @@ class ChapterService:
             await self.db.commit()
 
     async def _auto_analyze(self, chapter: Chapter, on_progress=None):
-        """自动剧情分析。
-
-        on_progress: 可选进度回调 async def on_progress(progress: int, message: str)。
-        传入后会在各步骤间上报进度（0-100），用于异步后台任务的进度追踪。
-        不传时保持原有同步行为，完全向后兼容。
-        """
+        """自动剧情分析。"""
+        import logging
+        logger = logging.getLogger(__name__)
 
         async def _report(progress: int, message: str):
             if on_progress:
-                try:
-                    await on_progress(progress, message)
-                except Exception:
-                    pass
+                try: await on_progress(progress, message)
+                except Exception: pass
+
+        # 预检：内容不能为空
+        content = (chapter.content or "").strip()
+        if len(content) < 50:
+            logger.warning(f"[analyze] 章节{chapter.chapter_number}内容不足50字，跳过分析")
+            return
 
         # 获取角色信息
         from app.models.character import Character
@@ -484,7 +485,6 @@ class ChapterService:
         chars_info = ", ".join([f"{c.name}({c.role})" for c in characters])
 
         existing_fs = await self.foreshadow_service.list_all()
-        # 伏笔分层注入（对标原项目）：让 AI 识别本章是否自然回收了某个伏笔
         must_resolve, upcoming, others = [], [], []
         for f in existing_fs:
             entry = f"- {f.title}({f.foreshadow_type or '未分类'})：{f.content[:60]}"
@@ -497,6 +497,10 @@ class ChapterService:
                 others.append(entry)
         fs_layered = "【本章必须回收】\n" + ("\n".join(must_resolve) if must_resolve else "无") +                      "\n【即将到期】\n" + ("\n".join(upcoming) if upcoming else "无") +                      "\n【其他伏笔】\n" + ("\n".join(others[:10]) if others else "无")
 
+        # 章节正文通过 system_prompt 的 {chapter_content} / {content} 注入，不重复放入 user_prompt
+        chapter_text = (chapter.content or "")[:5000]
+        user_prompt = "请分析这个章节，特别注意是否自然回收了「本章必须回收」的伏笔。"
+
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
         await _report(10, "AI 正在分析章节剧情...")
         result = await self.skill_engine.execute_skill(
@@ -507,8 +511,8 @@ class ChapterService:
                 "word_count": str(chapter.word_count),
                 "existing_foreshadows": fs_layered,
                 "characters_info": chars_info,
-                "chapter_content": chapter.content[:5000],
-                "user_prompt": "请分析这个章节，特别注意是否自然回收了「本章必须回收」的伏笔。",
+                "chapter_content": chapter_text,
+                "user_prompt": user_prompt,
             },
         )
         if result.get("error"):

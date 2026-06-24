@@ -23,6 +23,30 @@ async def _refresh_project_word_count(db: AsyncSession, project_id: int):
         await db.commit()
 
 
+async def _check_prev_analyzed(db: AsyncSession, project_id: int, chapter_number: int) -> Optional[str]:
+    """检查前一章是否已分析。返回错误消息（需阻止时），None 表示通过。
+
+    规则：前一章有内容（>=50字）但未分析时，阻止后续生成和分析。
+    """
+    prev = (await db.execute(
+        select(Chapter).where(
+            Chapter.project_id == project_id,
+            Chapter.chapter_number < chapter_number,
+        ).order_by(Chapter.chapter_number.desc()).limit(1)
+    )).scalars().first()
+    if not prev:
+        return None  # 没有前一章
+    if not prev.content or (prev.word_count or 0) < 50:
+        return None  # 前一章没有实质内容，由 word_count gate 处理
+    # 前一章有内容 → 必须已分析
+    prev_analyzed = (await db.execute(
+        select(PlotAnalysis.chapter_id).where(PlotAnalysis.chapter_id == prev.id)
+    )).scalars().first()
+    if not prev_analyzed:
+        return f"请先分析第{prev.chapter_number}章，再操作后续章节"
+    return None
+
+
 @router.post("/{project_id}/chapters")
 async def create_chapter(project_id: int, req: ChapterCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     await get_user_project(db, project_id, user)  # 权限校验
@@ -104,6 +128,13 @@ async def delete_chapter(project_id: int, chapter_id: int, db: AsyncSession = De
 
 @router.post("/{project_id}/chapters/{chapter_id}/generate")
 async def generate_chapter(project_id: int, chapter_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    c = (await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(404, "章节不存在")
+    # 检查前一章是否已分析
+    block_msg = await _check_prev_analyzed(db, project_id, c.chapter_number)
+    if block_msg:
+        raise HTTPException(409, block_msg)
     service = ChapterService(db, project_id, user.id)
     result = await service.generate_chapter(chapter_id)
     if result.get("error"):
@@ -120,6 +151,10 @@ async def generate_chapter_async(project_id: int, chapter_id: int, db: AsyncSess
     ch = (await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))).scalar_one_or_none()
     if not ch:
         raise HTTPException(404, "章节不存在")
+    # 检查前一章是否已分析
+    block_msg = await _check_prev_analyzed(db, project_id, ch.chapter_number)
+    if block_msg:
+        raise HTTPException(409, block_msg)
 
     from app.services.async_ai_service import submit_async_task
 

@@ -155,6 +155,12 @@ class AIClient:
             return result
         content = result["content"].strip()
 
+        # 响应过短：AI 未返回有效 JSON（通常是上下文溢出或模型异常），不重试
+        if len(content) < 20:
+            result["json"] = None
+            result["error"] = f"AI 返回内容过短（{len(content)}字符），无法解析为 JSON"
+            return result
+
         # 用原项目的强清洗逻辑：中文标点、未转义引号、markdown、json5 兜底
         from app.services.json_helper import clean_json_response, parse_json
         try:

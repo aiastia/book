@@ -311,6 +311,12 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         main_career_map = {c.name: c.id for c in all_careers if c.career_type == 'main'}
         sub_career_map = {c.name: c.id for c in all_careers if c.career_type == 'sub'}
         all_career_map = {c.name: c.id for c in all_careers}
+        # career_id → career 对象（用于取默认境界）
+        career_by_id = {c.id: c for c in all_careers}
+        def _default_stage_desc(career_obj):
+            """取职业的第一个阶段名作为默认境界"""
+            stages = career_obj.stages or []
+            return stages[0].get("name", "") if stages else ""
         matched_career = 0
         matched_sub = 0
         
@@ -322,11 +328,26 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
                 if not char.main_career_id:
                     if occ in main_career_map:
                         char.main_career_id = main_career_map[occ]
+                        # 使用 AI 指定的境界，否则取默认
+                        ai_stage = str(item.get("main_career_stage", "")).strip()
+                        if ai_stage:
+                            char.main_career_stage_desc = ai_stage
+                        elif not char.main_career_stage_desc:
+                            c_obj = career_by_id.get(char.main_career_id)
+                            if c_obj:
+                                char.main_career_stage_desc = _default_stage_desc(c_obj)
                         matched_career += 1
                     else:
                         for cname, cid in main_career_map.items():
                             if occ in cname or cname in occ:
                                 char.main_career_id = cid
+                                ai_stage = str(item.get("main_career_stage", "")).strip()
+                                if ai_stage:
+                                    char.main_career_stage_desc = ai_stage
+                                elif not char.main_career_stage_desc:
+                                    c_obj = career_by_id.get(cid)
+                                    if c_obj:
+                                        char.main_career_stage_desc = _default_stage_desc(c_obj)
                                 matched_career += 1
                                 break
             
@@ -340,6 +361,10 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
             for occ in occ_parts:
                 if not char.main_career_id or all_career_map.get(occ) != char.main_career_id:
                     sub_names.add(occ)
+            # AI 指定的副职业境界（与 sub_occupations 一一对应）
+            ai_sub_stages = item.get("sub_career_stages") or []
+            if isinstance(ai_sub_stages, str):
+                ai_sub_stages = [s.strip() for s in ai_sub_stages.split(",") if s.strip()]
             sub_list = []
             for sn in sub_names:
                 cid = None
@@ -355,7 +380,16 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
                             cname = cn
                             break
                 if cid and cid != char.main_career_id:
-                    sub_list.append({"career_id": cid, "name": cname, "stage_desc": ""})
+                    # 找对应的 AI 境界
+                    stage = ""
+                    idx = list(sub_names).index(sn) if sn in sub_names else -1
+                    if 0 <= idx < len(ai_sub_stages):
+                        stage = str(ai_sub_stages[idx]).strip()
+                    if not stage:
+                        c_obj = career_by_id.get(cid)
+                        if c_obj:
+                            stage = _default_stage_desc(c_obj)
+                    sub_list.append({"career_id": cid, "name": cname, "stage_desc": stage})
                     matched_sub += 1
             char.sub_careers = sub_list
         
