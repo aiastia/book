@@ -113,6 +113,10 @@ def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
     item["organizations"] = final_orgs
     item["scenes"] = clean_scenes
 
+    # 警告：大纲缺少角色（AI 可能忽略了 characters 字段）
+    if not final_chars:
+        logger.warning(f"[outline] 第{ch_num}章大纲缺少角色（characters 为空），请检查 AI 输出")
+
     return Outline(
         project_id=project_id,
         chapter_number=ch_num + offset,

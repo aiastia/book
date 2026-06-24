@@ -190,7 +190,7 @@ const grouped = computed(() => {
             <a-switch :checked="s.is_enabled" @change="onToggle(s)" />
           </div>
           <div class="skill-desc">{{ s.description || '暂无描述' }}</div>
-          <div v-if="s.system_prompt" class="skill-prompt">{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).slice(0, 120) }}{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).length > 120 ? '...' : '' }}</div>
+          <div v-if="s.system_prompt" class="skill-prompt" @click="openEdit(s)" :title="'点击查看完整提示词（' + (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).length + '字）'">{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).slice(0, 300) }}{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).length > 300 ? '... (点击查看全文)' : '' }}</div>
           <!-- 自定义开关 -->
           <div class="skill-custom-row">
             <span style="font-size:12px;color:#888;">自定义提示词</span>
@@ -308,6 +308,6 @@ description: 描述
 .skill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
 .skill-name{font-size:15px;font-weight:600;margin-bottom:4px;}
 .skill-desc{font-size:13px;color:#888;margin-bottom:8px;line-height:1.5;}
-.skill-prompt{font-size:12px;color:#aaa;background:#f9f9f9;padding:8px;border-radius:4px;margin-bottom:8px;font-family:monospace;line-height:1.4;max-height:60px;overflow:hidden;}
+.skill-prompt{font-size:12px;color:#aaa;background:#f9f9f9;padding:8px;border-radius:4px;margin-bottom:8px;font-family:monospace;line-height:1.4;max-height:120px;overflow:hidden;cursor:pointer;}
 .skill-actions{display:flex;gap:8px;}
 </style>

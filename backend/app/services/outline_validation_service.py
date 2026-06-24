@@ -8,7 +8,8 @@ from sqlalchemy import func, select as _sel
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.outline import Outline
 from app.models.character import Character
-from app.models.organization import Organization, OrganizationMember
+from app.models.organization import Organization
+from app.models.organization_member import OrganizationMember
 
 logger = logging.getLogger(__name__)
 

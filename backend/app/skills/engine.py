@@ -194,6 +194,7 @@ class SkillEngine:
             system_prompt = user_cfg["config"]["system_prompt"]
 
         # 替换提示词中的变量（兼容用户模板中直接写的 {变量}）
+        had_user_prompt_var = "{user_prompt}" in system_prompt
         for key, value in context.items():
             if isinstance(value, str):
                 system_prompt = system_prompt.replace(f"{{{key}}}", value)
@@ -213,7 +214,10 @@ class SkillEngine:
         _injected = _inject_context_blocks(context, skill_name)
         messages.extend(_injected)
 
-        messages.append({"role": "user", "content": str(context.get("user_prompt", ""))})
+        # 用户指令：如果模板里本来就有 {user_prompt}（已替换进 system 消息），则不重复添加。
+        user_text = str(context.get("user_prompt", ""))
+        if not had_user_prompt_var:
+            messages.append({"role": "user", "content": user_text})
 
         model = merged_config.get("model")
         temperature = merged_config.get("temperature")

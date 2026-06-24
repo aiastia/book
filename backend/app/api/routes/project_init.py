@@ -158,6 +158,7 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
         "genre": proj.genre or "网文", "title": proj.title,
         "synopsis": proj.synopsis or "暂无",
         "world_info": _build_world_info(proj),
+        "user_prompt": "请生成 6-8 个详细世界设定条目。",
     }, "详细设定", max_retries=2)
     if not derr and detail_result:
         items = detail_result.get("json") or []
@@ -241,7 +242,7 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
 
     from app.models.career import Career
     careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
-    career_info = "、".join(c.name for c in careers[:8]) if careers else "暂无"
+    career_info = "、".join(f"{c.name}({c.career_type})" for c in careers[:8]) if careers else "暂无"
 
     result, cerr = await _safe_skill_call(engine, ai_client, "characters_batch_generation", {
         "genre": proj.genre or "网文", "title": proj.title,
@@ -423,7 +424,8 @@ async def _link_org_memberships(db, pid, raw_chars):
     修复：去掉 break，一个角色所属的所有组织都写入 OrganizationMember；
     organization_id 记录主组织（第一个匹配的）。
     """
-    from app.models.organization import Organization, OrganizationMember
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
     from sqlalchemy import func
 
     orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
@@ -778,7 +780,8 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
     import logging
     logger = logging.getLogger(__name__)
     from app.models.character import Character
-    from app.models.organization import Organization, OrganizationMember
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
     from sqlalchemy import func
 
     task.status_message = "分配角色到组织..."
@@ -998,7 +1001,8 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     import logging
     logger = logging.getLogger(__name__)
     from app.models.character import Character
-    from app.models.organization import Organization, OrganizationMember
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
     from sqlalchemy import func
 
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
