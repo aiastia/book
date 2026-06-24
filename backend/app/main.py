@@ -149,6 +149,8 @@ async def _auto_migrate():
         # 第13批：提示词自定义开关
         ("skill_configs", "ADD COLUMN is_customized BOOLEAN DEFAULT 0"),
         ("skill_configs", "ADD COLUMN system_prompt_snapshot TEXT DEFAULT ''"),
+        # 第14批：大纲验证补全步骤
+        ("project_init_tasks", "ADD COLUMN validate_done INTEGER DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

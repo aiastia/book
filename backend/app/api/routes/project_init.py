@@ -33,18 +33,18 @@ ROLE_MAP = {
 # 组织提前到角色之前，这样角色生成时 AI 可指定所属组织，关联更可靠
 # 后置自动分配组织成员，确保所有角色都有组织归属
 # 生成顺序（优化后）：
-# 1. 世界观（核心 + 详细）→ 2. 地点地图 → 3. 物品道具 → 4. 职业体系
-# 5. 角色 → 6. 组织势力 + 角色组织关联 → 7. 角色关系图谱 → 8. 大纲
-# 职业分配合并到角色生成步骤中
+# 1. 世界观 → 2. 地点 → 3. 物品 → 4. 职业 → 5. 角色
+# 6. 组织+关联 → 7. 关系 → 8. 大纲 → 9. 验证补全
 INIT_STEPS = [
-    ("world", "世界观", 7, "world_done"),
-    ("locations", "地点地图", 18, "locations_done"),
-    ("items", "物品道具", 29, "items_done"),
-    ("career", "职业体系", 38, "career_done"),
-    ("characters", "角色", 50, "characters_done"),
-    ("org", "组织势力", 63, "org_done"),
-    ("relations", "角色关系", 75, "relations_done"),
-    ("outline", "大纲", 88, "outline_done"),
+    ("world", "世界观", 6, "world_done"),
+    ("locations", "地点地图", 15, "locations_done"),
+    ("items", "物品道具", 24, "items_done"),
+    ("career", "职业体系", 31, "career_done"),
+    ("characters", "角色", 40, "characters_done"),
+    ("org", "组织势力", 50, "org_done"),
+    ("relations", "角色关系", 60, "relations_done"),
+    ("outline", "大纲", 74, "outline_done"),
+    ("validate_outline", "验证补全", 88, "validate_done"),
 ]
 STEP_ORDER = [s[0] for s in INIT_STEPS]
 
@@ -408,8 +408,7 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         logger.info(f"[init] 职业匹配完成：主职业{matched_career}个，副职业{matched_sub}条")
 
         await db.flush()  # 拿到 char.id
-        # 处理角色-组织关联（organization_memberships）
-        await _link_org_memberships(db, pid, raw_chars)
+        # 角色-组织关联在后续 _step_org 中处理（组织此时尚未生成）
         await db.commit()
         task.characters_done = 1
         task.status_message = f"已生成 {added} 个角色"
@@ -986,8 +985,107 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
                 structure=extra_fields if extra_fields else None,
             ))
     await db.commit()
+
+    # ===== 角色-组织关联 =====
+    # 组织已生成，现在将角色分配到组织中
+    await _link_characters_to_orgs(db, pid, proj, ai_client)
+
     task.org_done = 1
     return None
+
+
+async def _link_characters_to_orgs(db, pid, proj, ai_client):
+    """将已有角色自动分配到已有组织中（AI 辅助匹配）。"""
+    import logging
+    logger = logging.getLogger(__name__)
+    from app.models.character import Character
+    from app.models.organization import Organization, OrganizationMember
+    from sqlalchemy import func
+
+    chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
+    orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
+
+    if not chars or not orgs:
+        return
+
+    # 找未分配组织的角色
+    chars_with_org = set()
+    for c in chars:
+        if c.organization_id:
+            chars_with_org.add(c.id)
+    member_rows = (await db.execute(
+        select(OrganizationMember.character_id).where(
+            OrganizationMember.organization_id.in_([o.id for o in orgs])
+        )
+    )).scalars().all()
+    chars_with_org.update(member_rows)
+    unassigned = [c for c in chars if c.id not in chars_with_org]
+    if not unassigned:
+        return
+
+    # 构建 AI prompt
+    org_list = "\n".join(
+        f"- ID:{o.id} {o.name}（{o.org_type or '势力'}，势力值:{o.power_value or 50}）\n"
+        f"  描述：{(o.description or '')[:150]}\n  格言：{o.motto or '无'}"
+        for o in orgs[:10]
+    )
+    char_parts = []
+    for c in unassigned[:20]:
+        info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
+        if c.identity: info.append(f"  身份：{c.identity[:100]}")
+        if c.occupation: info.append(f"  职业：{c.occupation[:80]}")
+        if c.personality: info.append(f"  性格：{c.personality[:120]}")
+        if c.background: info.append(f"  背景：{c.background[:120]}")
+        if c.story_goal: info.append(f"  目标：{c.story_goal[:80]}")
+        char_parts.append("\n".join(info))
+    char_list = "\n\n".join(char_parts)
+
+    prompt = f"""将角色分配到最合适的组织。返回纯JSON数组。
+
+已有组织：
+{org_list}
+
+待分配角色：
+{char_list}
+
+返回：[{{"character_id":0,"organization_id":0,"role":"核心成员"}}]"""
+
+    result = await ai_client.chat_json_retry(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7, max_tokens=4096,
+    )
+    if result.get("error"):
+        logger.warning(f"[init] 组织成员分配失败: {result['error']}")
+        return
+
+    data = result.get("json") or []
+    if isinstance(data, dict):
+        data = data.get("assignments") or data.get("data") or []
+
+    char_ids = {c.id for c in unassigned}
+    org_ids = {o.id for o in orgs}
+    assigned = 0
+    for a in data:
+        if not isinstance(a, dict): continue
+        cid = a.get("character_id")
+        oid = a.get("organization_id")
+        if cid not in char_ids or (oid and oid not in org_ids): continue
+        role = str(a.get("role", "成员"))[:50]
+        char = next((c for c in chars if c.id == cid), None)
+        if char and oid:
+            if not char.organization_id:
+                char.organization_id = oid
+            existing = await db.scalar(
+                select(func.count(OrganizationMember.id)).where(
+                    OrganizationMember.organization_id == oid,
+                    OrganizationMember.character_id == cid,
+                )
+            )
+            if not existing:
+                db.add(OrganizationMember(organization_id=oid, character_id=cid, role=role, status="active", source="ai"))
+                assigned += 1
+    await db.commit()
+    logger.info(f"[init] 角色-组织关联完成：{assigned}/{len(unassigned)} 个角色已分配")
 
 
 async def _step_locations(db, task, pid, proj, engine, ai_client):
@@ -1188,6 +1286,167 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
     return None
 
 
+async def _step_validate_outline(db, task, pid, proj, engine, ai_client):
+    """验证大纲：检查大纲中涉及的角色和组织是否都已创建，未创建的自动补充。"""
+    import logging
+    logger = logging.getLogger(__name__)
+    from app.models.outline import Outline
+    from app.models.character import Character
+    from app.models.organization import Organization
+
+    task.status_message = "验证大纲完整性..."
+    await db.commit()
+
+    outlines = (await db.execute(
+        select(Outline).where(Outline.project_id == pid)
+    )).scalars().all()
+    if not outlines:
+        task.status_message = "无大纲，跳过验证"
+        await db.commit()
+        return None
+
+    # 1. 从大纲中提取所有角色名和组织名
+    outline_char_names = set()
+    outline_org_names = set()
+    for o in outlines:
+        if o.characters and isinstance(o.characters, list):
+            for c in o.characters:
+                if isinstance(c, str):
+                    outline_char_names.add(c.strip())
+                elif isinstance(c, dict) and c.get("type") != "organization":
+                    outline_char_names.add(str(c.get("name", "")).strip())
+        if o.organizations and isinstance(o.organizations, list):
+            for org in o.organizations:
+                outline_org_names.add(str(org).strip() if isinstance(org, str) else str(org.get("name", "")).strip())
+        # 也检查 structure 中的 characters 数组（用户自定义模板格式）
+        if o.structure and isinstance(o.structure, dict):
+            chars = o.structure.get("characters", [])
+            if isinstance(chars, list):
+                for c in chars:
+                    if isinstance(c, dict) and c.get("type") == "organization":
+                        outline_org_names.add(str(c.get("name", "")).strip())
+                    elif isinstance(c, dict):
+                        outline_char_names.add(str(c.get("name", "")).strip())
+                    elif isinstance(c, str):
+                        outline_char_names.add(c.strip())
+
+    # 清理空字符串
+    outline_char_names.discard("")
+    outline_org_names.discard("")
+
+    # 2. 对比现有数据库
+    existing_chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
+    existing_char_names = {c.name for c in existing_chars}
+    existing_orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
+    existing_org_names = {o.name for o in existing_orgs}
+
+    missing_chars = outline_char_names - existing_char_names
+    missing_orgs = outline_org_names - existing_org_names
+
+    if not missing_chars and not missing_orgs:
+        logger.info(f"[init] 大纲验证通过：{len(outline_char_names)}个角色、{len(outline_org_names)}个组织均已存在")
+        task.status_message = "大纲验证通过"
+        await db.commit()
+        return None
+
+    logger.info(f"[init] 大纲缺失：角色{missing_chars}、组织{missing_orgs}")
+
+    total_added = 0
+
+    # 3. 补充缺失的角色
+    if missing_chars:
+        task.status_message = f"补充缺失角色（{len(missing_chars)}个）..."
+        await db.commit()
+
+        char_list = "\n".join(missing_chars)
+        result = await ai_client.chat_json_retry(
+            messages=[{"role": "user", "content": f"""为小说《{proj.title}》（题材：{proj.genre or '网文'}）创建以下角色。这些角色出现在大纲中但尚未创建。
+
+需创建的角色：{char_list}
+
+世界观：{_build_world_info(proj)}
+已有角色：{'、'.join(existing_char_names) or '暂无'}
+已有组织：{'、'.join(existing_org_names) or '暂无'}
+
+要求：每个角色包含 name、role（配角）、gender、age、identity、personality（80-150字）、background（80-150字）、occupation（从已有职业体系选，不确定可为空）、story_goal、motivation、ability。角色应与已有组织有合理的归属关系。返回纯JSON数组。"""}],
+            temperature=0.8, max_tokens=4096,
+        )
+        if not result.get("error"):
+            chars_data = result.get("json") or []
+            if isinstance(chars_data, dict):
+                chars_data = chars_data.get("characters") or chars_data.get("data") or []
+            for item in chars_data:
+                if isinstance(item, dict) and item.get("name"):
+                    char = Character(
+                        project_id=pid,
+                        name=str(item.get("name", ""))[:100],
+                        role=str(item.get("role", "配角"))[:50],
+                        gender=str(item.get("gender", ""))[:20],
+                        age=str(item.get("age", ""))[:20],
+                        identity=str(item.get("identity", ""))[:200],
+                        personality=str(item.get("personality", ""))[:2000],
+                        background=str(item.get("background", ""))[:2000],
+                        occupation=str(item.get("occupation", ""))[:200],
+                        ability=str(item.get("ability", ""))[:2000],
+                        story_goal=str(item.get("story_goal", ""))[:2000],
+                        motivation=str(item.get("motivation", ""))[:2000],
+                        weakness=str(item.get("weakness", ""))[:2000],
+                        speech_style=str(item.get("speech_style", ""))[:200],
+                    )
+                    db.add(char)
+                    total_added += 1
+            await db.commit()
+            logger.info(f"[init] 补全角色 {total_added} 个")
+
+    # 4. 补充缺失的组织
+    if missing_orgs:
+        task.status_message = f"补充缺失组织（{len(missing_orgs)}个）..."
+        await db.commit()
+
+        org_list = "\n".join(missing_orgs)
+        result = await ai_client.chat_json_retry(
+            messages=[{"role": "user", "content": f"""为小说《{proj.title}》（题材：{proj.genre or '网文'}）创建以下组织。这些组织出现在大纲中但尚未创建。
+
+需创建的组织：{org_list}
+
+世界观：{_build_world_info(proj)}
+已有组织：{'、'.join(existing_org_names) or '暂无'}
+已有角色：{'、'.join(existing_char_names) or '暂无'}
+
+要求：每个组织包含 name、org_type、description、power_value。组织应与已有角色有合理的关联。返回纯JSON数组。"""}],
+            temperature=0.8, max_tokens=4096,
+        )
+        if not result.get("error"):
+            orgs_data = result.get("json") or []
+            if isinstance(orgs_data, dict):
+                orgs_data = orgs_data.get("organizations") or orgs_data.get("data") or []
+            org_added = 0
+            for item in orgs_data:
+                if isinstance(item, dict) and item.get("name"):
+                    pv = item.get("power_value", 50)
+                    try: pv = int(pv)
+                    except: pv = 50
+                    db.add(Organization(
+                        project_id=pid,
+                        name=str(item.get("name", ""))[:100],
+                        org_type=str(item.get("org_type", ""))[:50],
+                        description=str(item.get("description", ""))[:2000],
+                        power_value=pv,
+                        location=str(item.get("location", ""))[:200],
+                        motto=str(item.get("motto", ""))[:200],
+                    ))
+                    org_added += 1
+            await db.commit()
+            total_added += org_added
+            logger.info(f"[init] 补全组织 {org_added} 个")
+
+    # 5. 如果有新增实体，重新跑一次角色-组织关联
+    if missing_chars or missing_orgs:
+        await _link_characters_to_orgs(db, pid, proj, ai_client)
+
+    task.status_message = f"大纲验证完成（补全 {total_added} 个实体）" if total_added else "大纲验证通过"
+
+
 # 步骤执行器映射
 STEP_EXECUTORS = {
     "world": _step_world,
@@ -1198,6 +1457,7 @@ STEP_EXECUTORS = {
     "org": _step_org,
     "relations": _step_relations,
     "outline": _step_outline,
+    "validate_outline": _step_validate_outline,
 }
 
 

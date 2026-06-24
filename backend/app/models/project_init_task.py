@@ -31,6 +31,7 @@ class ProjectInitTask(Base):
     locations_done = Column(Integer, default=0)
     items_done = Column(Integer, default=0)
     outline_done = Column(Integer, default=0)
+    validate_done = Column(Integer, default=0)
     # 失败信息
     failed_step = Column(String(100), default="")  # 失败的步骤名（用于 resume）
     error = Column(String(1000), default="")
@@ -56,6 +57,7 @@ class ProjectInitTask(Base):
             "locations_done": self.locations_done,
             "items_done": self.items_done,
             "outline_done": self.outline_done,
+            "validate_done": self.validate_done,
             "failed_step": self.failed_step,
             "error": self.error,
             "chapter_count": self.chapter_count,
