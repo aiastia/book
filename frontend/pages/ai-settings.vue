@@ -158,7 +158,7 @@ const providerMeta: Record<string, { label: string; icon: string; defaultUrl: st
   gemini: { label: 'Google Gemini', icon: '✨', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-2.0-flash' },
 }
 function onProviderChange(p: string) {
-  form.provider = p
+  form.provider = p as any
   form.backend_type = p === 'openai' ? 'openai' : p
   // 自动填充默认 URL 和模型（仅新增时）
   if (!editing.value) {

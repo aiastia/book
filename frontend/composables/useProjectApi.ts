@@ -40,22 +40,8 @@ export function useProjectApi() {
     return apiPut(`/api/projects/${pid()}`, body)
   }
 
-  function deleteProject() {
-    return apiDelete(`/api/projects/${pid()}`)
-  }
   function deleteProjectById(id: number) {
     return apiDelete(`/api/projects/${id}`)
-  }
-
-  // ---- 项目初始化后台任务 ----
-  function createInitTask(projectId: number, extra: any = {}) {
-    return apiPost<any>(`/api/projects/${projectId}/init-task`, extra, { timeout: 10000 })
-  }
-  function getInitTaskStatus(taskId: number) {
-    return apiGet<any>(`/api/projects/init-task/${taskId}/status`, { timeout: 8000 })
-  }
-  function resumeInitTask(taskId: number) {
-    return apiPost<any>(`/api/projects/init-task/${taskId}/resume`, {}, { timeout: 10000 })
   }
 
   // ---- 项目导入导出 ----
@@ -137,10 +123,6 @@ export function useProjectApi() {
     return apiPost(`/api/projects/${pid()}/characters`, body)
   }
 
-  function generateCharacter(body: { role_type?: string; extra?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/characters/generate`, body, { timeout: 60000 })
-  }
-
   function updateCharacter(characterId: number, body: any) {
     return apiPut(`/api/projects/${pid()}/characters/${characterId}`, body)
   }
@@ -155,7 +137,13 @@ export function useProjectApi() {
   }
 
   function createWorld(body: { name: string; category?: string; content: string }) {
-    return apiPost(`/api/projects/${pid()}/worlds`, body)
+    return apiPost<any>(`/api/projects/${pid()}/worlds`, body)
+  }
+  function updateWorld(worldId: number, body: any) {
+    return apiPut<any>(`/api/projects/${pid()}/worlds/${worldId}`, body)
+  }
+  function deleteWorld(worldId: number) {
+    return apiDelete(`/api/projects/${pid()}/worlds/${worldId}`)
   }
 
   function generateWorld(body: { genre?: string; idea?: string }) {
@@ -253,19 +241,6 @@ export function useProjectApi() {
   }
 
   // ---- 灵感模式 ----
-  function inspire(idea: string) {
-    return apiPost<any>(`/api/projects/${pid()}/inspire`, { idea }, { timeout: 60000 })
-  }
-
-  function globalInspire(idea: string) {
-    return apiPost<any>('/api/projects/global-inspire', { idea }, { timeout: 60000 })
-  }
-
-  // ---- 灵感步骤向导 ----
-  function inspirationStep(step: string, body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
-    return apiPost<{ prompt: string; options: string[] }>(`/api/projects/${pid()}/inspiration/step/${step}`, body, { timeout: 60000 })
-  }
-
   function globalInspirationStep(step: string, body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
     return apiPost<{ prompt: string; options: string[] }>(`/api/projects/global-inspiration/step/${step}`, body, { timeout: 60000 })
   }
@@ -279,9 +254,6 @@ export function useProjectApi() {
   }
 
   // ---- 大纲续写/展开 ----
-  function continueOutlines(body: { chapter_count: number }) {
-    return apiPost<{ outlines: any[]; count: number; new_characters?: string[] }>(`/api/projects/${pid()}/outlines/continue`, body, { timeout: 60000 })
-  }
   function continueOutlinesAsync(body: { chapter_count: number }) {
     return apiPost<{ task_id: number }>(`/api/projects/${pid()}/outlines/continue-async`, body, { timeout: 10000 })
   }
@@ -302,10 +274,6 @@ export function useProjectApi() {
   }
   function batchGenerateCharactersAsync(body: { count: number; requirements?: string }) {
     return apiPost<{ task_id: number }>(`/api/projects/${pid()}/characters/batch-generate-async`, body, { timeout: 10000 })
-  }
-
-  function autoAnalyzeCharacters() {
-    return apiPost<any>(`/api/projects/${pid()}/characters/auto-analysis`, {}, { timeout: 60000 })
   }
 
   function autoGenerateCharacter(body: { analysis_result?: any; specification?: string }) {
@@ -330,9 +298,6 @@ export function useProjectApi() {
   }
 
   // ---- 组织 AI 生成 ----
-  function generateOrganization(body: { user_input?: string }) {
-    return apiPost<any>(`/api/projects/${pid()}/organizations/generate`, body, { timeout: 60000 })
-  }
   function generateOrganizationAsync(body: { count?: number; user_input?: string }) {
     return apiPost<{ task_id: number }>(`/api/projects/${pid()}/organizations/generate-async`, body, { timeout: 10000 })
   }
@@ -718,13 +683,9 @@ export function useProjectApi() {
     getProject,
     createProject,
     updateProject,
-    deleteProject,
     deleteProjectById,
     exportProject,
     importProject,
-    createInitTask,
-    getInitTaskStatus,
-    resumeInitTask,
     // 大纲
     getOutlines,
     generateOutlines,
@@ -732,7 +693,6 @@ export function useProjectApi() {
     createOutline,
     updateOutline,
     deleteOutline,
-    continueOutlines,
     continueOutlinesAsync,
     expandOutline,
     getOutlineChapters,
@@ -750,12 +710,10 @@ export function useProjectApi() {
     // 角色
     getCharacters,
     createCharacter,
-    generateCharacter,
     updateCharacter,
     deleteCharacter,
     batchGenerateCharacters,
     batchGenerateCharactersAsync,
-    autoAnalyzeCharacters,
     autoGenerateCharacter,
     autoGenerateCharacterAsync,
     getCharacterChangeLogs,
@@ -765,13 +723,14 @@ export function useProjectApi() {
     // 世界观
     getWorlds,
     createWorld,
+    updateWorld,
+    deleteWorld,
     generateWorld,
     // 组织
     getOrganizations,
     createOrganization,
     deleteOrganization,
     updateOrganization,
-    generateOrganization,
     generateOrganizationAsync,
     autoAnalyzeOrganizations,
     autoGenerateOrganization,
@@ -872,11 +831,7 @@ export function useProjectApi() {
     analyzeAllUnanalyzed,
     getNavigation,
     // 灵感
-    inspire,
-    globalInspire,
-    inspirationStep,
     globalInspirationStep,
-    inspirationQuickComplete,
     globalInspirationQuickComplete,
     // 封面
     generateCoverPrompt,

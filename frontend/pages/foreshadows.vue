@@ -35,7 +35,8 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 // 加载角色候选
 async function loadCharacterOptions() {
   try {
-    const list = await api.getCharacters() as any[] || []
+    const res = await api.getCharacters()
+    const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({ name: c.name, role: c.role || '', label: c.role ? `${c.name}（${c.role}）` : c.name }))
   } catch (e) { console.warn('加载角色失败', e) }
 }

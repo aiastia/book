@@ -25,7 +25,8 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 const organizationOptions = ref<Array<{ name: string; org_type: string; label: string }>>([])
 async function loadCharacterOptions() {
   try {
-    const list = await api.getCharacters() as any[] || []
+    const res = await api.getCharacters()
+    const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({
       name: c.name,
       role: c.role || '',
@@ -35,8 +36,9 @@ async function loadCharacterOptions() {
 }
 async function loadOrganizationOptions() {
   try {
-    const list = await api.getOrganizations() as any[] || []
-    organizationOptions.value = list.map(o => ({
+    const res2 = await api.getOrganizations()
+    const list2 = (res2 as any).data || (res2 as any) || []
+    organizationOptions.value = list2.map(o => ({
       name: o.name,
       org_type: o.org_type || '',
       label: o.org_type ? `${o.name}（${o.org_type}）` : o.name,
@@ -194,7 +196,7 @@ async function onGenerate() {
   try {
     const { task_id } = await api.generateOutlinesAsync(genCount.value)
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'outline_new', `生成${genCount.value}章大纲`)
+    trackTask({ id: task_id, task_type: 'outline_new', title: `生成${genCount.value}章大纲` })
     showGen.value = false
     msg.success('大纲生成任务已提交，可在右下角查看进度')
     // 轮询完成后刷新
@@ -250,7 +252,7 @@ async function onContinue() {
 
     const { task_id } = await api.continueOutlinesAsync(params)
     const { trackTask } = useBackgroundTasks()
-    trackTask(task_id, 'outline_continue', `续写${continueForm.chapter_count}章大纲`)
+    trackTask({ id: task_id, task_type: 'outline_continue', title: `续写${continueForm.chapter_count}章大纲` })
     showContinue.value = false
     msg.success('大纲续写任务已提交，可在右下角查看进度')
     setTimeout(() => refresh(), 5000)
@@ -264,7 +266,7 @@ async function onGenerateNewChars() {
     for (const name of newCharNames.value) {
       const { task_id } = await api.autoGenerateCharacterAsync({ specification: `请生成一个名为「${name}」的角色` })
       const { trackTask } = useBackgroundTasks()
-      trackTask(task_id, 'characters', `生成角色「${name}」`)
+      trackTask({ id: task_id, task_type: 'characters', title: `生成角色「${name}」` })
     }
     msg.success(`${newCharNames.value.length} 个角色生成任务已提交，可在右下角查看进度`)
     showNewChars.value = false
@@ -421,7 +423,7 @@ async function deleteExpansion() {
             <div class="section-label">💡 情节要点（{{ o.key_points.length }}）</div>
             <div class="key-points">
               <div v-for="(p, i) in o.key_points" :key="i" class="kp-item">
-                <span class="kp-dot">{{ i + 1 }}</span>
+                <span class="kp-dot">{{ Number(i) + 1 }}</span>
                 <span>{{ typeof p === 'string' ? p : p.content || p.point || p.event || JSON.stringify(p) }}</span>
               </div>
             </div>

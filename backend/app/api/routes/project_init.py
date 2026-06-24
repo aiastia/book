@@ -32,16 +32,19 @@ ROLE_MAP = {
 # 顺序优化：世界观 → 职业 → 组织 → 角色 → 职业分配 → 关系 → 组织成员分配 → 大纲
 # 组织提前到角色之前，这样角色生成时 AI 可指定所属组织，关联更可靠
 # 后置自动分配组织成员，确保所有角色都有组织归属
-# 地点/物品不纳入初始化管线，由用户在对应页面按需手动触发 AI 生成
+# 生成顺序（优化后）：
+# 1. 世界观（核心 + 详细）→ 2. 地点地图 → 3. 物品道具 → 4. 职业体系
+# 5. 角色 → 6. 组织势力 + 角色组织关联 → 7. 角色关系图谱 → 8. 大纲
+# 职业分配合并到角色生成步骤中
 INIT_STEPS = [
-    ("world", "世界观", 10, "world_done"),
-    ("career", "职业体系", 20, "career_done"),
-    ("org", "组织势力", 30, "org_done"),
-    ("characters", "角色", 40, "characters_done"),
-    ("assign_careers", "职业分配", 46, "assign_careers_done"),
-    ("relations", "角色关系", 54, "relations_done"),
-    ("assign_org_members", "组织成员分配", 60, "assign_org_members_done"),
-    ("outline", "大纲", 80, "outline_done"),
+    ("world", "世界观", 7, "world_done"),
+    ("locations", "地点地图", 18, "locations_done"),
+    ("items", "物品道具", 29, "items_done"),
+    ("career", "职业体系", 38, "career_done"),
+    ("characters", "角色", 50, "characters_done"),
+    ("org", "组织势力", 63, "org_done"),
+    ("relations", "角色关系", 75, "relations_done"),
+    ("outline", "大纲", 88, "outline_done"),
 ]
 STEP_ORDER = [s[0] for s in INIT_STEPS]
 
@@ -216,13 +219,14 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
 
 
 async def _step_characters(db, task, pid, proj, engine, ai_client):
-    """步骤4：角色批量生成（含主角/配角/反派，关联已有组织）"""
+    """步骤：角色批量生成（含主角/配角/反派，职业从已有体系中选择）。
+    
+    组织在后续步骤生成，角色暂不关联组织。
+    """
     import logging
     logger = logging.getLogger(__name__)
     from app.models.character import Character
-    from app.models.organization import Organization
 
-    # 检查是否已有角色（可能上次重试已部分成功）
     existing_count = (await db.execute(
         select(func.count(Character.id)).where(Character.project_id == pid)
     )).scalar() or 0
@@ -236,10 +240,6 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
     task.status_message = "生成角色..."
     await db.commit()
 
-    # 获取已有组织列表，传给 AI 让角色直接关联组织
-    orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
-    org_info = "、".join(o.name for o in orgs[:10]) if orgs else "暂无"
-    # 获取已有职业体系
     from app.models.career import Career
     careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
     career_info = "、".join(c.name for c in careers[:8]) if careers else "暂无"
@@ -252,7 +252,7 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         "user_prompt": (
             f"请生成5个角色（必须包含1个主角、1个反派、其余配角）。\n"
             f"已有职业体系：{career_info}\n"
-            f"已有组织：{org_info}"
+            f"组织将在后续步骤生成，角色的 organization_memberships 暂返回空数组 []。"
         ),
     }, "角色")
     if cerr:
@@ -961,44 +961,46 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
         orgs_data = [orgs_data] if isinstance(orgs_data, dict) else []
 
     for item in orgs_data[:6]:
-	        if isinstance(item, dict) and item.get("name"):
-	            pv = item.get("power_value", item.get("power_level", 50))
-	            try:
-	                pv = int(pv)
-	            except Exception:
-	                pv = 50
-	            # 富字段存入 structure（prompt 新增 personality/background/purpose/traits 等）
-	            extra_fields = {}
-	            for k in ("personality", "background_story", "purpose", "traits"):
-	                v = item.get(k, "")
-	                if v:
-	                    extra_fields[k] = v
-	            db.add(Organization(project_id=pid,
-	                name=str(item.get("name", ""))[:100],
-	                org_type=str(item.get("org_type", item.get("organization_type", item.get("type", ""))))[:50],
-	                description=str(item.get("description", item.get("background", "")))[:2000],
-	                power_value=pv,
-	                location=str(item.get("location", ""))[:200],
-	                motto=str(item.get("motto", ""))[:200],
-	                color=str(item.get("color", ""))[:20],
-	                members=item.get("members", []) if isinstance(item.get("members"), list) else [],
-	                relations=item.get("relationships", []) if isinstance(item.get("relationships"), list) else [],
-	                structure=extra_fields if extra_fields else None,
-	            ))
+        if isinstance(item, dict) and item.get("name"):
+            pv = item.get("power_value", item.get("power_level", 50))
+            try:
+                pv = int(pv)
+            except Exception:
+                pv = 50
+            # 富字段存入 structure（prompt 新增 personality/background/purpose/traits 等）
+            extra_fields = {}
+            for k in ("personality", "background_story", "purpose", "traits"):
+                v = item.get(k, "")
+                if v:
+                    extra_fields[k] = v
+            db.add(Organization(project_id=pid,
+                name=str(item.get("name", ""))[:100],
+                org_type=str(item.get("org_type", item.get("organization_type", item.get("type", ""))))[:50],
+                description=str(item.get("description", item.get("background", "")))[:2000],
+                power_value=pv,
+                location=str(item.get("location", ""))[:200],
+                motto=str(item.get("motto", ""))[:200],
+                color=str(item.get("color", ""))[:20],
+                members=item.get("members", []) if isinstance(item.get("members"), list) else [],
+                relations=item.get("relationships", []) if isinstance(item.get("relationships"), list) else [],
+                structure=extra_fields if extra_fields else None,
+            ))
     await db.commit()
     task.org_done = 1
     return None
 
 
 async def _step_locations(db, task, pid, proj, engine, ai_client):
-    """步骤6：地点地图"""
+    """步骤：地点地图生成"""
     from app.models.location import Location
 
     task.status_message = "生成地点地图..."
     await db.commit()
 
     loc_result, lerr = await _safe_skill_call(engine, ai_client, "locations_generate", {
-        "title": proj.title, "world_info": f"{proj.world_location or ''} {proj.synopsis or ''}",
+        "title": proj.title,
+        "world_info": _build_world_info(proj),
+        "user_prompt": f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。",
     }, "地点")
     if lerr:
         return lerr
@@ -1022,14 +1024,16 @@ async def _step_locations(db, task, pid, proj, engine, ai_client):
 
 
 async def _step_items(db, task, pid, proj, engine, ai_client):
-    """步骤7：物品道具"""
+    """步骤：物品道具生成"""
     from app.models.item import Item
 
     task.status_message = "生成物品道具..."
     await db.commit()
 
     item_result, ierr = await _safe_skill_call(engine, ai_client, "items_generate", {
-        "title": proj.title, "world_info": f"规则：{proj.world_rules or ''} 简介：{proj.synopsis or ''}",
+        "title": proj.title,
+        "world_info": _build_world_info(proj),
+        "user_prompt": f"请为《{proj.title}》生成5-8个物品，至少1个关键剧情道具。",
     }, "物品")
     if ierr:
         return ierr
@@ -1187,12 +1191,12 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
 # 步骤执行器映射
 STEP_EXECUTORS = {
     "world": _step_world,
+    "locations": _step_locations,
+    "items": _step_items,
     "career": _step_career,
     "characters": _step_characters,
-    "assign_careers": _step_assign_careers,
-    "relations": _step_relations,
     "org": _step_org,
-    "assign_org_members": _step_assign_org_members,
+    "relations": _step_relations,
     "outline": _step_outline,
 }
 

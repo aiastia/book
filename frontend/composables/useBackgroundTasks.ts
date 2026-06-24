@@ -375,6 +375,8 @@ export function useBackgroundTasks() {
           { label: '职业分配', done: legacyTaskStatus.value?.assign_careers_done },
           { label: '关系', done: legacyTaskStatus.value?.relations_done },
           { label: '组织成员分配', done: legacyTaskStatus.value?.assign_org_members_done },
+          { label: '地点', done: legacyTaskStatus.value?.locations_done },
+          { label: '物品', done: legacyTaskStatus.value?.items_done },
           { label: '大纲', done: legacyTaskStatus.value?.outline_done },
         ],
         _failedStep: legacyTaskStatus.value?.failed_step || '',

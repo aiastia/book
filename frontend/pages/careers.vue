@@ -234,12 +234,12 @@ async function onAutoAssign() {
           <div class="section-title">📌 进阶阶段（{{ c.stages.length }}）</div>
           <div class="stage-timeline">
             <div v-for="(st, i) in c.stages" :key="i" class="stage-item">
-              <div class="stage-index">{{ i + 1 }}</div>
+              <div class="stage-index">{{ Number(i) + 1 }}</div>
               <div class="stage-body">
                 <div class="stage-name">{{ stageName(st) }}</div>
                 <div v-if="stageDetail(st)" class="stage-detail">{{ stageDetail(st) }}</div>
               </div>
-              <div v-if="i < c.stages.length - 1" class="stage-arrow">→</div>
+              <div v-if="Number(i) < c.stages.length - 1" class="stage-arrow">→</div>
             </div>
           </div>
         </div>

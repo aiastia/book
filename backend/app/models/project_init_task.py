@@ -28,6 +28,8 @@ class ProjectInitTask(Base):
     assign_careers_done = Column(Integer, default=0)
     relations_done = Column(Integer, default=0)
     assign_org_members_done = Column(Integer, default=0)
+    locations_done = Column(Integer, default=0)
+    items_done = Column(Integer, default=0)
     outline_done = Column(Integer, default=0)
     # 失败信息
     failed_step = Column(String(100), default="")  # 失败的步骤名（用于 resume）
@@ -51,6 +53,8 @@ class ProjectInitTask(Base):
             "assign_careers_done": self.assign_careers_done,
             "relations_done": self.relations_done,
             "assign_org_members_done": self.assign_org_members_done,
+            "locations_done": self.locations_done,
+            "items_done": self.items_done,
             "outline_done": self.outline_done,
             "failed_step": self.failed_step,
             "error": self.error,

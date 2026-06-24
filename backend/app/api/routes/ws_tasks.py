@@ -13,7 +13,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
-from app.core.auth import verify_token
+from app.core.auth import decode_token
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ async def ws_tasks(ws: WebSocket, token: str = Query(None)):
 
     # 验证 JWT
     try:
-        payload = verify_token(token)
+        payload = decode_token(token)
         user_id = payload.get("user_id")
         if not user_id:
             await ws.close(code=4003, reason="Invalid token: missing user_id")

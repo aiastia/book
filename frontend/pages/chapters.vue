@@ -185,7 +185,7 @@ const pagedGroupedChapters = computed(() => {
   const result: OutlineGroup[] = []
   const groupMap = new Map<string, OutlineGroup>()
   for (const { group, chapter } of sliced) {
-    const key = group.outlineId ?? 'uncategorized'
+    const key = String(group.outlineId ?? 'uncategorized')
     if (!groupMap.has(key)) {
       const g = { ...group, chapters: [] }
       groupMap.set(key, g)
