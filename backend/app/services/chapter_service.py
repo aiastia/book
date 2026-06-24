@@ -57,10 +57,12 @@ def generate_analysis_summary(analysis_data: dict) -> str:
         if not shown:
             lines.append(f"  整体质量: {scores.get('overall', 'N/A')}/10")
 
-        # 评分理由（AI 必填的逐维度说明）
+        # 评分理由（AI 必填的逐维度说明）：分号转成换行，每维度独占一行
         justification = scores.get("score_justification") or scores.get("justification")
         if justification:
-            lines.append(f"  评分理由: {justification}")
+            # 中英文分号转换行，让每维度理由独占一行更易读
+            formatted = justification.replace("；", "\n  ").replace(";", "\n  ")
+            lines.append(f"  评分理由: \n  {formatted.strip()}")
         lines.append("")
 
         # ===== 剧情阶段 =====
@@ -287,6 +289,10 @@ class ChapterService:
                 if lines and lines[-1].strip() == "```":
                     lines = lines[:-1]
                 content = "\n".join(lines)
+            # 去除开头的 markdown 标题（AI 偶尔输出「# 第一章 xxx」，系统框架本身已有标题）
+            import re as _re
+            content = _re.sub(r'^\s*#{1,6}\s*第[一二三四五六七八九十百零\d]+章[^\n]*\n?', '', content)
+            content = content.strip()
             if not content or not content.strip():
                 chapter.status = "draft"
                 await self.db.commit()
@@ -599,6 +605,12 @@ class ChapterService:
 
             await self.db.commit()
             await _report(70, "正在同步伏笔状态...")
+
+            # 重新分析前清理旧的分析伏笔（避免重复分析导致堆积），再同步新状态
+            try:
+                await self.foreshadow_service.clean_analysis_foreshadows(chapter.chapter_number)
+            except Exception as e:
+                print(f"[chapter_service] 清理旧分析伏笔失败（忽略）: {e}", flush=True)
 
             # 更新伏笔状态
             await self.foreshadow_service.auto_update_from_analysis(
@@ -958,6 +970,8 @@ class ChapterService:
               foreshadow(伏笔) / hook(钩子) / conflict(冲突)
 
         记忆同步写入向量库（ChromaDB），供后续章节生成时语义召回。
+        重新分析时会先清理该章节这 6 类旧记忆（DB + 向量库），避免堆积。
+        chapter_chunk / volume_summary 由其他流程产生，不在清理范围。
         """
         def _mk(mtype, content, importance=0.6, title="", related=None):
             if not content or not str(content).strip():
@@ -972,6 +986,32 @@ class ChapterService:
                 importance=importance,
                 related_characters=related or [],
             )
+
+        # 清理该章节的分析类旧记忆（DB + 向量库），避免重新分析堆积
+        analysis_memory_types = ("summary", "plot", "character", "foreshadow", "hook", "conflict")
+        old_mems = (await self.db.execute(
+            select(StoryMemory).where(
+                StoryMemory.project_id == self.project_id,
+                StoryMemory.chapter_id == chapter.id,
+                StoryMemory.memory_type.in_(analysis_memory_types),
+            )
+        )).scalars().all()
+        if old_mems:
+            # 先清理向量库（按 memory_id 逐条删）
+            if self.user_id:
+                try:
+                    from app.services.memory_vector_service import MemoryVectorService
+                    ai_client = await AIClient.from_user_config(self.db, self.user_id)
+                    vs = MemoryVectorService(ai_client)
+                    for m in old_mems:
+                        await vs.delete_memory(self.user_id, self.project_id, m.id)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"[memory] 清理旧向量失败（不影响）: {e}")
+            # 再删 DB 记录
+            for m in old_mems:
+                await self.db.delete(m)
+            await self.db.commit()
 
         memories = []
 

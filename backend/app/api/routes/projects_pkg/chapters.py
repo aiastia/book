@@ -29,14 +29,21 @@ async def create_chapter(project_id: int, req: ChapterCreate, db: AsyncSession =
 async def list_chapters(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     await get_user_project(db, project_id, user)  # 权限校验
     result = await db.execute(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number))
+    chapters = result.scalars().all()
+    # 批量查询已分析章节 id 集合（避免 N+1）
+    analyzed_ids = set((await db.execute(
+        select(PlotAnalysis.chapter_id).where(PlotAnalysis.project_id == project_id)
+    )).scalars().all())
     return [{
         "id": c.id, "chapter_number": c.chapter_number, "title": c.title,
         "word_count": c.word_count, "status": c.status, "quality_score": c.quality_score,
         "summary": c.summary[:100] if c.summary else "",
+        "content_preview": (c.content[:150] if c.content else ""),
         "outline_id": c.outline_id, "sub_index": c.sub_index or 1,
         "generation_mode": c.generation_mode or "one_to_one",
         "has_expansion_plan": bool(c.expansion_plan),
-    } for c in result.scalars().all()]
+        "analyzed": c.id in analyzed_ids,
+    } for c in chapters]
 
 
 @router.get("/{project_id}/chapters/{chapter_id}")

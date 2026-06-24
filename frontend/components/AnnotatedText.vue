@@ -20,10 +20,17 @@ const emit = defineEmits<{ (e: 'select', ann: Annotation): void }>()
 
 // 标注类型配色
 const typeColor: Record<string, { bg: string; border: string; text: string; label: string }> = {
-  hook: { bg: '#FFF1F0', border: '#FFCCC7', text: '#C75B5B', label: '钩子' },
-  foreshadow: { bg: '#E6F7FF', border: '#91D5FF', text: '#1677FF', label: '伏笔' },
-  plot_point: { bg: '#F6FFED', border: '#B7EB8F', text: '#52A569', label: '情节点' },
-  character_event: { bg: '#FFF7E6', border: '#FFD591', text: '#D49A4E', label: '角色' },
+  hook: { bg: '#FFF1F0', border: '#FF7875', text: '#C75B5B', label: '钩子' },
+  foreshadow: { bg: '#E6F7FF', border: '#40A9FF', text: '#1677FF', label: '伏笔' },
+  plot_point: { bg: '#F6FFED', border: '#73D13D', text: '#52A569', label: '情节点' },
+  character_event: { bg: '#FFF7E6', border: '#FFC53D', text: '#D49A4E', label: '角色' },
+}
+// 标注类型图标（对标 MuMu，标注段前置图标）
+const typeIcon: Record<string, string> = {
+  hook: '🎣',
+  foreshadow: '🔮',
+  plot_point: '⭐',
+  character_event: '👤',
 }
 
 // 生成标注唯一 ID
@@ -82,10 +89,9 @@ function segStyle(anns: Annotation[]) {
   const active = isActive(anns)
   return {
     background: active ? c.border : c.bg,
-    borderBottom: `2px solid ${c.border}`,
-    color: c.text,
+    borderBottom: `3px solid ${c.border}`,
+    color: active ? '#fff' : c.text,
     boxShadow: active ? `0 0 0 2px ${c.border}` : 'none',
-    transform: active ? 'scale(1.02)' : 'none',
   }
 }
 function onSegClick(anns: Annotation[]) {
@@ -95,24 +101,54 @@ function onSegClick(anns: Annotation[]) {
 function annKey(a: Annotation, idx: number) {
   return `${a.type}-${a.position}-${idx}`
 }
+
+// activeId 变化时滚动到对应标注（侧边栏点击联动正文）
+watch(() => props.activeId, (id) => {
+  if (!id) return
+  nextTick(() => {
+    const el = document.getElementById(`ann-${id}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+})
 </script>
 
 <template>
   <div class="annotated-text">
-    <span
-      v-for="(seg, i) in segments" :key="i"
-      :class="['seg', { annotated: seg.annotations.length, clickable: seg.annotations.length }]"
-      :style="segStyle(seg.annotations)"
-      @click="seg.annotations.length && onSegClick(seg.annotations)"
-    >
-      {{ seg.text }}
-    </span>
+    <template v-for="(seg, i) in segments" :key="i">
+      <!-- 标注段前置图标 -->
+      <span
+        v-if="seg.annotations.length && typeIcon[seg.annotations[0].type]"
+        class="seg-icon"
+        :style="{ color: (typeColor[seg.annotations[0].type] || typeColor.plot_point).border }"
+        @click="onSegClick(seg.annotations)"
+      >{{ typeIcon[seg.annotations[0].type] }}</span>
+      <span
+        :class="['seg', { annotated: seg.annotations.length, clickable: seg.annotations.length }]"
+        :style="segStyle(seg.annotations)"
+        :id="seg.annotations.length ? `ann-${annId(seg.annotations[0], 0)}` : undefined"
+        @click="seg.annotations.length && onSegClick(seg.annotations)"
+      >
+        {{ seg.text }}
+      </span>
+    </template>
   </div>
 </template>
 
 <style scoped>
 .annotated-text { font-size: 15px; line-height: 2; color: #2B2B2B; white-space: pre-wrap; word-break: break-word; }
-.seg { transition: all .2s ease; }
-.seg.annotated { padding: 1px 2px; border-radius: 3px; cursor: pointer; }
-.seg.clickable:hover { filter: brightness(0.96); }
+.seg { transition: all .15s ease; }
+.seg.annotated {
+  padding: 1px 3px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.seg.clickable:hover { filter: brightness(0.97); }
+.seg-icon {
+  cursor: pointer;
+  font-size: 13px;
+  margin: 0 1px;
+  user-select: none;
+  vertical-align: middle;
+}
 </style>

@@ -212,10 +212,58 @@ async def get_analysis(project_id: int, chapter_number: int, db: AsyncSession = 
         "pacing": a.pacing or "",
         "dialogue_ratio": a.dialogue_ratio or 0, "description_ratio": a.description_ratio or 0,
         "quality_scores": a.quality_scores, "suggestions": a.suggestions,
+        "consistency_issues": a.consistency_issues or [],
+        "analysis_report": a.analysis_report or "",
     }
 
 
 # ===== #8 章节阅读器标注 =====
+import re as _re
+
+# 中文关键词提取（用于在正文里定位分析描述）
+_PUNCT_RE = _re.compile(r"[，。！？、；：""''（）()\[\]【】《》\-—…·\s]+")
+
+
+def _locate_in_content(content: str, text: str) -> tuple[int, int]:
+    """在正文里定位分析描述文本，返回 (position, length)。
+
+    AI 的分析描述是概括性文字，不一定等于正文原文，所以三级匹配：
+    1. 精确匹配：描述的开头片段直接在正文里 find
+    2. 关键词匹配：提取描述里的中文短语（2-8字），逐个在正文 find，取首个命中
+    3. 模糊匹配：去掉标点后，找描述里最长片段的包含匹配
+    都失败返回 (-1, 0)，调用方据此标记 located=False。
+    """
+    if not text or not content:
+        return -1, 0
+    text = str(text).strip()
+    if not text:
+        return -1, 0
+
+    # 1. 精确匹配（描述前 15/20 字在正文里找）
+    for n in (20, 15, 10):
+        if len(text) >= n:
+            pos = content.find(text[:n])
+            if pos >= 0:
+                return pos, min(len(text), 40)
+
+    # 2. 关键词匹配：提取描述里的中文短语，逐个找
+    phrases = [p for p in _PUNCT_RE.split(text) if 2 <= len(p) <= 8]
+    for p in phrases:
+        pos = content.find(p)
+        if pos >= 0:
+            return pos, min(len(p), 40)
+
+    # 3. 模糊匹配：去标点后最长片段
+    cleaned = [p for p in _PUNCT_RE.split(text) if len(p) >= 3]
+    if cleaned:
+        longest = max(cleaned, key=len)
+        pos = content.find(longest)
+        if pos >= 0:
+            return pos, min(len(longest), 40)
+
+    return -1, 0
+
+
 @router.get("/{project_id}/chapters/{chapter_id}/annotations")
 async def get_annotations(
     project_id: int, chapter_id: int,
@@ -224,7 +272,8 @@ async def get_annotations(
     """获取章节标注（用于阅读器高亮，来自剧情分析）。
 
     返回 {annotations, summary}。标注类型：hook/foreshadow/plot_point/character_event。
-    每个标注含 position（字符偏移）、length、title、content、metadata。
+    每个标注含 position（字符偏移）、length、title、content、metadata、located（是否在正文定位到）。
+    located=False 的标注在侧边栏显示但不在正文高亮。
     """
     chapter = (await db.execute(
         select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
@@ -247,34 +296,39 @@ async def get_annotations(
             for htype, htext in hooks.items():
                 if not htext or not isinstance(htext, str):
                     continue
-                pos = content.find(htext[:20]) if len(htext) > 10 else -1
+                pos, length = _locate_in_content(content, htext)
                 annotations.append({
                     "type": "hook", "subtype": htype,
                     "title": f"钩子·{htype}", "content": htext,
-                    "position": max(0, pos), "length": len(htext[:50]) if pos >= 0 else 0,
+                    "position": max(0, pos), "length": length,
+                    "located": pos >= 0,
                 })
         # 2. 伏笔
         for fs in (analysis.foreshadows or []):
             if not isinstance(fs, dict):
                 continue
             title = fs.get("title", "")
-            detail = fs.get("detail", "")
-            search_text = title or detail
-            pos = content.find(search_text[:15]) if search_text and len(search_text) > 5 else -1
+            detail = fs.get("detail") or fs.get("content") or ""
+            # 优先用 quote（正文原文引用）定位，其次用 title/detail
+            quote = fs.get("quote", "")
+            search_text = quote or title or detail
+            pos, length = _locate_in_content(content, search_text)
             annotations.append({
                 "type": "foreshadow",
                 "subtype": fs.get("type", ""),
                 "title": title or "伏笔", "content": detail or title,
-                "position": max(0, pos), "length": len(search_text[:40]) if pos >= 0 else 0,
+                "position": max(0, pos), "length": length,
+                "located": pos >= 0,
                 "metadata": {"foreshadow_action": fs.get("type")},
             })
         # 3. 关键情节点
         for pp in (analysis.key_plot_points or []):
-            text = pp if isinstance(pp, str) else (pp.get("event") or pp.get("description") or str(pp))
-            pos = content.find(text[:15]) if text and len(text) > 5 else -1
+            text = pp if isinstance(pp, str) else (pp.get("event") or pp.get("description") or pp.get("quote") or str(pp))
+            pos, length = _locate_in_content(content, text)
             annotations.append({
                 "type": "plot_point", "title": "关键情节", "content": text,
-                "position": max(0, pos), "length": len(text[:40]) if pos >= 0 else 0,
+                "position": max(0, pos), "length": length,
+                "located": pos >= 0,
             })
         # 4. 角色事件
         for cs in (analysis.character_states or []):
@@ -289,14 +343,17 @@ async def get_annotations(
                 "type": "character_event",
                 "title": f"{name} 状态变化", "content": change or cs.get("status", ""),
                 "position": max(0, pos), "length": len(name) if pos >= 0 else 0,
+                "located": pos >= 0,
                 "metadata": {"character": name, "mental_change": change},
             })
 
-    # 过滤无效位置
+    # 过滤：保留 located=True 的（正文高亮用），located=False 也保留（侧边栏显示）
     valid = [a for a in annotations if a["position"] < len(content)]
+    located = [a for a in valid if a.get("located")]
 
     summary = {
         "total": len(valid),
+        "located": len(located),
         "hooks": len([a for a in valid if a["type"] == "hook"]),
         "foreshadows": len([a for a in valid if a["type"] == "foreshadow"]),
         "plot_points": len([a for a in valid if a["type"] == "plot_point"]),

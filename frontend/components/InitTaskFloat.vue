@@ -5,12 +5,12 @@ import { apiGet, apiPost } from '~/composables/useApi'
 
 const { tasks, isActive, cancelTask, dismissTask } = useBackgroundTasks()
 const msg = useMessage()
-const collapsed = ref(false)
+const collapsed = ref(true)
 const resuming = ref(false)
 const failedTasks = ref<any[]>([])
 const ignoredTaskIds = ref<Set<number>>(new Set())
 
-watch(isActive, (v) => { if (v) collapsed.value = false })
+watch(isActive, (v) => { if (v) collapsed.value = true })  // 新任务来时保持折叠（小条），避免遮挡操作区
 
 // 加载失败的任务
 async function loadFailedTasks() {
@@ -133,8 +133,8 @@ function tagStyle(status: string) {
 </script>
 
 <template>
-  <!-- 始终显示浮窗，即使没有活跃任务 -->
-  <div class="float-panel" :class="{ collapsed }">
+  <!-- 无任务时不渲染，避免遮挡页面操作区 -->
+  <div v-if="isActive || failedTasks.length" class="float-panel" :class="{ collapsed }">
     <div class="float-head" @click="collapsed = !collapsed">
       <span class="float-title-icon">&#x2699;&#xFE0F;</span>
       <span class="float-title">后台任务</span>

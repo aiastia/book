@@ -163,7 +163,8 @@ const columns = [
   { title: '内容', dataIndex: 'content', key: 'content', ellipsis: true },
   { title: '分类', dataIndex: 'foreshadow_type', key: 'foreshadow_type', width: 90 },
   { title: '埋设章', dataIndex: 'plant_chapter_number', key: 'plant', width: 80, sorter: (a: any, b: any) => (a.plant_chapter_number || 9999) - (b.plant_chapter_number || 9999) },
-  { title: '回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 80, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
+  { title: '目标回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 100, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
+  { title: '实际回收章', dataIndex: 'actual_resolve_chapter', key: 'actual_resolve', width: 100, sorter: (a: any, b: any) => (a.actual_resolve_chapter || 9999) - (b.actual_resolve_chapter || 9999) },
   { title: '重要性', dataIndex: 'priority', key: 'priority', width: 130, sorter: (a: any, b: any) => a.priority - b.priority },
   { title: '操作', key: 'actions', width: 200, fixed: 'right' as const },
 ]
@@ -259,6 +260,12 @@ const filteredData = computed(() => {
         </template>
         <template v-else-if="column.key === 'target'">
           {{ record.target_resolve_chapter_number ? `第${record.target_resolve_chapter_number}章` : '—' }}
+        </template>
+        <template v-else-if="column.key === 'actual_resolve'">
+          <span v-if="record.actual_resolve_chapter" style="color: #52A569; font-weight: 600">
+            第{{ record.actual_resolve_chapter }}章
+          </span>
+          <span v-else style="color: #B5C7CB">—</span>
         </template>
         <template v-else-if="column.key === 'priority'">
           <a-rate :value="Math.ceil((record.priority || 0) / 2)" disabled :count="5" style="font-size: 12px" />

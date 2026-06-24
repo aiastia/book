@@ -129,9 +129,14 @@ const reportScores = computed<Array<{ label: string; value: number }>>(() => {
 // 评分理由
 const scoreJustification = computed(() => {
   const report = analysis.value?.analysis_report || ''
-  const m = report.match(/评分理由[:：]\s*(.+)/)
-  if (m) return m[1].trim()
-  return analysis.value?.quality_scores?.score_justification || ''
+  const m = report.match(/评分理由[:：][\s\S]*?(?=\n【|\n\s*\n|$)/)
+  let text = ''
+  if (m) {
+    text = m[0].replace(/评分理由[:：]\s*/, '').replace(/^\s+/gm, '').trim()
+  } else {
+    text = analysis.value?.quality_scores?.score_justification || ''
+  }
+  return text.replace(/；/g, '\n').replace(/;/g, '\n')
 })
 
 const useReportScores = computed(() => reportScores.value.length > 0)
@@ -144,8 +149,39 @@ const qualityScoreCards = computed(() => {
     .map(([k, v]) => ({ key: k, label: scoreLabels[k] || k, value: v as number }))
 })
 
+// 统一评分数据源（reportScores 优先，降级 qualityScoreCards）
+const allScoreCards = computed<Array<{ key?: string; label: string; value: number }>>(() => {
+  if (useReportScores.value) {
+    return reportScores.value.map(s => {
+      const key = Object.entries(scoreLabels).find(([, label]) => label === s.label)?.[0] || ''
+      return { key, label: s.label, value: s.value }
+    })
+  }
+  return qualityScoreCards.value
+})
+
+// 评分分组：整体质量 / 核心三维 / 番茄三维 / 其他
+const CORE_KEYS = ['pacing', 'engagement', 'coherence']
+const TOMATO_KEYS = ['attraction', 'retention', 'bookmark_ratio']
+const overallCard = computed(() =>
+  allScoreCards.value.find(s => s.key === 'overall' || /整体|overall/i.test(s.label)) || null
+)
+const coreCards = computed(() => allScoreCards.value.filter(s => CORE_KEYS.includes(s.key || '')))
+const tomatoCards = computed(() => allScoreCards.value.filter(s => TOMATO_KEYS.includes(s.key || '')))
+const otherCards = computed(() => allScoreCards.value.filter(s =>
+  s.key !== 'overall' && !CORE_KEYS.includes(s.key || '') && !TOMATO_KEYS.includes(s.key || '')
+))
+
+const PACING_MAP: Record<string, string> = {
+  fast: '快速', slow: '缓慢', medium: '中等',
+  varied: '多变', mixed: '多变', balanced: '均衡',
+  rapid: '急促', steady: '稳健', gradual: '渐进',
+  tense: '紧张', relaxed: '舒缓', dynamic: '富有张力',
+}
 function pacingText(p: string): string {
-  return { fast: '快速', medium: '中等', slow: '缓慢' }[p] || p || ''
+  if (!p) return ''
+  const key = String(p).toLowerCase().trim()
+  return PACING_MAP[key] || p
 }
 
 function survivalText(s: string): string {
@@ -202,9 +238,15 @@ function parseSuggestions(data: any[]): string[] {
   return data.map(s => typeof s === 'string' ? s : s.content || s.text || '')
 }
 
-function parseKeyPoints(data: any[]): string[] {
+function parseKeyPoints(data: any[]): Array<{ event: string; quote?: string }> {
   if (!Array.isArray(data)) return []
-  return data.map(p => typeof p === 'string' ? p : p.content || p.text || '')
+  return data.map(p => {
+    if (typeof p === 'string') return { event: p }
+    if (typeof p === 'object' && p) {
+      return { event: p.event || p.content || p.text || p.description || '', quote: p.quote || '' }
+    }
+    return { event: '' }
+  }).filter(p => p.event)
 }
 
 function parseEmotionCurve(data: any[]): Array<{ point: string; emotion: string; intensity: number }> {
@@ -320,21 +362,48 @@ defineExpose({ open })
       <a-tabs v-model:activeKey="activeTab" size="small">
         <!-- Tab 1: 总览 -->
         <a-tab-pane key="overview" tab="📋 总览">
-          <!-- 评分卡片：优先用报告解析（自动支持任意维度，含番茄维度），降级 quality_scores -->
-          <div v-if="useReportScores" class="score-grid">
-            <div v-for="(s, i) in reportScores" :key="i" class="score-card"
-                 :class="{ highlight: /整体|overall/i.test(s.label) }">
-              <div class="score-label">{{ s.label }}</div>
-              <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
-              <div v-if="/整体|overall/i.test(s.label)" class="score-level" :style="{ color: scoreColor(s.value) }">{{ scoreLevel(s.value) }}</div>
+          <!-- 评分卡片（分组布局：整体质量大卡 / 核心三维 / 番茄三维 / 其他） -->
+          <div v-if="allScoreCards.length" class="score-section">
+            <!-- 整体质量（大卡，跨满） -->
+            <div v-if="overallCard" class="score-card overall">
+              <div class="score-label">整体质量</div>
+              <div class="score-num-big" :style="{ color: scoreColor(overallCard.value) }">
+                {{ overallCard.value.toFixed(1) }}<span class="score-unit">/10</span>
+              </div>
+              <div class="score-bar overall-bar">
+                <div class="score-bar-fill" :style="{ width: (overallCard.value * 10) + '%', backgroundColor: scoreColor(overallCard.value) }" />
+              </div>
+              <div class="score-level" :style="{ color: scoreColor(overallCard.value) }">{{ scoreLevel(overallCard.value) }}</div>
             </div>
-          </div>
-          <div v-else-if="qualityScoreCards.length" class="score-grid">
-            <div v-for="s in qualityScoreCards" :key="s.key" class="score-card"
-                 :class="{ highlight: s.key === 'overall' }">
-              <div class="score-label">{{ s.label }}</div>
-              <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value }}</div>
-              <div v-if="s.key === 'overall'" class="score-level" :style="{ color: scoreColor(s.value) }">{{ scoreLevel(s.value) }}</div>
+            <!-- 核心三维 -->
+            <div v-if="coreCards.length" class="score-row">
+              <div v-for="s in coreCards" :key="s.key" class="score-card mini">
+                <div class="score-label">{{ s.label }}</div>
+                <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
+                <div class="score-bar">
+                  <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
+                </div>
+              </div>
+            </div>
+            <!-- 番茄三维 -->
+            <div v-if="tomatoCards.length" class="score-row">
+              <div v-for="s in tomatoCards" :key="s.key" class="score-card mini tomato">
+                <div class="score-label">{{ s.label }}</div>
+                <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
+                <div class="score-bar">
+                  <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
+                </div>
+              </div>
+            </div>
+            <!-- 其他维度 -->
+            <div v-if="otherCards.length" class="score-row others">
+              <div v-for="s in otherCards" :key="s.key" class="score-card mini">
+                <div class="score-label">{{ s.label }}</div>
+                <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
+                <div class="score-bar">
+                  <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -475,7 +544,8 @@ defineExpose({ open })
           <template #tab>⭐ 关键情节 <a-badge :count="parseKeyPoints(analysis.key_plot_points).length" :number-style="{ backgroundColor: '#52A569', fontSize: '11px' }" /></template>
           <div v-if="parseKeyPoints(analysis.key_plot_points).length" class="data-list">
             <div v-for="(p, i) in parseKeyPoints(analysis.key_plot_points)" :key="i" class="data-card">
-              <div class="data-text">{{ p }}</div>
+              <div class="data-text">{{ p.event }}</div>
+              <div v-if="p.quote" class="data-quote">「{{ p.quote }}」</div>
             </div>
           </div>
           <a-empty v-else description="暂无关键情节数据" />
@@ -557,12 +627,30 @@ defineExpose({ open })
 .state-text { color: #8C8C8C; margin-bottom: 16px; font-size: 14px; }
 
 /* 评分 */
-.score-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-.score-card { background: #FAFAF7; border: 1px solid #E8E4DC; border-radius: 8px; padding: 10px 14px; min-width: 90px; text-align: center; }
-.score-card.highlight { background: linear-gradient(135deg, #F0F5F5, #EAF0F1); border-color: #B8CDD1; min-width: 110px; }
-.score-label { font-size: 11px; color: #8C8C8C; margin-bottom: 2px; }
+.score-section { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.score-card.overall {
+  background: linear-gradient(135deg, #F0F5F5, #EAF0F1);
+  border: 1px solid #B8CDD1;
+  border-radius: 8px;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.score-card.overall .score-label { font-size: 14px; font-weight: 600; color: #2B2B2B; margin: 0; flex-shrink: 0; }
+.score-card.overall .score-num-big { font-size: 36px; font-weight: 700; line-height: 1; flex-shrink: 0; }
+.score-card.overall .score-unit { font-size: 14px; color: #8C8C8C; font-weight: 500; }
+.score-card.overall .overall-bar { flex: 1; height: 8px; margin: 0; border-radius: 4px; }
+.score-card.overall .score-level { font-size: 13px; font-weight: 600; margin: 0; flex-shrink: 0; min-width: 36px; text-align: center; }
+.score-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.score-row.others { grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); }
+.score-card.mini { background: #FAFAF7; border: 1px solid #E8E4DC; border-radius: 6px; padding: 10px 12px; text-align: center; }
+.score-card.mini.tomato { background: linear-gradient(135deg, #FFF7E6, #FFFBF0); border-color: #FFE0B2; }
+.score-label { font-size: 11px; color: #8C8C8C; margin-bottom: 4px; }
 .score-num { font-size: 22px; font-weight: 700; line-height: 1.2; }
 .score-level { font-size: 11px; font-weight: 600; margin-top: 2px; }
+.score-bar { height: 4px; background: #F0EDE6; border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.score-bar-fill { height: 100%; border-radius: 2px; transition: width .4s ease; }
 
 /* 信息条 */
 .info-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
@@ -597,6 +685,17 @@ defineExpose({ open })
 .data-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
 .data-title { font-size: 14px; font-weight: 600; color: #2B2B2B; }
 .data-text { font-size: 14px; color: #2B2B2B; line-height: 1.6; }
+.data-quote {
+  font-size: 12px;
+  color: #8C8C8C;
+  line-height: 1.6;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #FAFAFA;
+  border-left: 2px solid #E8E4DC;
+  border-radius: 0 4px 4px 0;
+  font-style: italic;
+}
 .data-meta { font-size: 13px; color: #8C8C8C; margin-top: 4px; }
 .data-row { font-size: 13px; color: #595959; margin-top: 4px; }
 .data-row-label { color: #8C8C8C; margin-right: 6px; }

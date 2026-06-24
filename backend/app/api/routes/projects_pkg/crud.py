@@ -133,6 +133,7 @@ async def export_project(
 
     # TXT 整书导出
     if format == "txt":
+        from urllib.parse import quote
         chapters = (await db.execute(
             select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
         )).scalars().all()
@@ -144,8 +145,11 @@ async def export_project(
             lines += ["", f"第{ch.chapter_number}章 {ch.title or ''}", ""]
             lines.append(ch.content or "")
             lines.append("")
-        return PlainTextResponse("\n".join(lines), media_type="text/plain",
-                                 headers={"Content-Disposition": f"attachment; filename*=UTF-8''{(p.title or 'book')}.txt"})
+        safe_name = quote(p.title or "book", safe="")
+        return PlainTextResponse(
+            "\n".join(lines), media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}.txt"},
+        )
 
     # 全量 JSON 导出
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()

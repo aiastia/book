@@ -177,6 +177,7 @@
 .page-content {
   margin-top: var(--header-height);
   padding: 24px;
+  padding-bottom: 90px;  /* 底部留白，避开右下角后台任务面板，不挡分页/翻页按钮 */
   flex: 1;
 }
 /* 内容白卡（对标原项目） */

@@ -152,6 +152,22 @@ class ForeshadowService:
             await self.db.commit()
         return planted
 
+    async def clean_analysis_foreshadows(self, chapter_number: int):
+        """重新分析前清理：删除本章节由分析自动生成的伏笔（source_type='analysis'）。
+
+        保留 manual/planned 来源的伏笔，避免误删用户手动创建的。
+        避免重复分析导致伏笔堆积。
+        """
+        fs_list = await self.list_all()
+        to_delete = [
+            f for f in fs_list
+            if f.source_type == "analysis"
+            and (f.actual_plant_chapter == chapter_number or f.plant_chapter_number == chapter_number)
+        ]
+        for f in to_delete:
+            await self.db.delete(f)
+        await self.db.commit()
+
     async def auto_update_from_analysis(self, analysis_result: dict, chapter_number: int):
         """根据剧情分析结果自动更新伏笔状态"""
         foreshadows_data = analysis_result.get("foreshadows", [])

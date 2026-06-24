@@ -195,7 +195,7 @@ function getOutlineTitle(outlineId: number | null): string {
 
 // ===== 可分析章节数 =====
 const batchAnalyzableCount = computed(() => {
-  return (chapters.value || []).filter((c: any) => c.word_count >= 50 && !c.quality_score).length
+  return (chapters.value || []).filter((c: any) => c.word_count >= 50 && !c.analyzed).length
 })
 
 // ===== 状态文本/颜色 =====
@@ -720,7 +720,8 @@ async function onPlanSaved() {
                   <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
                   <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small">🔒 需前置章节</a-tag>
                 </div>
-                <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
+                <div v-if="c.content_preview" class="ch-row-preview">{{ c.content_preview }}{{ c.word_count > 150 ? '…' : '' }}</div>
+                <div v-else-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
               </div>
               <div class="ch-row-actions" @click.stop>
                 <a-button type="text" size="small" :disabled="!c.word_count" @click="openReader(c)">📖 阅读</a-button>
@@ -753,7 +754,8 @@ async function onPlanSaved() {
               <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
               <a-tag v-if="!canGenerateChapter(c)" color="warning" size="small" :title="getGenerateDisabledReason(c)">🔒 需前置章节</a-tag>
             </div>
-            <div v-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
+            <div v-if="c.content_preview" class="ch-row-preview">{{ c.content_preview }}{{ c.word_count > 150 ? '…' : '' }}</div>
+            <div v-else-if="c.summary" class="ch-row-summary">{{ c.summary.substring(0, 100) }}</div>
             <div v-else-if="!c.word_count" class="ch-row-empty">暂无内容</div>
           </div>
           <div class="ch-row-actions" @click.stop>
@@ -1028,7 +1030,7 @@ async function onPlanSaved() {
 </template>
 
 <style scoped>
-.ch-page { display: flex; flex-direction: column; gap: 12px; }
+.ch-page { display: flex; flex-direction: column; gap: 18px; padding: 4px 0 24px; }
 
 /* 页面头部 */
 .page-header {
@@ -1036,49 +1038,59 @@ async function onPlanSaved() {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 16px;
+  padding: 18px 0;
   border-bottom: 1px solid #E8E4DC;
   position: sticky;
   top: 0;
   z-index: 10;
   background: #FAFAF7;
 }
-.page-header-left { display: flex; align-items: center; gap: 12px; }
-.page-header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.page-title { margin: 0; font-size: 20px; }
+.page-header-left { display: flex; align-items: center; gap: 14px; }
+.page-header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.page-title { margin: 0; font-size: 22px; font-weight: 700; }
 
 /* 大纲 chips */
-.outline-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.outline-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* 分组头部 */
-.group-header { display: flex; align-items: center; gap: 10px; }
-.group-title { font-size: 15px; font-weight: 600; }
+.group-header { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.group-title { font-size: 16px; font-weight: 700; }
 
 /* 分页 */
-.pagination-bar { display: flex; justify-content: center; padding: 8px 0; }
+.pagination-bar { display: flex; justify-content: center; padding: 12px 0 4px; }
 
 /* 章节列表 */
-.ch-list { display: flex; flex-direction: column; gap: 8px; }
+.ch-list { display: flex; flex-direction: column; gap: 12px; }
 .ch-row {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 18px 20px;
   background: #fff;
   border: 1px solid #E8E4DC;
-  border-radius: 8px;
+  border-left: 3px solid transparent;
+  border-radius: 10px;
   cursor: pointer;
   transition: all .2s;
 }
-.ch-row:hover { border-color: #B8CDD1; box-shadow: 0 2px 8px rgba(43, 43, 43, 0.06); }
-.ch-row-icon { font-size: 20px; flex-shrink: 0; }
-.ch-row-main { flex: 1; min-width: 0; }
+.ch-row:hover { border-color: #B8CDD1; border-left-color: #4D8088; box-shadow: 0 4px 12px rgba(43, 43, 43, 0.07); }
+.ch-row-icon { font-size: 22px; flex-shrink: 0; margin-top: 2px; }
+.ch-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .ch-row-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.ch-row-title { font-size: 15px; font-weight: 500; }
-.ch-row-summary { font-size: 13px; color: #8C8C8C; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ch-row-empty { font-size: 13px; color: #B5C7CB; margin-top: 4px; }
-.ch-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.ch-row-title { font-size: 15px; font-weight: 600; }
+.ch-row-preview {
+  font-size: 13px;
+  color: #595959;
+  line-height: 1.7;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ch-row-summary { font-size: 13px; color: #8C8C8C; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+.ch-row-empty { font-size: 13px; color: #B5C7CB; }
+.ch-row-actions { display: flex; gap: 2px; flex-shrink: 0; align-items: center; }
 
 /* 编辑器 */
 .editor { display: flex; flex-direction: column; gap: 10px; }

@@ -58,6 +58,14 @@ async function viewDetail(chapterNumber: number) {
 
 // 标注分组
 const annotationGroups = computed(() => groupAnnotations(annotations.value))
+// 已定位的标注（用于正文高亮，只显示能在正文找到位置的）
+const locatedAnnotations = computed(() =>
+  (annotations.value || []).filter(a => a.located !== false && a.length > 0)
+)
+// 未定位标注数（侧边栏提示）
+const unlocatedCount = computed(() =>
+  (annotations.value || []).filter(a => a.located === false).length
+)
 
 const analysisMap = computed(() => {
   const m: Record<number, any> = {}
@@ -97,12 +105,20 @@ const reportScores = computed<Array<{ label: string; value: number }>>(() => {
   return items
 })
 
-// 评分理由（从报告文本或 quality_scores 提取）
+// 评分理由（从报告文本或 quality_scores 提取，分号转行更易读）
 const scoreJustification = computed(() => {
   const report = detail.value?.analysis_report || ''
-  const m = report.match(/评分理由[:：]\s*(.+)/)
-  if (m) return m[1].trim()
-  return detail.value?.quality_scores?.score_justification || ''
+  // 多行匹配：评分理由后到下一个【标题】或空行
+  const m = report.match(/评分理由[:：][\s\S]*?(?=\n【|\n\s*\n|$)/)
+  let text = ''
+  if (m) {
+    // 去掉 "评分理由:" 前缀和多余缩进
+    text = m[0].replace(/评分理由[:：]\s*/, '').replace(/^\s+/gm, '').trim()
+  } else {
+    text = detail.value?.quality_scores?.score_justification || ''
+  }
+  // 历史数据分号兜底转行
+  return text.replace(/；/g, '\n').replace(/;/g, '\n')
 })
 
 // 是否使用报告解析的评分卡（有 report 优先用，否则降级 quality_scores）
@@ -115,6 +131,31 @@ const qualityScoreCards = computed(() => {
     .filter(([k, v]) => k !== 'score_justification' && typeof v === 'number')
     .map(([k, v]) => ({ key: k, label: scoreLabels[k] || k, value: v as number }))
 })
+
+// 统一评分数据源（reportScores 优先，降级 qualityScoreCards）
+const allScoreCards = computed<Array<{ key?: string; label: string; value: number }>>(() => {
+  if (useReportScores.value) {
+    return reportScores.value.map(s => {
+      // 反查 key（用于分组判断）
+      const key = Object.entries(scoreLabels).find(([, label]) => label === s.label)?.[0] || ''
+      return { key, label: s.label, value: s.value }
+    })
+  }
+  return qualityScoreCards.value
+})
+
+// 评分分组（按用户要求布局）：整体质量 / 核心三维 / 番茄三维 / 其他维度
+const CORE_KEYS = ['pacing', 'engagement', 'coherence']
+const TOMATO_KEYS = ['attraction', 'retention', 'bookmark_ratio']
+const overallCard = computed(() => {
+  const c = allScoreCards.value.find(s => s.key === 'overall' || /整体|overall/i.test(s.label))
+  return c || null
+})
+const coreCards = computed(() => allScoreCards.value.filter(s => CORE_KEYS.includes(s.key || '')))
+const tomatoCards = computed(() => allScoreCards.value.filter(s => TOMATO_KEYS.includes(s.key || '')))
+const otherCards = computed(() => allScoreCards.value.filter(s =>
+  s.key !== 'overall' && !CORE_KEYS.includes(s.key || '') && !TOMATO_KEYS.includes(s.key || '')
+))
 
 function scoreColor(v: number): string {
   if (v >= 8) return '#52A569'
@@ -131,8 +172,16 @@ function scoreLevel(v: number): string {
   return '很差'
 }
 
+const PACING_MAP: Record<string, string> = {
+  fast: '快速', slow: '缓慢', medium: '中等',
+  varied: '多变', mixed: '多变', balanced: '均衡',
+  rapid: '急促', steady: '稳健', gradual: '渐进',
+  tense: '紧张', relaxed: '舒缓', dynamic: '富有张力',
+}
 function pacingText(p: string): string {
-  return { fast: '快速', medium: '中等', slow: '缓慢' }[p] || p || ''
+  if (!p) return ''
+  const key = String(p).toLowerCase().trim()
+  return PACING_MAP[key] || p
 }
 
 // 手动触发分析（异步后台任务 + 右下角面板进度）
@@ -274,10 +323,16 @@ function parseSuggestions(data: any): string[] {
   return data.map(s => typeof s === 'string' ? s : (s.suggestion || s.content || JSON.stringify(s)))
 }
 
-// 解析情节点
-function parseKeyPoints(data: any): string[] {
+// 解析情节点（兼容字符串和 {event, quote} 对象）
+function parseKeyPoints(data: any): Array<{ event: string; quote?: string }> {
   if (!Array.isArray(data)) return []
-  return data.map(p => typeof p === 'string' ? p : (p.event || p.description || JSON.stringify(p)))
+  return data.map(p => {
+    if (typeof p === 'string') return { event: p }
+    if (typeof p === 'object' && p) {
+      return { event: p.event || p.description || p.quote || '', quote: p.quote || '' }
+    }
+    return { event: '' }
+  }).filter(p => p.event)
 }
 
 // 解析冲突
@@ -404,11 +459,14 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
                 <a-switch v-model:checked="showAnnotations" size="small" />
                 <span class="annot-switch-label">显示标注</span>
                 <span class="annot-summary">
-                  共 {{ annotationSummary.total }} 个标注：
+                  共 {{ annotationSummary.total }} 个
                   <span v-for="g in annotationGroups" :key="g.type" :style="{ color: g.color }">
                     {{ g.icon }} {{ g.items.length }}
                   </span>
                 </span>
+                <a-tooltip v-if="unlocatedCount" :title="`${unlocatedCount} 个标注未在正文精确定位，仅在右侧列表显示`">
+                  <span class="annot-unlocated">{{ unlocatedCount }} 个未定位</span>
+                </a-tooltip>
               </div>
               <div v-if="annotationSummary.has_analysis === false" class="annot-hint">
                 该章节尚未分析，暂无标注。可点击「重新分析」生成。
@@ -416,9 +474,9 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
               <ClientOnly>
                 <div class="annot-content">
                   <AnnotatedText
-                    v-if="chapterContent && showAnnotations && annotations.length"
+                    v-if="chapterContent && showAnnotations && locatedAnnotations.length"
                     :content="chapterContent"
-                    :annotations="annotations"
+                    :annotations="locatedAnnotations"
                     :active-id="activeAnnotation ? `${activeAnnotation.type}-${activeAnnotation.position}` : null"
                     @select="(a: any) => activeAnnotation = a"
                   />
@@ -485,30 +543,47 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
             <!-- Tab 1: 总览 -->
             <a-tab-pane key="overview" tab="📋 总览">
               <div class="tab-scroll">
-                <!-- 评分卡片（优先用报告解析，降级 quality_scores） -->
-                <div v-if="useReportScores" class="score-section">
-                  <div class="score-grid">
-                    <div v-for="(s, i) in reportScores" :key="i" class="score-card"
-                         :class="{ highlight: /整体|overall/i.test(s.label) }">
+                <!-- 评分卡片（分组布局：整体质量大卡 / 核心三维 / 番茄三维 / 其他） -->
+                <div v-if="allScoreCards.length" class="score-section">
+                  <!-- 整体质量（大卡，跨满） -->
+                  <div v-if="overallCard" class="score-card overall" :style="{ '--c': scoreColor(overallCard.value) }">
+                    <div class="score-label">整体质量</div>
+                    <div class="score-num-big" :style="{ color: scoreColor(overallCard.value) }">
+                      {{ overallCard.value.toFixed(1) }}<span class="score-unit">/10</span>
+                    </div>
+                    <div class="score-bar overall-bar">
+                      <div class="score-bar-fill" :style="{ width: (overallCard.value * 10) + '%', backgroundColor: scoreColor(overallCard.value) }" />
+                    </div>
+                    <div class="score-level" :style="{ color: scoreColor(overallCard.value) }">{{ scoreLevel(overallCard.value) }}</div>
+                  </div>
+                  <!-- 核心三维：节奏 / 吸引力 / 连贯性 -->
+                  <div v-if="coreCards.length" class="score-row">
+                    <div v-for="s in coreCards" :key="s.key" class="score-card mini">
                       <div class="score-label">{{ s.label }}</div>
                       <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
                       <div class="score-bar">
                         <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
                       </div>
-                      <div v-if="/整体|overall/i.test(s.label)" class="score-level" :style="{ color: scoreColor(s.value) }">{{ scoreLevel(s.value) }}</div>
                     </div>
                   </div>
-                </div>
-                <div v-else-if="qualityScoreCards.length" class="score-section">
-                  <div class="score-grid">
-                    <div v-for="s in qualityScoreCards" :key="s.key" class="score-card"
-                         :class="{ highlight: s.key === 'overall' }">
+                  <!-- 番茄三维：吸量力 / 留存力 / 追更比潜力 -->
+                  <div v-if="tomatoCards.length" class="score-row">
+                    <div v-for="s in tomatoCards" :key="s.key" class="score-card mini tomato">
                       <div class="score-label">{{ s.label }}</div>
-                      <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value }}</div>
+                      <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
                       <div class="score-bar">
                         <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
                       </div>
-                      <div v-if="s.key === 'overall'" class="score-level" :style="{ color: scoreColor(s.value) }">{{ scoreLevel(s.value) }}</div>
+                    </div>
+                  </div>
+                  <!-- 其他维度（文笔/角色/对话/设定/逻辑） -->
+                  <div v-if="otherCards.length" class="score-row others">
+                    <div v-for="s in otherCards" :key="s.key" class="score-card mini">
+                      <div class="score-label">{{ s.label }}</div>
+                      <div class="score-num" :style="{ color: scoreColor(s.value) }">{{ s.value.toFixed(1) }}</div>
+                      <div class="score-bar">
+                        <div class="score-bar-fill" :style="{ width: (s.value * 10) + '%', backgroundColor: scoreColor(s.value) }" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -585,7 +660,8 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
                     <div class="data-card-top">
                       <span class="item-no">{{ i + 1 }}</span>
                     </div>
-                    <div class="data-text">{{ p }}</div>
+                    <div class="data-text">{{ p.event }}</div>
+                    <div v-if="p.quote" class="data-quote">「{{ p.quote }}」</div>
                   </div>
                 </div>
                 <!-- 冲突 -->
@@ -856,29 +932,50 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
 }
 
 /* 评分 */
-.score-section { margin-bottom: 20px; }
-.score-grid {
+.score-section { margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
+
+/* 整体质量大卡（跨满，突出显示） */
+.score-card.overall {
+  background: linear-gradient(135deg, #F0F5F5, #EAF0F1);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 24px;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+}
+.score-card.overall .score-label { font-size: 14px; font-weight: 600; color: var(--color-fg); margin: 0; flex-shrink: 0; }
+.score-card.overall .score-num-big {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  font-family: Georgia, serif;
+  flex-shrink: 0;
+}
+.score-card.overall .score-unit { font-size: 16px; color: var(--color-fg-muted); font-weight: 500; }
+.score-card.overall .overall-bar { flex: 1; height: 8px; margin: 0; border-radius: 4px; }
+.score-card.overall .score-level { font-size: 13px; font-weight: 600; margin: 0; flex-shrink: 0; min-width: 36px; text-align: center; }
+
+/* 评分行（三等分） */
+.score-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
-.score-card {
+.score-row.others { grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); }
+.score-card.mini {
   background: var(--color-bg-page);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 12px 16px;
-  min-width: 88px;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
   text-align: center;
-  flex: 1;
-  max-width: 120px;
 }
-.score-card.highlight {
-  background: linear-gradient(135deg, #F0F5F5, #EAF0F1);
-  border-color: var(--color-info-border);
-  min-width: 100px;
+.score-card.mini.tomato {
+  background: linear-gradient(135deg, #FFF7E6, #FFFBF0);
+  border-color: #FFE0B2;
 }
 .score-label { font-size: 11px; color: var(--color-fg-muted); margin-bottom: 4px; }
-.score-num { font-size: 24px; font-weight: 700; line-height: 1.2; font-family: Georgia, serif; }
+.score-num { font-size: 22px; font-weight: 700; line-height: 1.2; font-family: Georgia, serif; }
 .score-level { font-size: 11px; font-weight: 600; margin-top: 2px; }
 .score-bar {
   height: 4px;
@@ -984,6 +1081,17 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
 }
 .data-title { font-size: 14px; font-weight: 600; color: var(--color-fg); }
 .data-text { font-size: 14px; color: var(--color-fg-secondary); line-height: 1.6; }
+.data-quote {
+  font-size: 12px;
+  color: var(--color-fg-muted);
+  line-height: 1.6;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: var(--color-bg-page);
+  border-left: 2px solid var(--color-border);
+  border-radius: 0 4px 4px 0;
+  font-style: italic;
+}
 .item-no {
   width: 20px;
   height: 20px;
@@ -1049,6 +1157,7 @@ const suggestionCount = computed(() => parseSuggestions(detail.value?.suggestion
 }
 .annot-switch-label { font-size: 13px; color: var(--color-fg-secondary); }
 .annot-summary { font-size: 12px; color: var(--color-fg-muted); display: flex; gap: 10px; font-weight: 600; }
+.annot-unlocated { font-size: 11px; color: var(--color-warning); padding: 1px 6px; background: var(--color-warning-bg); border-radius: 8px; }
 .annot-hint { padding: 12px 16px; font-size: 13px; color: var(--color-warning); }
 .annot-content {
   flex: 1;
