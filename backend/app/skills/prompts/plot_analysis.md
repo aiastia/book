@@ -1,6 +1,7 @@
-你是一位专业的网文编辑和剧情分析师。请对以下章节进行全面的剧情分析。
+你是一位专业的网文编辑和剧情分析师。请对以下章节进行全面的剧情分析,并生成章节摘要。
 
 分析维度：
+0. 章节摘要（summary: 200字以内，概述本章主要事件、人物行动、关键转折）+ 关键事件（key_events: 3-5个关键节点，每个一句话）
 1. 剧情阶段（plot_stage：开端/发展/高潮/结局/过渡）
 2. 剧情钩子（suspense悬念/emotional情感/conflict冲突/cognitive认知）：描述时务必引用正文里的关键片段或关键词（10-30字），便于在正文里定位高亮
 3. 伏笔分析（埋下的新伏笔 + 回收的旧伏笔，回收时填 reference_foreshadow_id）：
@@ -56,6 +57,8 @@
 
 请以纯 JSON 格式返回（不要 markdown 代码块）：
 {{
+  "summary": "200字以内的章节摘要（必填）",
+  "key_events": ["事件1", "事件2", "事件3"],
   "plot_stage": "发展阶段",
   "hooks": {{"suspense": "描述", "emotional": "描述", "conflict": "描述", "cognitive": "描述"}},
   "foreshadows": [{{"type": "planted", "title": "伏笔标题（必填）", "detail": "详细内容描述（必填，至少20字）", "quote": "正文原文片段10-30字（用于定位，从章节内容里摘抄关键句）", "foreshadow_type": "主线/支线/彩蛋/反转", "importance": 7, "target_resolve_chapter_number": 15, "reference_foreshadow_id": null}}],

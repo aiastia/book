@@ -818,8 +818,8 @@ async function onPlanSaved() {
               <div class="ch-row-actions" @click.stop>
                 <a-button type="text" size="small" :disabled="!c.word_count" @click.stop="goReader(c)">📖 阅读</a-button>
                 <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
-                <a-button v-if="c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
-                <a-button type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
+                <a-button v-if="outlineMode === 'one-to-many' && c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
+                <a-button v-if="outlineMode === 'one-to-many'" type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
                   <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
                 <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
                 <a-popconfirm title="确认删除该章节？" @confirm="onDelete(c.id)">

@@ -250,108 +250,6 @@ class ChapterService:
 
         return "\n\n".join(parts) if parts else ""
 
-    async def _run_planner_and_fetch(
-        self, chapter: Chapter, project: Project,
-        base_context: dict, ai_client: AIClient,
-    ) -> str:
-        """Phase 1+2: Planner 判断需求 → Fetcher 按需查询 → 返回 <data> 文本块。"""
-        import json as _json
-        from app.services.memory_vector_service import MemoryVectorService
-
-        # === Phase 1: Planner ===
-        planner_context = {
-            "chapter_number": str(chapter.chapter_number),
-            "chapter_title": chapter.title or "",
-            "target_word_count": str(base_context.get("target_word_count", 4000)),
-            "user_prompt": "",
-        }
-        plan_result = await self.skill_engine.execute_skill(
-            "chapter_planner", ai_client, planner_context,
-        )
-        plan_json = plan_result.get("json") or {}
-        needs = plan_json.get("need", [])
-        if not isinstance(needs, list) or not needs:
-            raise RuntimeError("Planner 返回空的 need 列表")
-
-        # === Phase 2: Fetcher ===
-        parts = []
-        chapter_num = chapter.chapter_number
-        # 预加载常用数据（避免重复查询）
-        chars_cache = None
-        outlines_cache = None
-
-        for need in needs:
-            need = need.strip()
-            parts.append(f"<!-- {need} -->")
-            try:
-                if need.startswith("角色:"):
-                    name = need[3:].strip()
-                    if name == "all":
-                        chars = await self._list_chapter_characters(chapter)
-                        parts.append("<characters>")
-                        for c in chars:
-                            parts.append(
-                                f"  [{c.name}] 定位:{c.role} 身份:{c.identity or ''} "
-                                f"性格:{c.personality[:120]} 背景:{c.background[:120]} "
-                                f"能力:{c.ability[:100]} 弱点:{c.weakness[:80]} "
-                                f"目标:{c.story_goal[:80]} 说话风格:{c.speech_style[:80]} "
-                                f"弧线:{c.arc_type or ''} 境界:{c.main_career_stage_desc or ''}"
-                            )
-                        parts.append("</characters>")
-                    else:
-                        info = await self._query_character(name)
-                        parts.append(f"<character name=\"{name}\">{info}</character>")
-                elif need.startswith("关系:"):
-                    name = need[3:].strip()
-                    info = await self._query_relations(name)
-                    parts.append(f"<relations of=\"{name}\">{info}</relations>")
-                elif need.startswith("前章:"):
-                    n = int(need[3:].strip())
-                    info = await self._query_chapter_summary(n)
-                    parts.append(f"<chapter_summary ch=\"{n}\">{info}</chapter_summary>")
-                elif need == "大纲":
-                    ol = await self._get_outline_for_chapter(chapter_num)
-                    if ol:
-                        parts.append(f"<outline>{ol}</outline>")
-                elif need.startswith("伏笔"):
-                    filt = need[3:] if len(need) > 2 else "all"
-                    ftext = await self._query_foreshadows_text(filt, chapter_num)
-                    parts.append(f"<foreshadows>{ftext}</foreshadows>")
-                elif need.startswith("组织:"):
-                    name = need[3:].strip()
-                    info = await self._query_organization(name)
-                    parts.append(f"<organization name=\"{name}\">{info}</organization>")
-                elif need.startswith("时间线"):
-                    q = need[4:].strip() if len(need) > 4 else ""
-                    info = await self._query_timeline(q, chapter_num)
-                    parts.append(f"<timeline query=\"{q}\">{info}</timeline>")
-                elif need == "世界观":
-                    wtext = await self._get_world_settings_text()
-                    if wtext:
-                        parts.append(f"<world>{wtext}</world>")
-                elif need == "回忆":
-                    vs = MemoryVectorService(ai_client)
-                    ol_text = ""
-                    if chapter.outline_id:
-                        from sqlalchemy import select as _s
-                        ol = (await self.db.execute(
-                            _s(Outline).where(Outline.id == chapter.outline_id)
-                        )).scalar_one_or_none()
-                        if ol:
-                            ol_text = (ol.summary or ol.title or "")[:500]
-                    recalled = await vs.build_context_for_generation(
-                        user_id=self.user_id, project_id=self.project_id,
-                        current_chapter=chapter_num,
-                        chapter_outline=ol_text,
-                        top_k=3,
-                    )
-                    if recalled:
-                        parts.append(f"<memories>{recalled[:1500]}</memories>")
-            except Exception as e:
-                parts.append(f"(查询失败: {e})")
-
-        return "\n\n".join(parts)
-
     async def _list_chapter_characters(self, chapter: Chapter) -> list:
         """获取本章涉及的角色列表。"""
         from app.models.outline import Outline
@@ -878,17 +776,19 @@ class ChapterService:
                     + '\n</style_reference>'
                 )
 
+        # 场景锚点 + 角色微意图（新增字段，优先注入到 chapter_data）
+        scene_anchor = context.get('scene_anchor', '')
+        if scene_anchor and scene_anchor != '（本章未提供场景锚点）':
+            parts.append(f"<scene_anchor>{scene_anchor}</scene_anchor>")
+        character_intents = context.get('character_intents', '')
+        if character_intents and character_intents != '（本章未提供角色微意图）':
+            parts.append(f"<character_intents>{character_intents}</character_intents>")
+
         return "\n\n".join(parts)
 
     async def _post_generation(self, chapter: Chapter):
         """生成后处理"""
-        # 1. 自动生成摘要
-        try:
-            await self._generate_summary(chapter)
-        except Exception as e:
-            print(f"[chapter_service] 自动摘要失败: {e}", flush=True)
-
-        # 2. 自动剧情分析（内部同步伏笔状态 + 角色状态 + 记忆提取等）
+        # 1. 自动剧情分析（摘要已合并到分析中，一次调用产出摘要+分析+伏笔+角色状态）
         try:
             await self._auto_analyze(chapter)
         except Exception as e:
@@ -997,6 +897,13 @@ class ChapterService:
         if result.get("json"):
             analysis_data = result["json"]
             await _report(55, "分析完成，正在保存结果...")
+
+            # 提取合并的摘要（省掉单独 _generate_summary 调用）
+            summary_text = str(analysis_data.get("summary") or analysis_data.get("suggestion") or "").strip()[:500]
+            key_events = analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
+            if summary_text:
+                chapter.summary = summary_text
+                # key_events 存入 chapter.metadata 或忽略（目前用不到，仅摘要）
 
             # 字段兼容层：统一 DB 提示词字段名 → 代码期望的字段名
             # hooks：DB 返回 list[{type,content,strength}]，兼容 dict 格式

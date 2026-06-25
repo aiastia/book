@@ -252,16 +252,24 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
         detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
         world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
 
-    # 角色：分层注入（无论工具模式都发，角色信息由系统直接提供，不走工具查询）
+    # 角色：工具模式下仅发名字+角色+身份（一行），详细信息 AI 可用 query_character 按需获取
     char_parts = []
-    # 查最近大纲中涉及的角色名（用于判断"最近活跃"）
-    recent_char_names = set()
-    try:
-        recent_outlines = (await db.execute(
-            select(Outline).where(Outline.project_id == project_id)
-            .order_by(Outline.chapter_number.desc()).limit(5)
-        )).scalars().all()
-        for o in recent_outlines:
+    if use_tools:
+        for c in chars:
+            info = f"- {c.name}（{c.role}"
+            if c.identity: info += f"，{c.identity[:60]}"
+            info += "）"
+            char_parts.append(info)
+        chars_info = "\n".join(char_parts)
+    else:
+        # 查最近大纲中涉及的角色名（用于判断"最近活跃"）
+        recent_char_names = set()
+        try:
+            recent_outlines = (await db.execute(
+                select(Outline).where(Outline.project_id == project_id)
+                .order_by(Outline.chapter_number.desc()).limit(5)
+            )).scalars().all()
+            for o in recent_outlines:
             if o.characters and isinstance(o.characters, list):
                 for c in o.characters:
                     recent_char_names.add(str(c).strip() if isinstance(c, str) else c.get("name", ""))

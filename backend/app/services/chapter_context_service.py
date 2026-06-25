@@ -564,6 +564,64 @@ class ChapterContextService:
         except Exception:
             pass
 
+        # ===== 场景锚点 + 角色微意图 =====
+        scene_anchor = ""
+        character_intents = ""
+        # 1-to-many: 从 expansion_plan 提取
+        if chapter.expansion_plan and isinstance(chapter.expansion_plan, dict):
+            plan = chapter.expansion_plan
+            sa = plan.get("scene_anchor", "")
+            if sa:
+                scene_anchor = str(sa)
+            ci = plan.get("character_intents", [])
+            if ci and isinstance(ci, list):
+                lines = []
+                for item in ci:
+                    if isinstance(item, dict):
+                        name = item.get("character", item.get("name", "?"))
+                        goal = item.get("this_chapter_goal", "")
+                        want = item.get("immediate_want", "")
+                        lines.append(f"  {name}：本章目标={goal}；此刻想要={want}")
+                    elif isinstance(item, str):
+                        lines.append(f"  {item}")
+                if lines:
+                    character_intents = "本章角色微意图：\n" + "\n".join(lines)
+        # 1-to-1: 从 outline.structure 提取
+        if not scene_anchor or not character_intents:
+            ol_struct = None
+            if not chapter.outline_id:
+                ol = (await self.db.execute(
+                    select(Outline).where(
+                        Outline.project_id == self.project_id,
+                        Outline.chapter_number == chapter.chapter_number,
+                    ).order_by(Outline.id.desc())
+                )).scalars().first()
+            else:
+                ol = (await self.db.execute(
+                    select(Outline).where(Outline.id == chapter.outline_id)
+                )).scalar_one_or_none()
+            if ol and ol.structure and isinstance(ol.structure, dict):
+                ol_struct = ol.structure
+            if ol_struct:
+                if not scene_anchor:
+                    sa = ol_struct.get("scene_anchor", "")
+                    if sa:
+                        scene_anchor = str(sa)
+                if not character_intents:
+                    ci = ol_struct.get("character_intents", [])
+                    if ci and isinstance(ci, list):
+                        lines = []
+                        for item in ci:
+                            if isinstance(item, dict):
+                                name = item.get("character", item.get("name", "?"))
+                                goal = item.get("this_chapter_goal", "")
+                                want = item.get("immediate_want", "")
+                                lines.append(f"  {name}：本章目标={goal}；此刻想要={want}")
+                            elif isinstance(item, str):
+                                lines.append(f"  {item}")
+                        if lines:
+                            character_intents = "本章角色微意图：\n" + "\n".join(lines)
+
         return {
             # 原有 key（builtin 模板使用）
             "chapter_outline": chapter_outline,
@@ -585,12 +643,15 @@ class ChapterContextService:
             "previous_chapter_summary": prev_summary,
             "recent_chapters_context": recent_chapters_context,
             # ===== 连贯性增强（让第二章能衔接第一章）=====
-            "previous_analysis": prev_analysis_summary,  # 上章分析：情感结尾/关键转折/伏笔动态/未决冲突/改进建议
-            "character_current_states": character_current_states,  # 角色当前心理/状态/境界
-            "story_progress": story_progress,  # 故事进度
-            "pending_foreshadows": pending_foreshadows,  # 待回收/超期伏笔提醒
-            "recent_expansion_plans": recent_expansion_plans,  # 已写章节规划摘要链
-            "quality_trends_detail": quality_trends_detail,  # 质量分项趋势（pacing/engagement/coherence）
+            "previous_analysis": prev_analysis_summary,
+            "character_current_states": character_current_states,
+            "story_progress": story_progress,
+            "pending_foreshadows": pending_foreshadows,
+            "recent_expansion_plans": recent_expansion_plans,
+            "quality_trends_detail": quality_trends_detail,
+            # ===== 场景锚点 + 角色微意图 =====
+            "scene_anchor": scene_anchor or "（本章未提供场景锚点）",
+            "character_intents": character_intents or "（本章未提供角色微意图）",
         }
 
     async def _get_important_context(self, chapter: Chapter) -> dict:
