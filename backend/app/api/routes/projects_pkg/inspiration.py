@@ -82,7 +82,8 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
         pass
 
     result = await ai_client.chat_json_retry(
-        messages=messages, max_tokens=600, max_retries=3,
+        messages=messages,
+        max_retries=3,
         **insp_kwargs,
     )
     # AI 调用本身报错（401/网络等）→ 直接抛出

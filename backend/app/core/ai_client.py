@@ -59,7 +59,7 @@ class AIClient:
                  provider: str = "openai", embedding_model: str = None,
                  reasoning_model: bool = False,
                  default_temperature: float = None, default_top_p: float = None,
-                 default_frequency_penalty: float = None, default_presence_penalty: float = None):
+                 default_frequency_penalty: float = None, default_presence_penalty: float = None, default_max_tokens: int = None):
         self.base_url = base_url or settings.AI_BASE_URL
         self.api_key = api_key or settings.AI_API_KEY
         self.model = model or settings.AI_MODEL
@@ -74,6 +74,7 @@ class AIClient:
         self.default_top_p = default_top_p
         self.default_frequency_penalty = default_frequency_penalty
         self.default_presence_penalty = default_presence_penalty
+        self.default_max_tokens = default_max_tokens
         self._client = None
 
     def _apply_reasoning(self, kwargs: dict) -> dict:
@@ -104,6 +105,14 @@ class AIClient:
             return self.default_top_p
         return settings.AI_TOP_P
 
+    def _resolve_max_tokens(self, max_tokens: int) -> int:
+        """max_tokens 解析：显式传参 > 模型配置 > settings。"""
+        if max_tokens is not None:
+            return max_tokens
+        if self.default_max_tokens is not None:
+            return self.default_max_tokens
+        return settings.AI_DEFAULT_MAX_TOKENS
+
     @staticmethod
     def _defaults_from_cfg(cfg) -> dict:
         """从 AIModelConfig 提取模型配置层的默认参数（temperature/top_p/penalty）。
@@ -115,6 +124,7 @@ class AIClient:
             default_top_p=cfg.top_p / 100 if cfg.top_p is not None else None,
             default_frequency_penalty=cfg.frequency_penalty / 100 if (cfg.frequency_penalty is not None and abs(cfg.frequency_penalty) > 2) else cfg.frequency_penalty,
             default_presence_penalty=cfg.presence_penalty / 100 if (cfg.presence_penalty is not None and abs(cfg.presence_penalty) > 2) else cfg.presence_penalty,
+                    default_max_tokens=cfg.max_tokens,
         )
 
     @classmethod
@@ -183,7 +193,7 @@ class AIClient:
             "messages": messages,
             "temperature": self._resolve_temperature(temperature),
             "top_p": self._resolve_top_p(top_p),
-            "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
+            "max_tokens": self._resolve_max_tokens(max_tokens),
         }
         # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
         eff_fp = frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
@@ -244,7 +254,7 @@ class AIClient:
             "messages": messages,
             "temperature": self._resolve_temperature(temperature),
             "top_p": self._resolve_top_p(top_p),
-            "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
+            "max_tokens": self._resolve_max_tokens(max_tokens),
             "stream": True,
         }
         # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
@@ -327,7 +337,7 @@ class AIClient:
             "messages": messages,
             "temperature": self._resolve_temperature(temperature),
             "top_p": self._resolve_top_p(top_p),
-            "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
+            "max_tokens": self._resolve_max_tokens(max_tokens),
             "stream": True,
         }
         # 推理模型：强制 temperature=1，移除 top_p/penalty

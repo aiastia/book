@@ -378,8 +378,8 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
             <label>Max Tokens（最大长度）</label>
             <span class="slider-value">{{ defaultModel?.max_tokens ?? 4096 }}</span>
           </div>
-          <a-slider :value="defaultModel?.max_tokens ?? 4096" :min="256" :max="16384" :step="256" disabled />
-          <div class="slider-range"><span>512</span><span>128000</span></div>
+          <a-slider :value="defaultModel?.max_tokens ?? 4096" :min="2000" :max="200000" :step="1000" disabled />
+          <div class="slider-range"><span>2000</span><span>200000</span></div>
         </div>
         <div class="slider-group">
           <div class="slider-header">
@@ -521,7 +521,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <label>Max Tokens（最大长度）</label>
           <a-tag color="default">{{ form.max_tokens }}</a-tag>
         </div>
-        <a-slider v-model:value="form.max_tokens" :min="512" :max="128000" :step="512" />
+          <a-slider v-model:value="form.max_tokens" :min="2000" :max="200000" :step="1000" />
         <div class="slider-range"><span>512</span><span>128000</span></div>
       </div>
 
