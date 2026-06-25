@@ -5,7 +5,6 @@
   "category": "import",
   "skill_type": "builtin",
   "config": {
-    "max_tokens": 1000,
     "temperature": 65,
     "frequency_penalty": 0.3
   },

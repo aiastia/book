@@ -4,7 +4,7 @@
   "description": "1-N模式：基于前置章节内容创作新章节（用于第2章及以后）",
   "category": "import",
   "skill_type": "builtin",
-  "config": {"max_tokens": 24576},
+  "config": {},
   "parameters": {
     "type": "object",
     "properties": {}

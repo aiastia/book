@@ -4,7 +4,7 @@
   "description": "1-1模式：章节创作（用于第1章，无前置章节）",
   "category": "import",
   "skill_type": "builtin",
-  "config": {"max_tokens": 24576},
+  "config": {},
   "parameters": {
     "type": "object",
     "properties": {}
