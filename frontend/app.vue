@@ -1,6 +1,8 @@
 <!-- 根组件：根据路由 meta 选择 layout，默认 default -->
 <!-- a-config-provider 注入 antd 主题（青蓝主色 #4D8088，对标 MuMuAINovel） -->
 <script setup lang="ts">
+// 从 antd 插件获取 SSR-safe 的 CSS-in-JS 缓存
+const antdCache = useNuxtApp().$antdCache
 const themeConfig = {
   token: {
     colorPrimary: '#4D8088',
@@ -25,8 +27,10 @@ const themeConfig = {
 
 <template>
   <a-config-provider :theme="themeConfig">
-    <NuxtLayout>
-      <NuxtPage />
-    </NuxtLayout>
+    <a-style-provider :cache="antdCache">
+      <NuxtLayout>
+        <NuxtPage />
+      </NuxtLayout>
+    </a-style-provider>
   </a-config-provider>
 </template>

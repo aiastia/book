@@ -97,6 +97,7 @@ from app.models.project_init_task import ProjectInitTask
 from app.skills.engine import SkillEngine
 from app.core.ai_client import AIClient
 from app.services.chapter_tools import get_chapter_tools, make_tool_executor
+from app.api.routes.projects_pkg.outlines import _build_outline
 
 router = APIRouter(prefix="/api/projects", tags=["项目初始化"])
 
@@ -995,7 +996,11 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
 
     # ===== 角色-组织关联 =====
     # 组织已生成，现在将角色分配到组织中
-    await _link_characters_to_orgs(db, pid, proj, engine, ai_client)
+    try:
+        await _link_characters_to_orgs(db, pid, proj, engine, ai_client)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"[init] 角色-组织关联异常: {e}")
 
     task.org_done = 1
     return None
@@ -1048,16 +1053,14 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
         char_parts.append("\n".join(info))
     char_list = "\n\n".join(char_parts)
 
-    result = await engine.execute_skill("org_member_assign", ai_client, {
-        "title": proj.title,
-        "genre": proj.genre or "网文",
-        "world_info": _build_world_info(proj),
-        "user_prompt": f"""已有组织：
-{org_list}
-
-待分配角色：
-{char_list}""",
-    })
+    result = await ai_client.chat_json(
+        messages=[
+            {"role": "system", "content": "你是网文势力策划师。根据角色信息和已有组织，将每个角色分配到最合适的组织中。只返回纯JSON数组：[{\"character_id\":0,\"organization_id\":0,\"role\":\"成员\"}]"},
+            {"role": "user", "content": f"请为小说《{proj.title}（{proj.genre or '网文'}）》的角色分配组织。\n\n已有组织：\n{org_list}\n\n待分配角色：\n{char_list}"},
+        ],
+        model=ai_client.model,
+        max_tokens=8192,
+    )
     if result.get("error"):
         logger.warning(f"[init] 组织成员分配失败: {result['error']}")
         return
@@ -1185,6 +1188,7 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
     from app.models.chapter import Chapter
     from app.models.world import WorldSetting
     from app.models.character import Character
+    from app.models.organization import Organization
 
     task.status_message = "生成大纲..."
     await db.commit()
@@ -1225,6 +1229,11 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
         char_parts.append(f"... 还有 {len(chars) - 15} 个角色（可用工具查询详情）")
     chars_info = "\n\n".join(char_parts) if char_parts else "暂无"
 
+    # 用于大纲清洗：区分角色名和组织名
+    char_names = {c.name for c in chars}
+    orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
+    org_names = {o.name for o in orgs}
+
     result, oerr = await _safe_skill_call(engine, ai_client, "outline_create", {
         # 标准变量（文件模板用）
         "world_info": world_info_complete,
@@ -1259,16 +1268,9 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
                 ch_num = item.get("chapter_number")
                 if not isinstance(ch_num, int) or ch_num < 1:
                     ch_num = idx + 1
-                o = Outline(
-                    project_id=pid,
-                    chapter_number=ch_num,
-                    title=str(item.get("title", f"第{ch_num}章"))[:200],
-                    summary=str(item.get("summary", ""))[:2000],
-                    key_points=item.get("key_points", []) if isinstance(item.get("key_points"), list) else [],
-                    emotion=str(item.get("emotion", ""))[:100],
-                    goal=str(item.get("goal", ""))[:200],
-                    structure=item,
-                )
+                o = _build_outline(pid, item, offset=0, index=idx,
+                                   char_names=char_names, org_names=org_names)
+                o.chapter_number = ch_num  # 以 AI 返回章号为准
                 db.add(o)
                 created_outline_objs.append(o)
                 added += 1

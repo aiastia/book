@@ -264,7 +264,7 @@ class AIClient:
         """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
         import logging
         logger = logging.getLogger(__name__)
-        result = await self.chat(
+        result = await self.chat_stream_collect(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -273,6 +273,23 @@ class AIClient:
         if result.get("error"):
             return result
         content = result["content"].strip()
+
+        # 流式空内容兜底：推理模型（如 Kimi K2.6）可能把所有 token 用于 reasoning
+        # 导致 content 为空。退到非流式重试一次，非流式 API 会正确分配 reasoning/content 配额。
+        if not content and (result.get("output_tokens") or 0) > 0:
+            logger.warning(
+                f"[AI] 流式返回空内容（output_tokens={result.get('output_tokens')}），"
+                f"回退到非流式重试..."
+            )
+            result = await self.chat(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if result.get("error"):
+                return result
+            content = result["content"].strip()
 
         # 记录每次 AI 调用的 token 消耗，便于排查重复计费
         logger.info(

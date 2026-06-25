@@ -54,6 +54,8 @@ const headerTitle = computed(() => {
         </div>
       </div>
     </div>
-    <InitTaskFloat />
+    <ClientOnly>
+      <InitTaskFloat />
+    </ClientOnly>
   </div>
 </template>

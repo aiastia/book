@@ -292,7 +292,7 @@ class SkillEngine:
                         max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
                     )
                 else:
-                    result = await ai_client.chat(
+                    result = await ai_client.chat_stream_collect(
                         messages=messages, model=model,
                         temperature=temperature, top_p=top_p,
                         max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
