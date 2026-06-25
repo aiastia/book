@@ -472,7 +472,7 @@ async def _link_org_memberships(db, pid, raw_chars):
                     db.add(OrganizationMember(
                         organization_id=org_id,
                         character_id=char.id,
-                        role=item.get("org_role", "成员")[:50] if isinstance(item.get("org_role"), str) else "成员",
+                        position=item.get("org_role", "成员")[:50] if isinstance(item.get("org_role"), str) else "成员",
                         status="active",
                     ))
 
@@ -930,7 +930,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
                     db.add(OrganizationMember(
                         organization_id=oid,
                         character_id=cid,
-                        role=role,
+                        position=role,
                         status="active",
                         source="ai",
                     ))
@@ -1086,7 +1086,7 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
                 )
             )
             if not existing:
-                db.add(OrganizationMember(organization_id=oid, character_id=cid, role=role, status="active", source="ai"))
+                db.add(OrganizationMember(organization_id=oid, character_id=cid, position=role, status="active", source="ai"))
                 assigned += 1
     await db.commit()
     logger.info(f"[init] 角色-组织关联完成：{assigned}/{len(unassigned)} 个角色已分配")
