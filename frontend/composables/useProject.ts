@@ -48,12 +48,16 @@ export function useProject() {
   // 首次调用时同步各来源
   // 优先级：URL query > cookie > localStorage（保证 SSR 和客户端一致）
   if (currentProjectId.value === null) {
+    // 记录 pid 来源：URL 是最高优先级，不应被 cookie 覆盖
+    let fromUrl = false
+
     // 1) 优先从 URL query 读取（SSR 和客户端都能读到，是最高优先级来源）
     try {
       const route = useRoute()
       const qid = route.query.pid
       if (qid && !isNaN(Number(qid))) {
         currentProjectId.value = Number(qid)
+        fromUrl = true
       }
     } catch { /* 非 setup 上下文时忽略 */ }
 
@@ -67,14 +71,21 @@ export function useProject() {
       }
     }
 
-    // 客户端同步：确保 cookie/localStorage 与当前值一致
+    // 客户端同步：将 cookie 和 localStorage 统一到当前权威值
     if (import.meta.client && currentProjectId.value !== null) {
-      // 如果 cookie 存在且与当前值不同，以 cookie 为准（SSR 确定的权威值）
+      // URL 是最高优先级 — 如果 URL 有 pid，以 URL 为准同步 cookie 和 localStorage
+      // 如果 cookie 与 URL 不一致，更新 cookie（不反向覆盖 URL）
       const cookieVal = projectIdCookie.value && projectIdCookie.value !== false
         ? projectIdCookie.value.value
         : null
       if (cookieVal != null && Number(cookieVal) !== currentProjectId.value) {
-        currentProjectId.value = Number(cookieVal)
+        if (fromUrl) {
+          // URL 优先：同步 cookie 到 URL 的值
+          projectIdCookie.value.value = currentProjectId.value
+        } else {
+          // 无 URL 时 cookie 是权威值
+          currentProjectId.value = Number(cookieVal)
+        }
       }
       // 同步 localStorage 到当前值
       const storedId = localStorage.getItem(PROJECT_KEY)
