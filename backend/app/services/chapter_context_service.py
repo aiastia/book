@@ -766,13 +766,20 @@ class ChapterContextService:
         style_traits = ""
         style_reference_text = ""
         author_name = ""
-        style_disable_dimensions = False
+        style_enable_traits = True
+        style_enable_custom = True
+        style_enable_dimensions = True
         if proj and proj.writing_style:
             ws = proj.writing_style
             # 提取用户自定义提示词（高级），单独注入让 AI 明确遵循
             style_custom_prompt = (ws.get("custom_prompt") or "").strip()
-            # 是否关闭维度配置注入（跟随 apply 快照，与维度数据同属一套）
-            style_disable_dimensions = bool(ws.get("disable_dimensions"))
+            # 三个区块开关（跟随 apply 快照；兼容旧 disable_dimensions）
+            style_enable_traits = ws.get("enable_traits") if ws.get("enable_traits") is not None else True
+            style_enable_custom = ws.get("enable_custom") if ws.get("enable_custom") is not None else True
+            if ws.get("enable_dimensions") is not None:
+                style_enable_dimensions = bool(ws.get("enable_dimensions"))
+            else:
+                style_enable_dimensions = not bool(ws.get("disable_dimensions"))
             # 作家文风模仿：若记录了来源 style_id，则读取「最新」的特征/范文/作家名，
             # 这样用户重新提炼后无需再次"设为项目默认"即可生效。
             latest_traits = None
@@ -803,7 +810,9 @@ class ChapterContextService:
             "style_traits": style_traits,
             "style_reference_text": style_reference_text,
             "author_name": author_name,
-            "style_disable_dimensions": style_disable_dimensions,
+            "style_enable_traits": style_enable_traits,
+            "style_enable_custom": style_enable_custom,
+            "style_enable_dimensions": style_enable_dimensions,
         }
 
     async def _get_reference_context(self, chapter: Chapter) -> dict:

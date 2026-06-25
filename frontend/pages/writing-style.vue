@@ -35,7 +35,10 @@ const editForm = reactive({
     dialogue_ratio: '中',        // 高/中/低（单选）
     vocabulary: ['通俗'],        // 通俗/文雅/华丽（多选）
     pov: '第三人称',             // 第一/第三/全知（单选）
-    disable_dimensions: false,   // 是否关闭维度配置注入（true=不注入③）
+    // 三个区块的启用开关（关闭=隐藏内容、不注入，但数据保留）
+    enable_traits: true,         // ① 作家文风模仿
+    enable_custom: true,         // ② 自定义提示词
+    enable_dimensions: true,     // ③ 维度配置
   } as Record<string, any>,
   reference_text: '',   // 范文原文（few-shot 原料）
   style_traits: {} as Record<string, string>,  // AI 提炼出的结构化特征
@@ -43,6 +46,22 @@ const editForm = reactive({
 const analyzeLoading = ref(false)
 // 是否已提炼出文风特征（用于 ②自定义提示词 的互斥提示）
 const hasStyleTraits = computed(() => Object.keys(editForm.style_traits || {}).length > 0)
+// 当前启用的区块数量（三个区块至少要开一个）
+const enabledCount = computed(() => {
+  let n = 0
+  if (editForm.config.enable_traits) n++
+  if (editForm.config.enable_custom) n++
+  if (editForm.config.enable_dimensions) n++
+  return n
+})
+// 切换区块开关：若会变成全关则阻止（至少保留一个）
+function toggleSection(key: 'enable_traits' | 'enable_custom' | 'enable_dimensions', on: boolean) {
+  if (!on && enabledCount.value <= 1) {
+    msg.warning('至少需要保留一个启用的区块')
+    return  // 不变（开关会自动回弹，因为 checked 未改 editForm）
+  }
+  editForm.config[key] = on
+}
 
 // 文风特征各维度的中文标签
 const traitLabels: Record<string, string> = {
@@ -123,7 +142,11 @@ function openAdd() {
   editForm.custom_prompt = ''
   editForm.reference_text = ''
   editForm.style_traits = {}
-  editForm.config = { ...defaultConfig, tone: [...defaultConfig.tone], description_focus: [...defaultConfig.description_focus], vocabulary: [...defaultConfig.vocabulary], disable_dimensions: false }
+  editForm.config = {
+    ...defaultConfig,
+    tone: [...defaultConfig.tone], description_focus: [...defaultConfig.description_focus], vocabulary: [...defaultConfig.vocabulary],
+    enable_traits: true, enable_custom: true, enable_dimensions: true,
+  }
   showEdit.value = true
 }
 function openEdit(s: any) {
@@ -144,7 +167,10 @@ function openEdit(s: any) {
     dialogue_ratio: normValue('dialogue_ratio', cfg.dialogue_ratio),
     vocabulary: normValue('vocabulary', cfg.vocabulary),
     pov: normValue('pov', cfg.pov),
-    disable_dimensions: !!cfg.disable_dimensions,
+    // 三个区块开关（兼容旧 disable_dimensions）
+    enable_traits: cfg.enable_traits !== undefined ? !!cfg.enable_traits : true,
+    enable_custom: cfg.enable_custom !== undefined ? !!cfg.enable_custom : true,
+    enable_dimensions: cfg.enable_dimensions !== undefined ? !!cfg.enable_dimensions : !cfg.disable_dimensions,
   }
   showEdit.value = true
 }
@@ -270,17 +296,18 @@ async function onApplyToProject(id: number) {
       <a-form-item label="风格名称"><a-input v-model:value="editForm.name" /></a-form-item>
       <a-form-item label="描述"><a-textarea v-model:value="editForm.description" :rows="2" /></a-form-item>
       <a-alert type="info" :closable="false" style="margin-bottom:8px;"
-        message="写作风格分三层，生成时如何注入"
-        description="① 作家文风特征 与 ② 自定义提示词 互斥，只会注入其一（有文风特征时优先用文风，自定义提示词不生效）；③ 维度配置默认作为基础底色注入，可在下方开关关闭。" />
+        message="写作风格分三层，每层可独立开关（至少保留一个）"
+        description="① 作家文风特征 与 ② 自定义提示词 互斥，都开启时只用文风；③ 维度配置作为基础底色。关闭某层=不注入、内容保留，三个全关时会阻止（至少留一个）。" />
       <div class="dim-section-head">
         <span class="dim-section-title">③ 维度配置（基础底色）</span>
-        <a-tooltip title="关闭后，生成时只注入①或②，不再注入维度配置">
-          <a-switch v-model:checked="editForm.config.disable_dimensions" size="small" />
+        <a-tooltip title="关闭后不注入维度配置，数据保留">
+          <a-switch :checked="editForm.config.enable_dimensions" size="small" @change="(v:boolean) => toggleSection('enable_dimensions', v)" />
         </a-tooltip>
-        <span class="dim-section-hint" :class="{ off: editForm.config.disable_dimensions }">
-          {{ editForm.config.disable_dimensions ? '已关闭（不注入维度配置）' : '已开启（作为底色注入）' }}
+        <span class="dim-section-hint" :class="{ off: !editForm.config.enable_dimensions }">
+          {{ editForm.config.enable_dimensions ? '已开启（作为底色注入）' : '已关闭（不注入，数据保留）' }}
         </span>
       </div>
+      <template v-if="editForm.config.enable_dimensions">
       <div v-for="(opts, key) in optionGroups" :key="key" class="dim-row">
         <span class="dim-row-label">{{ labels[key] }}<a-tooltip v-if="isMulti(key)" title="可多选"><span class="dim-multi-hint">多选</span></a-tooltip></span>
         <div class="dim-row-opts">
@@ -296,7 +323,17 @@ async function onApplyToProject(id: number) {
           </a-radio-group>
         </div>
       </div>
-      <a-divider orientation="left">② 自定义提示词（自由文字指令 · 与①互斥）</a-divider>
+      </template>
+      <div class="dim-section-head">
+        <span class="dim-section-title">② 自定义提示词（自由文字指令 · 与①互斥）</span>
+        <a-tooltip title="关闭后不注入自定义提示词，内容保留">
+          <a-switch :checked="editForm.config.enable_custom" size="small" @change="(v:boolean) => toggleSection('enable_custom', v)" />
+        </a-tooltip>
+        <span class="dim-section-hint" :class="{ off: !editForm.config.enable_custom }">
+          {{ editForm.config.enable_custom ? '已开启' : '已关闭（不注入，内容保留）' }}
+        </span>
+      </div>
+      <template v-if="editForm.config.enable_custom">
       <a-alert :type="hasStyleTraits ? 'warning' : 'info'" show-icon :closable="false" style="margin-bottom:10px;"
         :message="hasStyleTraits ? '当前已提炼文风特征，此项不会生效（与①互斥，文风优先）' : '直接写给 AI 的写作风格指令；留空则不注入'" />
       <a-textarea
@@ -304,8 +341,18 @@ async function onApplyToProject(id: number) {
         :rows="6"
         placeholder="例如：多用短句和反问，对话占比高，战斗场面要有画面感和冲击力；避免说教式心理独白，角色情绪通过动作和神态展现……"
       />
+      </template>
 
-      <a-divider orientation="left">① 作家文风模仿（最高优先级 · 仿写准则）</a-divider>
+      <div class="dim-section-head">
+        <span class="dim-section-title">① 作家文风模仿（最高优先级 · 仿写准则）</span>
+        <a-tooltip title="关闭后不注入文风特征，范文/特征数据保留">
+          <a-switch :checked="editForm.config.enable_traits" size="small" @change="(v:boolean) => toggleSection('enable_traits', v)" />
+        </a-tooltip>
+        <span class="dim-section-hint" :class="{ off: !editForm.config.enable_traits }">
+          {{ editForm.config.enable_traits ? '已开启' : '已关闭（不注入，数据保留）' }}
+        </span>
+      </div>
+      <template v-if="editForm.config.enable_traits">
       <a-alert type="info" show-icon :closable="false" style="margin-bottom:10px;"
         message="粘贴目标作家（如鲁迅、余华、金庸）的原文片段，AI 会自动提炼出句式/用词/意象/节奏等可操作的文风特征。提炼出的特征是最高优先级的仿写准则，与下面两层冲突时一律以它为准。" />
       <a-form-item label="作家名（可选）">
@@ -335,6 +382,7 @@ async function onApplyToProject(id: number) {
           <span class="trait-val">{{ val }}</span>
         </div>
       </div>
+      </template>
     </a-form>
     <template #footer>
       <a-button @click="showEdit = false">取消</a-button>
@@ -359,7 +407,7 @@ async function onApplyToProject(id: number) {
 .custom-prompt-label { font-size: 11px; color: #4D8088; font-weight: 600; }
 .custom-prompt-text { font-size: 12px; color: #595959; margin-top: 4px; white-space: pre-wrap; max-height: 60px; overflow: hidden; }
 .dim-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-.dim-row-label { font-size: 13px; color: #595959; width: 72px; min-width: 72px; flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding-top: 3px; }
+.dim-row-label { font-size: 13px; color: #595959; width: 92px; min-width: 92px; flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding-top: 3px; flex-wrap: nowrap; white-space: nowrap; }
 .dim-row-opts { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; row-gap: 8px; align-items: center; }
 .dim-section-head { display: flex; align-items: center; gap: 10px; margin: 16px 0 12px; }
 .dim-section-title { font-size: 13px; color: #595959; font-weight: 600; }
@@ -372,7 +420,7 @@ async function onApplyToProject(id: number) {
   appearance: none; -webkit-appearance: none;
   border: 1px solid #d9d9d9; background: #fff; color: #595959;
   height: 24px; padding: 0 12px; margin-right: 8px; cursor: pointer;
-  font-size: 13px; line-height: 22px; transition: all .2s;
+  font-size: 14px; line-height: 22px; transition: all .2s;
   border-radius: 6px;
 }
 .seg-btn:hover { color: #4D8088; border-color: #4D8088; position: relative; z-index: 1; }

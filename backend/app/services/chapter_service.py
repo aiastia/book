@@ -479,8 +479,14 @@ class ChapterService:
                     import json as _json
                     _sc = overrides["style_config"]
                     context["writing_style"] = _json.dumps(_sc, ensure_ascii=False)
-                    # 维度配置开关（disable_dimensions 存在 style_config 里）
-                    context["style_disable_dimensions"] = bool(_sc.get("disable_dimensions")) if isinstance(_sc, dict) else False
+                    # 三层开关（存在 style_config 里；兼容旧 disable_dimensions）
+                    if isinstance(_sc, dict):
+                        context["style_enable_traits"] = _sc.get("enable_traits") if _sc.get("enable_traits") is not None else True
+                        context["style_enable_custom"] = _sc.get("enable_custom") if _sc.get("enable_custom") is not None else True
+                        if _sc.get("enable_dimensions") is not None:
+                            context["style_enable_dimensions"] = bool(_sc.get("enable_dimensions"))
+                        else:
+                            context["style_enable_dimensions"] = not bool(_sc.get("disable_dimensions"))
                 if overrides.get("style_name"):
                     context["style_name"] = str(overrides["style_name"])
                 if overrides.get("style_custom_prompt"):
@@ -803,18 +809,19 @@ class ChapterService:
         if vol:
             parts.append(f"<volume_summaries>{vol}</volume_summaries>")
 
-        # 写作风格：①作家文风特征 与 ②自定义提示词 互斥（只注入其一，文风优先）；
-        # ③维度配置作为基础底色注入，可由用户开关关闭。
+        # 写作风格：三层各有开关控制是否注入；①②互斥（文风优先）；至少注入一层。
         style = context.get('writing_style', '')
         style_custom = context.get('style_custom_prompt', '')
         style_traits = context.get('style_traits', '')
         style_ref = context.get('style_reference_text', '')
-        disable_dim = bool(context.get('style_disable_dimensions'))
-        has_traits = bool(style_traits)
-        # 互斥：有文风特征时，自定义提示词不再注入（文风优先）
-        has_custom = bool(style_custom) and not has_traits
-        # 维度配置：用户可关闭（disable_dimensions=True 时不注入）
-        has_base = bool(style) and style != "默认网文风格，节奏明快" and not disable_dim
+        en_traits = context.get('style_enable_traits', True)
+        en_custom = context.get('style_enable_custom', True)
+        en_dim = context.get('style_enable_dimensions', True)
+        has_traits = bool(style_traits) and en_traits
+        # 互斥：文风特征启用且存在时，自定义提示词不再注入（文风优先）
+        has_custom = bool(style_custom) and en_custom and not has_traits
+        # 维度配置：受开关控制
+        has_base = bool(style) and style != "默认网文风格，节奏明快" and en_dim
         if has_traits or has_custom or has_base or style_ref:
             # 动态生成总纲：只列出实际生效的层，避免空洞指令
             circled = ["①", "②", "③", "④"]
