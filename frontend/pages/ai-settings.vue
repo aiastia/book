@@ -17,12 +17,24 @@ const form = reactive({
   inspiration_top_p: null as number | null,
   inspiration_frequency_penalty: null as number | null,
   inspiration_presence_penalty: null as number | null,
+  inspiration_custom: false,
   backend_type: 'openai' as string,
   provider: 'openai' as 'openai' | 'anthropic' | 'gemini',
   embedding_model: '' as string,
 })
 const testing = ref<number | null>(null)
-const testResult = ref<Record<number, string>>({})
+// 模型测试结果持久化到 localStorage，刷新页面也能看到上次的测试状态
+const TEST_RESULT_KEY = 'moyu_ai_test_results'
+const testResult = ref<Record<number, string>>(
+  JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(TEST_RESULT_KEY)) || '{}')
+)
+// 监听变化自动保存
+import { watch } from 'vue'
+watch(testResult, (v) => {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(TEST_RESULT_KEY, JSON.stringify(v))
+  }
+}, { deep: true })
 const fetchingModels = ref(false)
 const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
 const activeModelId = ref<number | null>(null)
@@ -56,6 +68,7 @@ function openAdd() {
     frequency_penalty: null, presence_penalty: null,
     inspiration_temperature: null, inspiration_top_p: null,
     inspiration_frequency_penalty: null, inspiration_presence_penalty: null,
+    inspiration_custom: false,
     backend_type: 'openai', provider: 'openai', embedding_model: '',
   })
   remoteModels.value = []
@@ -74,6 +87,7 @@ function openEdit(m: any) {
     inspiration_top_p: m.inspiration_top_p ?? null,
     inspiration_frequency_penalty: m.inspiration_frequency_penalty ?? null,
     inspiration_presence_penalty: m.inspiration_presence_penalty ?? null,
+    inspiration_custom: m.inspiration_custom ?? false,
   })
   remoteModels.value = []
   modelSearch.value = ''
@@ -98,7 +112,7 @@ async function onSave() {
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除此模型配置？')) return
-  try { await api.deleteAiModel(id); await refresh() } catch (e: any) { msg.error('删除失败') }
+  try { await api.deleteAiModel(id); delete testResult.value[id]; await refresh() } catch (e: any) { msg.error('删除失败') }
 }
 async function onTest(id: number) {
   testing.value = id
@@ -230,6 +244,20 @@ function penaltyDisplay(val: number | null): string {
 function penaltySliderVal(val: number | null): number {
   return val ?? 0
 }
+
+// 灵感模式温度递减表常量
+const INSP_BASE = { title: 0.8, description: 0.65, theme: 0.55, genre: 0.45 }
+// 根据滑块值计算各阶段实际温度
+const inspirationStageTemps = computed(() => {
+  const ref = form.inspiration_temperature
+  if (ref == null) return INSP_BASE  // 留空 → 显示默认表
+  const ratio = (ref / 100) / INSP_BASE.title
+  const r: Record<string, number> = {}
+  for (const [k, v] of Object.entries(INSP_BASE)) {
+    r[k] = parseFloat((v * ratio).toFixed(2))
+  }
+  return r
+})
 
 // 默认模型的参数
 const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_default))
@@ -521,54 +549,66 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
         <a-button size="small" type="link" @click="form.presence_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>
       </div>
 
-      <a-divider orientation="left">灵感模式参数</a-divider>
-      <p style="font-size:12px;color:#999;margin-bottom:12px;">
-        以下参数仅对灵感模式（创建项目时的灵感向导）生效。留空 = 跟随上方全局参数。
-      </p>
-
-      <div class="slider-group">
-        <div class="slider-header">
-          <label>Temperature（随机性）</label>
-          <a-tag :color="form.inspiration_temperature == null ? 'default' : 'blue'">{{ form.inspiration_temperature == null ? '跟随全局' : (form.inspiration_temperature / 100).toFixed(2) }}</a-tag>
+      <a-form-item>
+        <a-switch v-model:checked="form.inspiration_custom" />
+        <span style="margin-left: 8px;">自定义灵感参数</span>
+        <div style="font-size:12px;color:#999;margin-top:4px;">
+          开启后灵感模式使用递减温度表（标题 0.8 → 题材 0.45），下方滑块可覆盖默认值。关闭则跟随全局参数。
         </div>
-        <a-slider :value="form.inspiration_temperature ?? 70" :min="0" :max="200" :step="1"
-          @change="(v: number) => form.inspiration_temperature = v" />
-        <div class="slider-range"><span>0 (精确)</span><span>1</span><span>2 (创造)</span></div>
-        <a-button size="small" type="link" @click="form.inspiration_temperature = null" style="padding:0;margin-top:4px;">跟随全局</a-button>
-      </div>
+      </a-form-item>
 
-      <div class="slider-group">
-        <div class="slider-header">
-          <label>Top P（核采样）</label>
-          <a-tag :color="form.inspiration_top_p == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_top_p) }}</a-tag>
-        </div>
-        <a-slider :value="penaltySliderVal(form.inspiration_top_p)" :min="0" :max="100" :step="1"
-          @change="(v: number) => form.inspiration_top_p = v" />
-        <div class="slider-range"><span>0</span><span>0.5</span><span>1</span></div>
-        <a-button size="small" type="link" @click="form.inspiration_top_p = null" style="padding:0;margin-top:4px;">不发送</a-button>
-      </div>
+      <template v-if="form.inspiration_custom">
+        <a-divider orientation="left">灵感模式参数</a-divider>
 
-      <div class="slider-group">
-        <div class="slider-header">
-          <label>频率惩罚（减少重复用词）</label>
-          <a-tag :color="form.inspiration_frequency_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_frequency_penalty) }}</a-tag>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>Temperature（以标题为基准）</label>
+            <a-tag :color="form.inspiration_temperature == null ? 'default' : 'blue'">{{ form.inspiration_temperature == null ? '递减温度表' : (form.inspiration_temperature / 100).toFixed(2) + '（基准）' }}</a-tag>
+          </div>
+          <a-slider :value="form.inspiration_temperature ?? 70" :min="0" :max="200" :step="1"
+            @change="(v: number) => form.inspiration_temperature = v" />
+          <div class="slider-range"><span>0</span><span>1</span><span>2</span></div>
+          <a-button size="small" type="link" @click="form.inspiration_temperature = null" style="padding:0;margin-top:4px;">使用递减温度表</a-button>
+          <div style="display:flex;gap:16px;font-size:12px;color:#888;margin-top:6px;">
+            <span v-for="(val, label) in inspirationStageTemps" :key="label" :title="label">
+              {{ label }} <b style="color:#4D8088;">{{ val }}</b>
+            </span>
+          </div>
         </div>
-        <a-slider :value="penaltySliderVal(form.inspiration_frequency_penalty)" :min="-200" :max="200" :step="1"
-          @change="(v: number) => form.inspiration_frequency_penalty = v" />
-        <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
-        <a-button size="small" type="link" @click="form.inspiration_frequency_penalty = null" style="padding:0;margin-top:4px;">不发送</a-button>
-      </div>
 
-      <div class="slider-group">
-        <div class="slider-header">
-          <label>存在惩罚（鼓励新话题）</label>
-          <a-tag :color="form.inspiration_presence_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_presence_penalty) }}</a-tag>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>Top P（核采样）</label>
+            <a-tag :color="form.inspiration_top_p == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_top_p) }}</a-tag>
+          </div>
+          <a-slider :value="penaltySliderVal(form.inspiration_top_p)" :min="0" :max="100" :step="1"
+            @change="(v: number) => form.inspiration_top_p = v" />
+          <div class="slider-range"><span>0</span><span>0.5</span><span>1</span></div>
+          <a-button size="small" type="link" @click="form.inspiration_top_p = null" style="padding:0;margin-top:4px;">不发送</a-button>
         </div>
-        <a-slider :value="penaltySliderVal(form.inspiration_presence_penalty)" :min="-200" :max="200" :step="1"
-          @change="(v: number) => form.inspiration_presence_penalty = v" />
-        <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
-        <a-button size="small" type="link" @click="form.inspiration_presence_penalty = null" style="padding:0;margin-top:4px;">不发送</a-button>
-      </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>频率惩罚（减少重复用词）</label>
+            <a-tag :color="form.inspiration_frequency_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_frequency_penalty) }}</a-tag>
+          </div>
+          <a-slider :value="penaltySliderVal(form.inspiration_frequency_penalty)" :min="-200" :max="200" :step="1"
+            @change="(v: number) => form.inspiration_frequency_penalty = v" />
+          <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
+          <a-button size="small" type="link" @click="form.inspiration_frequency_penalty = null" style="padding:0;margin-top:4px;">不发送</a-button>
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>存在惩罚（鼓励新话题）</label>
+            <a-tag :color="form.inspiration_presence_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_presence_penalty) }}</a-tag>
+          </div>
+          <a-slider :value="penaltySliderVal(form.inspiration_presence_penalty)" :min="-200" :max="200" :step="1"
+            @change="(v: number) => form.inspiration_presence_penalty = v" />
+          <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
+          <a-button size="small" type="link" @click="form.inspiration_presence_penalty = null" style="padding:0;margin-top:4px;">不发送</a-button>
+        </div>
+      </template>
 
       <a-form-item>
         <a-switch v-model:checked="form.reasoning_model" />

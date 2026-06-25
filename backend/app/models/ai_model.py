@@ -25,6 +25,8 @@ class AIModelConfig(Base):
     inspiration_top_p = Column(Integer, nullable=True, default=None)        # *100，NULL=不发送
     inspiration_frequency_penalty = Column(Integer, nullable=True, default=None)   # *100，NULL=不发送
     inspiration_presence_penalty = Column(Integer, nullable=True, default=None)    # *100，NULL=不发送
+    # 灵感模式自定义开关：关=用系统内置递减温度表，开=用上方 4 个自定义参数
+    inspiration_custom = Column(Boolean, default=False)
     is_default = Column(Boolean, default=False)
     # 推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3 等）：勾选后强制 temperature=1，不发送 top_p/penalty
     reasoning_model = Column(Boolean, default=False)

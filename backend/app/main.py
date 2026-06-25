@@ -165,6 +165,8 @@ async def _auto_migrate():
         ("ai_model_configs", "ADD COLUMN inspiration_top_p INTEGER"),
         ("ai_model_configs", "ADD COLUMN inspiration_frequency_penalty INTEGER"),
         ("ai_model_configs", "ADD COLUMN inspiration_presence_penalty INTEGER"),
+        # 第18批：灵感模式自定义开关
+        ("ai_model_configs", "ADD COLUMN inspiration_custom BOOLEAN DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

@@ -1,9 +1,20 @@
 """灵感模式：步骤向导（重试 + 格式校验 + 失败降级）+ 快速补全。
-温度/惩罚等参数统一走 AI 模型设置页配置，不再散落硬编码。"""
+
+AI 设置页「灵感模式参数」开关：
+  关（默认）→ 使用模型全局参数
+  开 → 递减温度表控制不同阶段（title 0.8 → genre 0.45），可用滑块覆盖"""
 from app.api.routes.projects_pkg.base import *
 
 
 router = make_router()
+
+# 灵感步骤递减温度（移植自 MuMuAINovel）：title 最有创意，genre 最明确
+INSPIRATION_TEMPERATURES = {
+    "title": 0.8,
+    "description": 0.65,
+    "theme": 0.55,
+    "genre": 0.45,
+}
 
 
 def _validate_options(data: dict, step_name: str) -> tuple[bool, str]:
@@ -38,7 +49,7 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
     usr_prompt = substitute_vars(usr_skill.system_prompt, ctx)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": usr_prompt}]
 
-    # 读取灵感模式独立参数（NULL=跟随全局，不传让 ai_client 走默认值）
+    # 灵感参数开关：关=不传参（走全局模型配置），开=递减温度表+自定义
     insp_kwargs = {}
     try:
         from app.models.ai_model import AIModelConfig
@@ -49,18 +60,21 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
                 AIModelConfig.is_default == True,
             )
         )).scalar_one_or_none()
-        if cfg:
-            # temperature: *100 → float；None=不传（跟随全局）
+        if cfg and cfg.inspiration_custom:
+            # temperature：滑块以 title (0.8) 为基准，按比例缩放所有阶段
             if cfg.inspiration_temperature is not None:
-                insp_kwargs["temperature"] = cfg.inspiration_temperature / 100
-            # top_p: *100 → float；None=不传（跟随全局）
+                ratio = (cfg.inspiration_temperature / 100) / INSPIRATION_TEMPERATURES.get("title", 0.8)
+                insp_kwargs["temperature"] = INSPIRATION_TEMPERATURES.get(step_name, 0.7) * ratio
+            elif step_name in INSPIRATION_TEMPERATURES:
+                insp_kwargs["temperature"] = INSPIRATION_TEMPERATURES[step_name]
+            # top_p: 滑块设置才传
             if cfg.inspiration_top_p is not None:
                 insp_kwargs["top_p"] = cfg.inspiration_top_p / 100
-            # frequency_penalty: |v|>2 视为 *100
+            # frequency_penalty
             if cfg.inspiration_frequency_penalty is not None:
                 fp = cfg.inspiration_frequency_penalty
                 insp_kwargs["frequency_penalty"] = fp / 100 if abs(fp) > 2 else fp
-            # presence_penalty: |v|>2 视为 *100
+            # presence_penalty
             if cfg.inspiration_presence_penalty is not None:
                 pp = cfg.inspiration_presence_penalty
                 insp_kwargs["presence_penalty"] = pp / 100 if abs(pp) > 2 else pp

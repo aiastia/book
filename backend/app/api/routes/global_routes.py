@@ -44,6 +44,7 @@ class AIModelCreate(BaseModel):
     inspiration_top_p: Optional[int] = None            # *100，None=不发送
     inspiration_frequency_penalty: Optional[int] = None # *100，None=不发送
     inspiration_presence_penalty: Optional[int] = None  # *100，None=不发送
+    inspiration_custom: bool = False  # 灵感模式自定义开关：关=全局参数，开=递减温度表+自定义参数
     is_default: bool = False
     reasoning_model: bool = False  # 推理模型：强制 temperature=1，不发 top_p/penalty
     backend_type: str = "openai"
@@ -66,6 +67,7 @@ class AIModelUpdate(BaseModel):
     inspiration_top_p: Optional[int] = None
     inspiration_frequency_penalty: Optional[int] = None
     inspiration_presence_penalty: Optional[int] = None
+    inspiration_custom: Optional[bool] = None
     is_default: Optional[bool] = None
     reasoning_model: Optional[bool] = None
     backend_type: Optional[str] = None
@@ -87,6 +89,7 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
         "is_default": m.is_default, "reasoning_model": m.reasoning_model or False,
         "inspiration_temperature": m.inspiration_temperature,
         "inspiration_top_p": m.inspiration_top_p,
+        "inspiration_custom": m.inspiration_custom or False,
         "inspiration_frequency_penalty": m.inspiration_frequency_penalty,
         "inspiration_presence_penalty": m.inspiration_presence_penalty,
         "backend_type": m.backend_type or "openai",
