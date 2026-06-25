@@ -108,7 +108,13 @@ async def update_ai_model(model_id: int, req: AIModelUpdate, db: AsyncSession = 
     m = result.scalar_one_or_none()
     if not m:
         raise HTTPException(404, "模型配置不存在")
-    data = req.model_dump(exclude_none=True)
+    # 用 exclude_unset 而非 exclude_none：只更新客户端「实际传了」的字段。
+    # 这样能区分三种语义：
+    #   - 未传（exclude_unset 排除）        → 不更新，保留原值
+    #   - 显式传 null（frequency_penalty）  → 保留 null，触发「重置为不发送」
+    #   - 传具体值                          → 正常更新
+    # 旧的 exclude_none 会把显式 null 一起丢掉，导致频率/存在惩罚无法重置。
+    data = req.model_dump(exclude_unset=True)
     # 空 api_key 表示不修改（保留原值），避免前端留空时覆盖已存密钥
     if not data.get("api_key"):
         data.pop("api_key", None)
