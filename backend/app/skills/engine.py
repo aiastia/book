@@ -186,6 +186,9 @@ class SkillEngine:
                 t = cfg.temperature
                 if t is not None:
                     self._user_ai_defaults_cache["temperature"] = t / 100 if t > 2 else t
+                # top_p: 存储为 *100
+                if cfg.top_p is not None:
+                    self._user_ai_defaults_cache["top_p"] = cfg.top_p / 100
                 # frequency_penalty: 存储为 *100, |v|>2 时视为百分制
                 if cfg.frequency_penalty is not None:
                     fp = cfg.frequency_penalty
@@ -305,10 +308,12 @@ class SkillEngine:
         presence_penalty = merged_config.get("presence_penalty")
 
         # skill 未配置的参数 → 回退到用户的 AI 模型默认值
-        if temperature is None or frequency_penalty is None or presence_penalty is None:
+        if temperature is None or top_p is None or frequency_penalty is None or presence_penalty is None:
             user_defaults = await self._get_user_ai_defaults()
             if temperature is None:
                 temperature = user_defaults.get("temperature")
+            if top_p is None:
+                top_p = user_defaults.get("top_p")
             if frequency_penalty is None:
                 frequency_penalty = user_defaults.get("frequency_penalty")
             if presence_penalty is None:

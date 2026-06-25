@@ -57,7 +57,9 @@ class AIClient:
 
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
                  provider: str = "openai", embedding_model: str = None,
-                 reasoning_model: bool = False):
+                 reasoning_model: bool = False,
+                 default_temperature: float = None, default_top_p: float = None,
+                 default_frequency_penalty: float = None, default_presence_penalty: float = None):
         self.base_url = base_url or settings.AI_BASE_URL
         self.api_key = api_key or settings.AI_API_KEY
         self.model = model or settings.AI_MODEL
@@ -65,6 +67,13 @@ class AIClient:
         self.embedding_model = embedding_model or ""
         # 推理模型（Kimi K2 / DeepSeek-R1 / o1-o3）：强制 temperature=1，不发 top_p/penalty
         self.reasoning_model = bool(reasoning_model)
+        # 模型配置层的默认参数（来自 AIModelConfig）。优先级：
+        #   调用方显式传参 > self.default_*（用户设置） > settings.AI_*（环境变量兜底）
+        # None 表示未从模型配置读取，回退到 settings 全局默认。
+        self.default_temperature = default_temperature
+        self.default_top_p = default_top_p
+        self.default_frequency_penalty = default_frequency_penalty
+        self.default_presence_penalty = default_presence_penalty
         self._client = None
 
     def _apply_reasoning(self, kwargs: dict) -> dict:
@@ -79,9 +88,42 @@ class AIClient:
             kwargs.pop("presence_penalty", None)
         return kwargs
 
+    def _resolve_temperature(self, temperature: float) -> float:
+        """temperature 解析：显式传参 > 模型配置 > settings。"""
+        if temperature is not None:
+            return temperature
+        if self.default_temperature is not None:
+            return self.default_temperature
+        return settings.AI_TEMPERATURE
+
+    def _resolve_top_p(self, top_p: float) -> float:
+        """top_p 解析：显式传参 > 模型配置 > settings。"""
+        if top_p is not None:
+            return top_p
+        if self.default_top_p is not None:
+            return self.default_top_p
+        return settings.AI_TOP_P
+
+    @staticmethod
+    def _defaults_from_cfg(cfg) -> dict:
+        """从 AIModelConfig 提取模型配置层的默认参数（temperature/top_p/penalty）。
+        AIModelConfig 按 *100 整数存储，转回 0~1 浮点；None 表示「不发送」。
+        用于 from_user_config 及其它直接从 cfg 构造 AIClient 的场景，避免重复。
+        """
+        return dict(
+            default_temperature=cfg.temperature / 100 if cfg.temperature is not None else None,
+            default_top_p=cfg.top_p / 100 if cfg.top_p is not None else None,
+            default_frequency_penalty=cfg.frequency_penalty / 100 if (cfg.frequency_penalty is not None and abs(cfg.frequency_penalty) > 2) else cfg.frequency_penalty,
+            default_presence_penalty=cfg.presence_penalty / 100 if (cfg.presence_penalty is not None and abs(cfg.presence_penalty) > 2) else cfg.presence_penalty,
+        )
+
     @classmethod
     async def from_user_config(cls, db, user_id: int) -> "AIClient":
-        """从用户配置创建客户端（查找用户默认 AI 模型）"""
+        """从用户配置创建客户端（查找用户默认 AI 模型）。
+        会把 AIModelConfig 的 temperature/top_p/penalty 挂到实例作为默认值，
+        使所有走本方法的调用路径（skill 流水线、project_init、inspiration、ai_tools 等）
+        自动读取用户在 AI 设置页配的参数。
+        """
         try:
             from app.models.ai_model import AIModelConfig
             from sqlalchemy import select
@@ -100,6 +142,7 @@ class AIClient:
                     provider=cfg.provider or cfg.backend_type or "openai",
                     embedding_model=cfg.embedding_model or "",
                     reasoning_model=cfg.reasoning_model or False,
+                    **cls._defaults_from_cfg(cfg),
                 )
         except Exception:
             pass
@@ -138,15 +181,17 @@ class AIClient:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": temperature if temperature is not None else settings.AI_TEMPERATURE,
-            "top_p": top_p if top_p is not None else settings.AI_TOP_P,
+            "temperature": self._resolve_temperature(temperature),
+            "top_p": self._resolve_top_p(top_p),
             "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
         }
-        # penalty 参数仅当用户显式配置时才发送，避免不支持该参数的模型报错
-        if frequency_penalty is not None:
-            kwargs["frequency_penalty"] = frequency_penalty
-        if presence_penalty is not None:
-            kwargs["presence_penalty"] = presence_penalty
+        # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
+        eff_fp = frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
+        eff_pp = presence_penalty if presence_penalty is not None else self.default_presence_penalty
+        if eff_fp is not None:
+            kwargs["frequency_penalty"] = eff_fp
+        if eff_pp is not None:
+            kwargs["presence_penalty"] = eff_pp
         if response_format:
             kwargs["response_format"] = response_format
         if tools:
@@ -197,15 +242,18 @@ class AIClient:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": temperature if temperature is not None else settings.AI_TEMPERATURE,
-            "top_p": top_p if top_p is not None else settings.AI_TOP_P,
+            "temperature": self._resolve_temperature(temperature),
+            "top_p": self._resolve_top_p(top_p),
             "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
             "stream": True,
         }
-        if frequency_penalty is not None:
-            kwargs["frequency_penalty"] = frequency_penalty
-        if presence_penalty is not None:
-            kwargs["presence_penalty"] = presence_penalty
+        # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
+        eff_fp = frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
+        eff_pp = presence_penalty if presence_penalty is not None else self.default_presence_penalty
+        if eff_fp is not None:
+            kwargs["frequency_penalty"] = eff_fp
+        if eff_pp is not None:
+            kwargs["presence_penalty"] = eff_pp
         if response_format:
             kwargs["response_format"] = response_format
         if tools:
@@ -277,8 +325,8 @@ class AIClient:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": temperature if temperature is not None else settings.AI_TEMPERATURE,
-            "top_p": top_p if top_p is not None else settings.AI_TOP_P,
+            "temperature": self._resolve_temperature(temperature),
+            "top_p": self._resolve_top_p(top_p),
             "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
             "stream": True,
         }

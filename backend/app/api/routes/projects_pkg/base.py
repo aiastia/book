@@ -295,6 +295,7 @@ async def make_engine_and_client(db: AsyncSession, user_id: int, model_override:
                     provider=cfg.provider or cfg.backend_type or "openai",
                     embedding_model=cfg.embedding_model or "",
                     reasoning_model=cfg.reasoning_model or False,
+                    **AIClient._defaults_from_cfg(cfg),
                 )
                 return engine, ai_client
         except Exception:
