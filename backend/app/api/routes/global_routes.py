@@ -39,6 +39,11 @@ class AIModelCreate(BaseModel):
     max_tokens: int = 4096
     frequency_penalty: Optional[int] = None  # *100，None=不发送
     presence_penalty: Optional[int] = None   # *100，None=不发送
+    # 灵感模式独立参数（None=跟随全局 / 不发送）
+    inspiration_temperature: Optional[int] = None       # *100，None=跟随全局 temperature
+    inspiration_top_p: Optional[int] = None            # *100，None=不发送
+    inspiration_frequency_penalty: Optional[int] = None # *100，None=不发送
+    inspiration_presence_penalty: Optional[int] = None  # *100，None=不发送
     is_default: bool = False
     reasoning_model: bool = False  # 推理模型：强制 temperature=1，不发 top_p/penalty
     backend_type: str = "openai"
@@ -56,6 +61,11 @@ class AIModelUpdate(BaseModel):
     max_tokens: Optional[int] = None
     frequency_penalty: Optional[int] = None  # *100，None=不发送
     presence_penalty: Optional[int] = None   # *100，None=不发送
+    # 灵感模式独立参数
+    inspiration_temperature: Optional[int] = None
+    inspiration_top_p: Optional[int] = None
+    inspiration_frequency_penalty: Optional[int] = None
+    inspiration_presence_penalty: Optional[int] = None
     is_default: Optional[bool] = None
     reasoning_model: Optional[bool] = None
     backend_type: Optional[str] = None
@@ -75,6 +85,10 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
         "temperature": m.temperature, "top_p": m.top_p, "max_tokens": m.max_tokens,
         "frequency_penalty": m.frequency_penalty, "presence_penalty": m.presence_penalty,
         "is_default": m.is_default, "reasoning_model": m.reasoning_model or False,
+        "inspiration_temperature": m.inspiration_temperature,
+        "inspiration_top_p": m.inspiration_top_p,
+        "inspiration_frequency_penalty": m.inspiration_frequency_penalty,
+        "inspiration_presence_penalty": m.inspiration_presence_penalty,
         "backend_type": m.backend_type or "openai",
         "provider": m.provider or m.backend_type or "openai",
         "embedding_model": m.embedding_model or "",
@@ -164,7 +178,13 @@ async def test_ai_model(model_id: int, db: AsyncSession = Depends(get_db), user=
     m = result.scalar_one_or_none()
     if not m:
         raise HTTPException(404, "模型配置不存在")
-    client = AIClient(base_url=m.base_url, api_key=m.api_key, model=m.model)
+    # 测试连接：用该条配置构造客户端，必须带上 reasoning_model 标记，
+    # 否则推理模型（Kimi/R1）测试时仍会发 temperature/top_p 导致 400。
+    client = AIClient(
+        base_url=m.base_url, api_key=m.api_key, model=m.model,
+        reasoning_model=m.reasoning_model or False,
+        **AIClient._defaults_from_cfg(m),
+    )
     resp = await client.chat(
         messages=[{"role": "user", "content": "请回复：连接成功"}],
         max_tokens=20,

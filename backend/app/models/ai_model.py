@@ -19,6 +19,12 @@ class AIModelConfig(Base):
     max_tokens = Column(Integer, default=4096)
     frequency_penalty = Column(Integer, nullable=True, default=None)  # *100 存储，NULL=不发送
     presence_penalty = Column(Integer, nullable=True, default=None)   # *100 存储，NULL=不发送
+    # 灵感模式独立参数（NULL=跟随全局模型配置，留空即用上面的全局值）
+    # 单独配置灵感模式用不同的温度/采样，不影响其它功能
+    inspiration_temperature = Column(Integer, nullable=True, default=None)  # *100，NULL=跟随全局
+    inspiration_top_p = Column(Integer, nullable=True, default=None)        # *100，NULL=不发送
+    inspiration_frequency_penalty = Column(Integer, nullable=True, default=None)   # *100，NULL=不发送
+    inspiration_presence_penalty = Column(Integer, nullable=True, default=None)    # *100，NULL=不发送
     is_default = Column(Boolean, default=False)
     # 推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3 等）：勾选后强制 temperature=1，不发送 top_p/penalty
     reasoning_model = Column(Boolean, default=False)

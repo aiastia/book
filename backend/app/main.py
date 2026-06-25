@@ -160,6 +160,11 @@ async def _auto_migrate():
         ("writing_styles", "ADD COLUMN traits_updated_at DATETIME"),
         # 第16批：推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3，强制 temperature=1，不发 top_p/penalty）
         ("ai_model_configs", "ADD COLUMN reasoning_model BOOLEAN DEFAULT 0"),
+        # 第17批：灵感模式独立参数（NULL=跟随全局模型配置）
+        ("ai_model_configs", "ADD COLUMN inspiration_temperature INTEGER"),
+        ("ai_model_configs", "ADD COLUMN inspiration_top_p INTEGER"),
+        ("ai_model_configs", "ADD COLUMN inspiration_frequency_penalty INTEGER"),
+        ("ai_model_configs", "ADD COLUMN inspiration_presence_penalty INTEGER"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

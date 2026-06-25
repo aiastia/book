@@ -12,6 +12,11 @@ const form = reactive({
   temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
   reasoning_model: false,
   frequency_penalty: null as number | null, presence_penalty: null as number | null,
+  // 灵感模式独立参数（null=跟随全局/不发送）
+  inspiration_temperature: null as number | null,
+  inspiration_top_p: null as number | null,
+  inspiration_frequency_penalty: null as number | null,
+  inspiration_presence_penalty: null as number | null,
   backend_type: 'openai' as string,
   provider: 'openai' as 'openai' | 'anthropic' | 'gemini',
   embedding_model: '' as string,
@@ -49,6 +54,8 @@ function openAdd() {
     temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
     reasoning_model: false,
     frequency_penalty: null, presence_penalty: null,
+    inspiration_temperature: null, inspiration_top_p: null,
+    inspiration_frequency_penalty: null, inspiration_presence_penalty: null,
     backend_type: 'openai', provider: 'openai', embedding_model: '',
   })
   remoteModels.value = []
@@ -63,6 +70,10 @@ function openEdit(m: any) {
     provider: m.provider || m.backend_type || 'openai',
     embedding_model: m.embedding_model || '',
     reasoning_model: m.reasoning_model ?? false,
+    inspiration_temperature: m.inspiration_temperature ?? null,
+    inspiration_top_p: m.inspiration_top_p ?? null,
+    inspiration_frequency_penalty: m.inspiration_frequency_penalty ?? null,
+    inspiration_presence_penalty: m.inspiration_presence_penalty ?? null,
   })
   remoteModels.value = []
   modelSearch.value = ''
@@ -310,7 +321,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
             @change="onSetDefault"
             style="width:100%;"
           >
-            <a-select-option v-for="m in models" :key="m.id" :label="m.model + (m.is_default ? ' (默认)' : '')" :value="m.id" />
+            <a-select-option v-for="m in models" :key="m.id" :value="m.id">{{ m.model }}{{ m.is_default ? ' (默认)' : '' }}</a-select-option>
           </a-select>
         </div>
       </div>
@@ -508,6 +519,55 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           @change="(v: number) => form.presence_penalty = v" />
         <div class="slider-range"><span>-2.0 (聚焦主题)</span><span>0</span><span>2.0 (鼓励发散)</span></div>
         <a-button size="small" type="link" @click="form.presence_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>
+      </div>
+
+      <a-divider orientation="left">灵感模式参数</a-divider>
+      <p style="font-size:12px;color:#999;margin-bottom:12px;">
+        以下参数仅对灵感模式（创建项目时的灵感向导）生效。留空 = 跟随上方全局参数。
+      </p>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Temperature（随机性）</label>
+          <a-tag :color="form.inspiration_temperature == null ? 'default' : 'blue'">{{ form.inspiration_temperature == null ? '跟随全局' : (form.inspiration_temperature / 100).toFixed(2) }}</a-tag>
+        </div>
+        <a-slider :value="form.inspiration_temperature ?? 70" :min="0" :max="200" :step="1"
+          @change="(v: number) => form.inspiration_temperature = v" />
+        <div class="slider-range"><span>0 (精确)</span><span>1</span><span>2 (创造)</span></div>
+        <a-button size="small" type="link" @click="form.inspiration_temperature = null" style="padding:0;margin-top:4px;">跟随全局</a-button>
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>Top P（核采样）</label>
+          <a-tag :color="form.inspiration_top_p == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_top_p) }}</a-tag>
+        </div>
+        <a-slider :value="penaltySliderVal(form.inspiration_top_p)" :min="0" :max="100" :step="1"
+          @change="(v: number) => form.inspiration_top_p = v" />
+        <div class="slider-range"><span>0</span><span>0.5</span><span>1</span></div>
+        <a-button size="small" type="link" @click="form.inspiration_top_p = null" style="padding:0;margin-top:4px;">不发送</a-button>
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>频率惩罚（减少重复用词）</label>
+          <a-tag :color="form.inspiration_frequency_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_frequency_penalty) }}</a-tag>
+        </div>
+        <a-slider :value="penaltySliderVal(form.inspiration_frequency_penalty)" :min="-200" :max="200" :step="1"
+          @change="(v: number) => form.inspiration_frequency_penalty = v" />
+        <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
+        <a-button size="small" type="link" @click="form.inspiration_frequency_penalty = null" style="padding:0;margin-top:4px;">不发送</a-button>
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>存在惩罚（鼓励新话题）</label>
+          <a-tag :color="form.inspiration_presence_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.inspiration_presence_penalty) }}</a-tag>
+        </div>
+        <a-slider :value="penaltySliderVal(form.inspiration_presence_penalty)" :min="-200" :max="200" :step="1"
+          @change="(v: number) => form.inspiration_presence_penalty = v" />
+        <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
+        <a-button size="small" type="link" @click="form.inspiration_presence_penalty = null" style="padding:0;margin-top:4px;">不发送</a-button>
       </div>
 
       <a-form-item>

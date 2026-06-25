@@ -1,16 +1,9 @@
-"""灵感模式：步骤向导（递减温度 + 重试 + 格式校验 + 失败降级）+ 快速补全"""
+"""灵感模式：步骤向导（重试 + 格式校验 + 失败降级）+ 快速补全。
+温度/惩罚等参数统一走 AI 模型设置页配置，不再散落硬编码。"""
 from app.api.routes.projects_pkg.base import *
 
 
 router = make_router()
-
-# 灵感步骤递减温度（移植自 MuMuAINovel）：title 最有创意，genre 最明确
-INSPIRATION_TEMPERATURES = {
-    "title": 0.8,
-    "description": 0.65,
-    "theme": 0.55,
-    "genre": 0.45,
-}
 
 
 def _validate_options(data: dict, step_name: str) -> tuple[bool, str]:
@@ -35,7 +28,7 @@ def _validate_options(data: dict, step_name: str) -> tuple[bool, str]:
 
 
 async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
-    """灵感步骤统一执行：递减温度 + 重试 + 格式校验 + 失败降级。"""
+    """灵感步骤统一执行：读取灵感模式独立参数，未配则跟随全局模型配置。"""
     sys_skill = await engine.get_skill(f"inspiration_{step_name}_system")
     usr_skill = await engine.get_skill(f"inspiration_{step_name}_user")
     if not sys_skill or not usr_skill:
@@ -45,9 +38,38 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
     usr_prompt = substitute_vars(usr_skill.system_prompt, ctx)
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": usr_prompt}]
 
+    # 读取灵感模式独立参数（NULL=跟随全局，不传让 ai_client 走默认值）
+    insp_kwargs = {}
+    try:
+        from app.models.ai_model import AIModelConfig
+        from sqlalchemy import select
+        cfg = (await engine.db.execute(
+            select(AIModelConfig).where(
+                AIModelConfig.user_id == engine.user_id,
+                AIModelConfig.is_default == True,
+            )
+        )).scalar_one_or_none()
+        if cfg:
+            # temperature: *100 → float；None=不传（跟随全局）
+            if cfg.inspiration_temperature is not None:
+                insp_kwargs["temperature"] = cfg.inspiration_temperature / 100
+            # top_p: *100 → float；None=不传（跟随全局）
+            if cfg.inspiration_top_p is not None:
+                insp_kwargs["top_p"] = cfg.inspiration_top_p / 100
+            # frequency_penalty: |v|>2 视为 *100
+            if cfg.inspiration_frequency_penalty is not None:
+                fp = cfg.inspiration_frequency_penalty
+                insp_kwargs["frequency_penalty"] = fp / 100 if abs(fp) > 2 else fp
+            # presence_penalty: |v|>2 视为 *100
+            if cfg.inspiration_presence_penalty is not None:
+                pp = cfg.inspiration_presence_penalty
+                insp_kwargs["presence_penalty"] = pp / 100 if abs(pp) > 2 else pp
+    except Exception:
+        pass
+
     result = await ai_client.chat_json_retry(
-        messages=messages, temperature=INSPIRATION_TEMPERATURES.get(step_name, 0.7),
-        max_tokens=600, frequency_penalty=0.2, max_retries=3
+        messages=messages, max_tokens=600, max_retries=3,
+        **insp_kwargs,
     )
     # AI 调用本身报错（401/网络等）→ 直接抛出
     if result.get("error") and result.get("json") is None:

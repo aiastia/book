@@ -583,7 +583,6 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.7,
         max_tokens=4096,
     )
     if result.get("error"):
@@ -888,7 +887,6 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.7,
         max_tokens=4096,
     )
     if result.get("error"):
