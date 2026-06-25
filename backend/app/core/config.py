@@ -18,12 +18,12 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = "https://api.openai.com/v1"
     AI_API_KEY: str = ""
     AI_MODEL: str = "gpt-4o"
-    AI_TEMPERATURE: float = 0.85
+    AI_TEMPERATURE: float = 0.7
     AI_TOP_P: float = 0.9
     AI_MAX_TOKENS: int = 65536              # 单次请求最大输出 token 数（全局上限，覆盖 skill 配置）
     AI_DEFAULT_MAX_TOKENS: int = 26384      # 默认输出 token 数（skill 未配置时使用）
-    AI_FREQUENCY_PENALTY: float = 0.0       # 频率惩罚（-2.0~2.0），正值减少重复用词
-    AI_PRESENCE_PENALTY: float = 0.0        # 存在惩罚（-2.0~2.0），正值鼓励引入新话题
+    # frequency_penalty / presence_penalty 不在全局强制默认值。
+    # 由用户 AI 设置页逐个模型配置，None 时不发送参数以兼容不支持这些参数的模型。
 
     # AI 超时和重试配置（环境变量：MOYU_AI_TIMEOUT / MOYU_AI_MAX_RETRIES）
     AI_TIMEOUT: int = 600               # 读写超时（秒），默认 10 分钟（复杂提示词需要更长推理时间）

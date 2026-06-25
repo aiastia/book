@@ -160,6 +160,42 @@ class SkillEngine:
     def __init__(self, db: AsyncSession, user_id: int = None):
         self.db = db
         self.user_id = user_id
+        self._user_ai_defaults_cache = None
+
+    async def _get_user_ai_defaults(self) -> dict:
+        """惰性加载用户 AI 模型配置中的参数默认值。
+        仅在 skill 未显式配置时作为 fallback。
+        返回值: {"temperature": float|None, "frequency_penalty": float|None, "presence_penalty": float|None, ...}
+        """
+        if self._user_ai_defaults_cache is not None:
+            return self._user_ai_defaults_cache
+        self._user_ai_defaults_cache = {}
+        if not self.user_id:
+            return self._user_ai_defaults_cache
+        try:
+            from app.models.ai_model import AIModelConfig
+            result = await self.db.execute(
+                select(AIModelConfig).where(
+                    AIModelConfig.user_id == self.user_id,
+                    AIModelConfig.is_default == True,
+                )
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                # temperature: 存储为 *100, >2 时视为百分制
+                t = cfg.temperature
+                if t is not None:
+                    self._user_ai_defaults_cache["temperature"] = t / 100 if t > 2 else t
+                # frequency_penalty: 存储为 *100, |v|>2 时视为百分制
+                if cfg.frequency_penalty is not None:
+                    fp = cfg.frequency_penalty
+                    self._user_ai_defaults_cache["frequency_penalty"] = fp / 100 if abs(fp) > 2 else fp
+                if cfg.presence_penalty is not None:
+                    pp = cfg.presence_penalty
+                    self._user_ai_defaults_cache["presence_penalty"] = pp / 100 if abs(pp) > 2 else pp
+        except Exception:
+            pass
+        return self._user_ai_defaults_cache
 
     async def get_skill(self, skill_name: str) -> Optional[Skill]:
         result = await self.db.execute(select(Skill).where(Skill.name == skill_name))
@@ -265,6 +301,18 @@ class SkillEngine:
         if max_tokens is None:
             max_tokens = settings.AI_DEFAULT_MAX_TOKENS
         max_tokens = min(max_tokens, settings.AI_MAX_TOKENS)
+        frequency_penalty = merged_config.get("frequency_penalty")
+        presence_penalty = merged_config.get("presence_penalty")
+
+        # skill 未配置的参数 → 回退到用户的 AI 模型默认值
+        if temperature is None or frequency_penalty is None or presence_penalty is None:
+            user_defaults = await self._get_user_ai_defaults()
+            if temperature is None:
+                temperature = user_defaults.get("temperature")
+            if frequency_penalty is None:
+                frequency_penalty = user_defaults.get("frequency_penalty")
+            if presence_penalty is None:
+                presence_penalty = user_defaults.get("presence_penalty")
 
         if stream:
             return {
@@ -296,6 +344,8 @@ class SkillEngine:
                         messages=messages, model=model,
                         temperature=temperature, top_p=top_p,
                         max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+                        frequency_penalty=frequency_penalty,
+                        presence_penalty=presence_penalty,
                     )
                 if not result.get("error"):
                     break
@@ -316,6 +366,8 @@ class SkillEngine:
                     messages=messages, model=model,
                     temperature=temperature,
                     max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+                    frequency_penalty=frequency_penalty,
+                    presence_penalty=presence_penalty,
                 )
 
         for hook in (skill.post_hooks or []):

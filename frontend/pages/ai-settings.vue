@@ -10,6 +10,7 @@ const editing = ref<any>(null)
 const form = reactive({
   id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
   temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+  frequency_penalty: null as number | null, presence_penalty: null as number | null,
   backend_type: 'openai' as string,
   provider: 'openai' as 'openai' | 'anthropic' | 'gemini',
   embedding_model: '' as string,
@@ -45,6 +46,7 @@ function openAdd() {
   Object.assign(form, {
     id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
     temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+    frequency_penalty: null, presence_penalty: null,
     backend_type: 'openai', provider: 'openai', embedding_model: '',
   })
   remoteModels.value = []
@@ -206,6 +208,15 @@ const topPDisplay = computed({
   set: (v: string) => { form.top_p = Math.round(parseFloat(v) * 100) }
 })
 
+// 频率/存在惩罚显示转换（null=不发送，-200~200 映射到 -2.00~2.00）
+function penaltyDisplay(val: number | null): string {
+  if (val == null) return '不发送'
+  return (val / 100).toFixed(2)
+}
+function penaltySliderVal(val: number | null): number {
+  return val ?? 0
+}
+
 // 默认模型的参数
 const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_default))
 </script>
@@ -327,6 +338,22 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           </div>
           <a-slider :value="defaultModel?.max_tokens ?? 4096" :min="256" :max="16384" :step="256" disabled />
           <div class="slider-range"><span>512</span><span>128000</span></div>
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>频率惩罚（减少重复用词）</label>
+            <span class="slider-value">{{ penaltyDisplay(defaultModel?.frequency_penalty ?? null) }}</span>
+          </div>
+          <a-slider :value="penaltySliderVal(defaultModel?.frequency_penalty ?? null)" :min="-200" :max="200" :step="1" disabled />
+          <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <label>存在惩罚（引入新话题）</label>
+            <span class="slider-value">{{ penaltyDisplay(defaultModel?.presence_penalty ?? null) }}</span>
+          </div>
+          <a-slider :value="penaltySliderVal(defaultModel?.presence_penalty ?? null)" :min="-200" :max="200" :step="1" disabled />
+          <div class="slider-range"><span>-2.0</span><span>0</span><span>2.0</span></div>
         </div>
       </div>
     </a-card>
@@ -454,6 +481,30 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
         </div>
         <a-slider v-model:value="form.max_tokens" :min="512" :max="128000" :step="512" />
         <div class="slider-range"><span>512</span><span>128000</span></div>
+      </div>
+
+      <a-divider orientation="left">高级参数</a-divider>
+      <p style="font-size:12px;color:#999;margin-bottom:12px;">以下参数若为"不发送"，则 API 调用时不携带该字段（兼容不支持的模型）</p>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>频率惩罚（减少重复用词）</label>
+          <a-tag :color="form.frequency_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.frequency_penalty) }}</a-tag>
+        </div>
+        <a-slider :value="penaltySliderVal(form.frequency_penalty)" :min="-200" :max="200" :step="1"
+          @change="(v: number) => form.frequency_penalty = v" />
+        <div class="slider-range"><span>-2.0 (鼓励重复)</span><span>0</span><span>2.0 (禁止重复)</span></div>
+        <a-button size="small" type="link" @click="form.frequency_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header">
+          <label>存在惩罚（鼓励新话题）</label>
+          <a-tag :color="form.presence_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.presence_penalty) }}</a-tag>
+        </div>
+        <a-slider :value="penaltySliderVal(form.presence_penalty)" :min="-200" :max="200" :step="1"
+          @change="(v: number) => form.presence_penalty = v" />
+        <div class="slider-range"><span>-2.0 (聚焦主题)</span><span>0</span><span>2.0 (鼓励发散)</span></div>
+        <a-button size="small" type="link" @click="form.presence_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>
       </div>
 
       <a-form-item>

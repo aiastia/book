@@ -37,6 +37,8 @@ class AIModelCreate(BaseModel):
     temperature: int = 85
     top_p: int = 90
     max_tokens: int = 4096
+    frequency_penalty: Optional[int] = None  # *100，None=不发送
+    presence_penalty: Optional[int] = None   # *100，None=不发送
     is_default: bool = False
     backend_type: str = "openai"
     provider: str = "openai"
@@ -51,6 +53,8 @@ class AIModelUpdate(BaseModel):
     temperature: Optional[int] = None
     top_p: Optional[int] = None
     max_tokens: Optional[int] = None
+    frequency_penalty: Optional[int] = None  # *100，None=不发送
+    presence_penalty: Optional[int] = None   # *100，None=不发送
     is_default: Optional[bool] = None
     backend_type: Optional[str] = None
     provider: Optional[str] = None
@@ -67,6 +71,7 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
     return [{
         "id": m.id, "name": m.name, "base_url": m.base_url, "model": m.model,
         "temperature": m.temperature, "top_p": m.top_p, "max_tokens": m.max_tokens,
+        "frequency_penalty": m.frequency_penalty, "presence_penalty": m.presence_penalty,
         "is_default": m.is_default, "backend_type": m.backend_type or "openai",
         "provider": m.provider or m.backend_type or "openai",
         "embedding_model": m.embedding_model or "",

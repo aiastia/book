@@ -46,7 +46,8 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
     messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": usr_prompt}]
 
     result = await ai_client.chat_json_retry(
-        messages=messages, temperature=INSPIRATION_TEMPERATURES.get(step_name, 0.7), max_retries=3
+        messages=messages, temperature=INSPIRATION_TEMPERATURES.get(step_name, 0.7),
+        max_tokens=600, frequency_penalty=0.2, max_retries=3
     )
     # AI 调用本身报错（401/网络等）→ 直接抛出
     if result.get("error") and result.get("json") is None:

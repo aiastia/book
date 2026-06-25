@@ -87,6 +87,8 @@ async def _auto_migrate():
         # 第1批：AI 多 Provider + 记忆向量
         ("ai_model_configs", "ADD COLUMN provider VARCHAR(20) DEFAULT 'openai'"),
         ("ai_model_configs", "ADD COLUMN embedding_model VARCHAR(100) DEFAULT ''"),
+        ("ai_model_configs", "ADD COLUMN frequency_penalty INTEGER"),
+        ("ai_model_configs", "ADD COLUMN presence_penalty INTEGER"),
         ("story_memories", "ADD COLUMN user_id INTEGER"),
         ("story_memories", "ADD COLUMN title VARCHAR(200) DEFAULT ''"),
         ("story_memories", "ADD COLUMN vector_id VARCHAR(100) DEFAULT ''"),

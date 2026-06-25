@@ -122,12 +122,15 @@ class AIClient:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": temperature or settings.AI_TEMPERATURE,
-            "top_p": top_p or settings.AI_TOP_P,
-            "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
-            "frequency_penalty": frequency_penalty if frequency_penalty is not None else settings.AI_FREQUENCY_PENALTY,
-            "presence_penalty": presence_penalty if presence_penalty is not None else settings.AI_PRESENCE_PENALTY,
+            "temperature": temperature if temperature is not None else settings.AI_TEMPERATURE,
+            "top_p": top_p if top_p is not None else settings.AI_TOP_P,
+            "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
         }
+        # penalty 参数仅当用户显式配置时才发送，避免不支持该参数的模型报错
+        if frequency_penalty is not None:
+            kwargs["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            kwargs["presence_penalty"] = presence_penalty
         if response_format:
             kwargs["response_format"] = response_format
         if tools:
@@ -176,13 +179,15 @@ class AIClient:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": temperature or settings.AI_TEMPERATURE,
-            "top_p": top_p or settings.AI_TOP_P,
-            "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
-            "frequency_penalty": frequency_penalty if frequency_penalty is not None else settings.AI_FREQUENCY_PENALTY,
-            "presence_penalty": presence_penalty if presence_penalty is not None else settings.AI_PRESENCE_PENALTY,
+            "temperature": temperature if temperature is not None else settings.AI_TEMPERATURE,
+            "top_p": top_p if top_p is not None else settings.AI_TOP_P,
+            "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
             "stream": True,
         }
+        if frequency_penalty is not None:
+            kwargs["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            kwargs["presence_penalty"] = presence_penalty
         if response_format:
             kwargs["response_format"] = response_format
         if tools:
@@ -252,9 +257,9 @@ class AIClient:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
-            "temperature": temperature or settings.AI_TEMPERATURE,
-            "top_p": top_p or settings.AI_TOP_P,
-            "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+            "temperature": temperature if temperature is not None else settings.AI_TEMPERATURE,
+            "top_p": top_p if top_p is not None else settings.AI_TOP_P,
+            "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
             "stream": True,
         }
         stream = await self.client.chat.completions.create(**kwargs)
@@ -343,6 +348,8 @@ class AIClient:
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
         max_retries: int = None,
     ) -> dict:
         """带重试的 JSON 调用：解析失败时最多重试 max_retries 次。
@@ -365,6 +372,8 @@ class AIClient:
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
             )
             total_input_tokens += last_result.get("input_tokens", 0)
             total_output_tokens += last_result.get("output_tokens", 0)
@@ -415,7 +424,7 @@ class AIClient:
         tools: list[dict],
         tool_executor,
         model: str = None,
-        temperature: float = 0.85,
+        temperature: float = None,
         max_tokens: int = 16384,
         max_rounds: int = 5,
     ) -> dict:

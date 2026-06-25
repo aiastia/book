@@ -36,7 +36,11 @@ const coreFields = [
 ]
 const editingDetail = ref<any>(null)
 const detailForm = reactive({ name: '', category: '其他', content: '' })
-const categories = ['地理', '历史', '种族', '势力', '修炼体系', '科技', '文化', '其他']
+const categories = ['地理', '历史', '种族', '势力', '修炼体系', '科技', '文化', '经济', '军事', '宗教', '风俗',
+  '系统空间', '位面分类', '常见位面模板', '穿越者组织', '任务机制', '积分兑换', '规则边界', '位面意志', '身份生成', '异常事件',
+  '世界基线', '关键节点', '循环变量', '记忆继承', '蝴蝶效应案例', '终局路径',
+  '表世界地理', '里世界地理', '边界与通道', '双世界交互规则', '两边势力对照',
+  '其他']
 
 async function onGenCore() {
   if (!await msg.confirm('AI 将重新生成核心世界观（时间/地点/氛围/规则），已有内容将被覆盖。确认开始？')) return
@@ -46,7 +50,7 @@ async function onGenCore() {
   finally { genAll.value = false }
 }
 async function onGenDetail() {
-  if (!await msg.confirm('AI 将生成详细世界观设定（地理/历史/种族等），已有条目不受影响。确认开始？')) return
+  if (!await msg.confirm('AI 将生成详细世界观设定条目（根据题材自适应类别），已有条目不受影响。确认开始？')) return
   genAll.value = true
   try {
     await api.generateWorld({ genre: currentProjectInfo.value?.genre || '', idea: (worldCore.value?.world_rules || '') + ' ' + (worldCore.value?.world_location || '') })
