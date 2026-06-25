@@ -870,7 +870,7 @@ async def _expand_outline_core(
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
         "organizations_info": ctx["organizations_info"],
         "strategy_instruction": strategy_instructions.get(strategy, strategy_instructions["balanced"]),
-        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_tone(情感基调)、narrative_goal(叙事目标)、conflict_type(冲突类型)。返回JSON数组。{existing_context}",
+        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_arc(情绪变化弧线)、narrative_goal(叙事目标)、conflict_type(冲突类型)、hook(结尾钩子)、shuang_design(结构化爽点设计)、rhythm_tag(节奏标签)、scene_anchor(场景锚点)、character_intents(角色微意图)。返回JSON数组。{existing_context}",
     })
     check_skill_error(result)
     expanded_data = result.get("json") or []
@@ -897,7 +897,7 @@ async def _expand_outline_core(
             "plot_summary": plan.get("plot_summary", plan.get("summary", "")),
             "key_events": plan.get("key_events", []),
             "character_focus": plan.get("character_focus", []),
-            "emotional_tone": plan.get("emotional_tone", ""),
+            "emotional_tone": plan.get("emotional_arc") or plan.get("emotional_tone", ""),
             "narrative_goal": plan.get("narrative_goal", ""),
             "conflict_type": plan.get("conflict_type", ""),
             "estimated_words": plan.get("estimated_words", 3000),

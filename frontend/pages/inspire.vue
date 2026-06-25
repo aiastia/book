@@ -59,7 +59,9 @@ function addGenre() {
 
 // 创建中状态
 const creating = ref(false)
-const genStep = ref('')  // 自动生成进度
+const genStep = ref('')
+// 大纲模式（1→1 传统模式 / 1→N 细化模式）
+const outlineMode = ref<'one_to_one' | 'one_to_many'>('one_to_many')  // 自动生成进度
 
 // 兜底：旧的全局灵感
 const legacyResult = ref<any>(null)
@@ -151,10 +153,11 @@ async function onQuickComplete() {
 	    // 1. 创建项目
 	    genStep.value = '创建项目...'
 	    const { createProject: selectAndCreate } = useProject()
-	    const created = await selectAndCreate(data.title, data.genre, data.synopsis, {
-	      target_word_count: data.target_word_count,
-	      narrative_pov: data.narrative_pov,
-	    })
+    const created = await selectAndCreate(data.title, data.genre, data.synopsis, {
+      target_word_count: data.target_word_count,
+      narrative_pov: data.narrative_pov,
+      outline_mode: outlineMode.value,
+    })
     const pid = created.id
 
     // 2. 提交后台初始化任务（世界观+角色+大纲异步生成）
@@ -310,6 +313,20 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
         <div class="result-section"><h4>主题</h4><p>{{ stepResults.theme }}</p></div>
         <div class="result-section"><h4>类型</h4><div><a-tag v-for="g in stepResults.genre" :key="g" style="margin-right:6px;">{{ g }}</a-tag></div></div>
         <div class="result-section"><h4>主角名字（可选）</h4><a-input v-model:value="stepResults.protagonist_name" placeholder="留空则 AI 生成" style="max-width:240px;" /></div>
+        <!-- 大纲模式选择 -->
+        <div class="result-section">
+          <h4>大纲模式</h4>
+          <div style="display:flex;gap:12px;margin-top:4px;">
+            <div class="mode-card" :class="{ active: outlineMode === 'one_to_one' }" @click="outlineMode = 'one_to_one'">
+              <div class="mode-card-title">传统模式 (1→1)</div>
+              <div class="mode-card-desc">一条大纲对应一章</div>
+            </div>
+            <div class="mode-card" :class="{ active: outlineMode === 'one_to_many' }" @click="outlineMode = 'one_to_many'">
+              <div class="mode-card-title">细化模式 (1→N)</div>
+              <div class="mode-card-desc">一条大纲展开为多章</div>
+            </div>
+          </div>
+        </div>
         <a-alert v-if="creating && genStep" :message="genStep + '...'" type="info" show-icon style="margin-top:16px;" />
         <div style="margin-top:20px;display:flex;gap:8px;">
           <a-button type="primary" :loading="creating" @click="onCreateProject">
@@ -345,6 +362,20 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
             <a-col :span="12"><a-form-item label="目标字数"><a-input-number v-model:value="quickResult.target_word_count" :min="10000" :max="5000000" :step="10000" style="width:100%" /></a-form-item></a-col>
           </a-row>
         </a-form>
+        <!-- 大纲模式选择 -->
+        <div style="margin-top:12px;">
+          <h4 style="font-size:14px;color:#2B2B2B;margin-bottom:8px;">大纲模式</h4>
+          <div style="display:flex;gap:12px;">
+            <div class="mode-card" :class="{ active: outlineMode === 'one_to_one' }" @click="outlineMode = 'one_to_one'">
+              <span class="mode-card-title">传统模式 (1→1)</span>
+              <span class="mode-card-desc">一条大纲 = 一章</span>
+            </div>
+            <div class="mode-card" :class="{ active: outlineMode === 'one_to_many' }" @click="outlineMode = 'one_to_many'">
+              <span class="mode-card-title">细化模式 (1→N)</span>
+              <span class="mode-card-desc">一条大纲 → 多章</span>
+            </div>
+          </div>
+        </div>
         <a-alert v-if="creating && genStep" :message="genStep + '...'" type="info" show-icon style="margin-top:16px;" />
         <div style="margin-top:20px;display:flex;gap:8px;">
           <a-button type="primary" :loading="creating" @click="onCreateProject">
@@ -378,4 +409,9 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
 .step-progress{margin-bottom:8px;}
 .custom-input-box{display:flex;align-items:center;gap:8px;margin-top:16px;padding-top:12px;border-top:1px dashed #E8E4DC;}
 .custom-label{font-size:13px;color:#8C8C8C;white-space:nowrap;}
+.mode-card{cursor:pointer;border:2px solid #e5e7eb;border-radius:8px;padding:10px 14px;transition:all .15s;display:inline-flex;flex-direction:column;gap:2px}
+.mode-card:hover{border-color:#B8CDD1;background:#F0F5F5}
+.mode-card.active{border-color:#4D8088;background:#EAF0F1}
+.mode-card-title{font-size:14px;font-weight:500}
+.mode-card-desc{font-size:12px;color:#8C8C8C}
 </style>

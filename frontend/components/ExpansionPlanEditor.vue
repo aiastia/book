@@ -42,24 +42,30 @@ const loadingCharacters = ref(false)
 const saving = ref(false)
 const regenerating = ref(false)
 
-// AI 重新规划：对该卷重新展开（覆盖模式），AI 重新生成所有子章节的规划
-// 仅在章节有关联大纲时可用
+// AI 重新规划：对该卷重新展开（覆盖模式），AI 重新生成该卷所有子章节的规划
 const canRegenerate = computed(() => props.outlineId != null && props.outlineId > 0)
 
 async function onRegenerate() {
   if (!props.outlineId) return
+  // 先查该卷现有章节数，复用此数量
+  let existingCount = 3
+  try {
+    const chs = await apiGet<any>(`/api/projects/${currentProjectId.value}/outlines/${props.outlineId}/chapters`)
+    if (chs?.chapter_count) existingCount = chs.chapter_count
+  } catch { /* 取不到就用默认3 */ }
+
   if (!await msg.confirm(
-    `AI 将重新规划第${props.chapterNumber}章所属卷的所有子章节。\n旧规划数据将被覆盖。`,
-    'AI 重新规划确认',
+    `AI 将重新规划该卷的全部 ${existingCount} 节子章节规划。\n旧规划数据将被覆盖，新规划从原章号开始。`,
+    '重新规划整卷',
   )) return
   regenerating.value = true
   try {
     const { task_id } = await api.expandOutlineAsync(props.outlineId, {
-      target_chapter_count: 3,  // 默认3章，用户后续可在大纲页调整
+      target_chapter_count: existingCount,
       mode: 'replace',
     })
     const { trackTask } = useBackgroundTasks()
-    trackTask({ id: task_id, task_type: 'outline_expand', title: `重新规划第${props.chapterNumber}章所属卷` })
+    trackTask({ id: task_id, task_type: 'outline_expand', title: `重规划第${props.chapterNumber}章所属卷(${existingCount}节)` })
     msg.success('重新规划任务已提交，完成后刷新查看')
     emit('saved', {})
     close()
@@ -209,7 +215,6 @@ async function onSave() {
     :width="700"
     centered
     :destroy-on-close="true"
-    :footer="null"
     @cancel="close"
   >
     <div v-if="chapterTitle" class="plan-subtitle">章节：{{ chapterTitle }}</div>
@@ -284,7 +289,7 @@ async function onSave() {
     </a-form>
     <template #footer>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <a-button v-if="canRegenerate" :loading="regenerating" @click="onRegenerate">🤖 AI 重新规划</a-button>
+        <a-button v-if="canRegenerate" :loading="regenerating" @click="onRegenerate">🤖 AI 重规划整卷</a-button>
         <span v-else></span>
         <div>
           <a-button @click="close" :disabled="saving || regenerating">取消</a-button>

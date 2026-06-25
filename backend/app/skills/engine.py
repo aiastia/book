@@ -1,4 +1,6 @@
 import asyncio
+import os
+import re
 """Skill 执行引擎"""
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +8,40 @@ from sqlalchemy import select
 from app.models.skill import Skill, SkillConfig
 from app.core.ai_client import AIClient
 from app.core.config import settings
+
+# 提示词文件目录
+_PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
+
+
+def _resolve_includes(text: str, base_dir: str = None, seen: set = None) -> str:
+    """解析提示词中的 @include:filename 指令，替换为文件内容。
+
+    支持嵌套 include（最多 5 层），自动检测循环引用。
+    """
+    if base_dir is None:
+        base_dir = _PROMPTS_DIR
+    if seen is None:
+        seen = set()
+
+    def _replace(m: re.Match) -> str:
+        fname = m.group(1).strip()
+        if fname in seen:
+            return f"[@include 循环引用已截断: {fname}]"
+        inc_path = os.path.join(base_dir, fname)
+        if not os.path.isfile(inc_path):
+            return f"[@include 文件不存在: {fname}]"
+        seen.add(fname)
+        try:
+            with open(inc_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            return f"[@include 读取失败: {fname}]"
+        # 递归解析嵌套 include，但限制深度
+        if len(seen) < 5 and "@include:" in content:
+            content = _resolve_includes(content, base_dir, seen)
+        return content
+
+    return re.sub(r"@include:(\S+\.md)", _replace, text)
 
 
 # ===== 上下文自动注入 =====
@@ -266,6 +302,10 @@ class SkillEngine:
         # 只有当用户主动开启了自定义（is_customized=True）且提供了 system_prompt 时才使用用户版本
         if user_cfg and user_cfg.get("is_customized") and user_cfg.get("config", {}).get("system_prompt"):
             system_prompt = user_cfg["config"]["system_prompt"]
+
+        # 解析 @include 指令（支持提示词复用共享片段）
+        if "@include:" in system_prompt:
+            system_prompt = _resolve_includes(system_prompt)
 
         # 替换提示词中的变量（兼容用户模板中直接写的 {变量}）
         had_user_prompt_var = "{user_prompt}" in system_prompt

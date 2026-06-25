@@ -9,6 +9,13 @@ const api = useProjectApi()
 const { selectProject, createProject: selectAndCreate } = useProject()
 const { data: projects, refresh } = await api.listProjects()
 
+// ===== 模式筛选 =====
+const filterMode = ref<'all' | 'one_to_one' | 'one_to_many'>('all')
+const filteredProjects = computed(() => {
+  if (filterMode.value === 'all') return projects.value || []
+  return (projects.value || []).filter(p => (p.outline_mode || 'one_to_one') === filterMode.value)
+})
+
 // ===== 删除 / 导出 / 导入 =====
 async function onDelete(p: any, e: Event) {
   e.stopPropagation()
@@ -138,8 +145,13 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
     </div>
 
     <div class="book-grid-bg">
-      <div v-if="projects && projects.length" class="book-grid">
-        <div v-for="(p, i) in projects" :key="p.id" class="book-card" @click="enterProject(p)">
+      <div v-if="projects && projects.length" style="display:flex;gap:8px;margin-bottom:16px;justify-content:center">
+        <a-button size="small" :type="filterMode === 'all' ? 'primary' : 'default'" @click="filterMode = 'all'">全部</a-button>
+        <a-button size="small" :type="filterMode === 'one_to_one' ? 'primary' : 'default'" @click="filterMode = 'one_to_one'">传统模式 (1→1)</a-button>
+        <a-button size="small" :type="filterMode === 'one_to_many' ? 'primary' : 'default'" @click="filterMode = 'one_to_many'">细化模式 (1→N)</a-button>
+      </div>
+      <div v-if="filteredProjects && filteredProjects.length" class="book-grid">
+        <div v-for="(p, i) in filteredProjects" :key="p.id" class="book-card" @click="enterProject(p)">
           <div class="book-spine" :style="spineStyle(i)"></div>
           <div class="book-page">
             <div class="book-title">{{ p.title }}</div>

@@ -267,8 +267,8 @@ class ChapterContextService:
                 parts.append("关键事件：\n" + "\n".join(f"- {e}" for e in plan["key_events"]))
             if plan.get("character_focus"):
                 parts.append(f"角色焦点：{', '.join(plan['character_focus'])}")
-            if plan.get("emotional_tone"):
-                parts.append(f"情感基调：{plan['emotional_tone']}")
+            if plan.get("emotional_tone") or plan.get("emotional_arc"):
+                parts.append(f"情感基调：{plan.get('emotional_arc') or plan.get('emotional_tone', '')}")
             if plan.get("narrative_goal"):
                 parts.append(f"叙事目标：{plan['narrative_goal']}")
             if plan.get("conflict_type"):
