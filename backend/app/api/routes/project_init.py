@@ -583,7 +583,6 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=4096,
     )
     if result.get("error"):
         task.assign_careers_done = 1
@@ -887,7 +886,6 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        max_tokens=4096,
     )
     if result.get("error"):
         logger.warning(f"[init] 组织成员分配 AI 调用失败: {result['error']}")
@@ -1066,7 +1064,6 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
             {"role": "user", "content": f"请为小说《{proj.title}（{proj.genre or '网文'}）》的角色分配组织。\n\n已有组织：\n{org_list}\n\n待分配角色：\n{char_list}"},
         ],
         model=ai_client.model,
-        max_tokens=8192,
     )
     if result.get("error"):
         logger.warning(f"[init] 组织成员分配失败: {result['error']}")
