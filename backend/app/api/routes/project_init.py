@@ -1119,7 +1119,7 @@ async def _step_locations(db, task, pid, proj, engine, ai_client):
     loc_result, lerr = await _safe_skill_call(engine, ai_client, "locations_generate", {
         "title": proj.title,
         "world_info": _build_world_info(proj),
-        "user_prompt": f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。已有角色：{char_hint}。地点应与角色的身份、活动范围、剧情走向相匹配。",
+        "user_prompt": f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。已有角色：{char_hint}。地点应形成关联网：至少一对地点在描述中互相引用（如'从A出发前往B''在C遇到D'），而非各自孤立。",
     }, "地点")
     if lerr:
         return lerr
