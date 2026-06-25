@@ -150,15 +150,17 @@ case "${1:-all}" in
     start_docker
     ;;
   status)
+    set +e
     show_status
     ;;
   *)
-    echo "用法: ./dev.sh [backend|frontend|all|stop|docker|status]"
-    echo "  无参数 / all      同时启动前后端"
-    echo "  backend          只启动后端"
-    echo "  frontend         只启动前端"
-    echo "  stop             停止所有"
-    echo "  docker           用 Docker Compose 启动"
+	    echo "用法: ./dev.sh [backend|frontend|all|stop|restart|docker|status]"
+	    echo "  无参数 / all      同时启动前后端"
+	    echo "  backend          只启动后端"
+	    echo "  frontend         只启动前端"
+	    echo "  stop             停止所有"
+	    echo "  restart          重启所有"
+	    echo "  docker           用 Docker Compose 启动"
     echo "  status           查看运行状态"
     exit 1
     ;;
