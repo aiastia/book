@@ -40,6 +40,7 @@ class AIModelCreate(BaseModel):
     frequency_penalty: Optional[int] = None  # *100，None=不发送
     presence_penalty: Optional[int] = None   # *100，None=不发送
     is_default: bool = False
+    reasoning_model: bool = False  # 推理模型：强制 temperature=1，不发 top_p/penalty
     backend_type: str = "openai"
     provider: str = "openai"
     embedding_model: str = ""
@@ -56,6 +57,7 @@ class AIModelUpdate(BaseModel):
     frequency_penalty: Optional[int] = None  # *100，None=不发送
     presence_penalty: Optional[int] = None   # *100，None=不发送
     is_default: Optional[bool] = None
+    reasoning_model: Optional[bool] = None
     backend_type: Optional[str] = None
     provider: Optional[str] = None
     embedding_model: Optional[str] = None
@@ -72,7 +74,8 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
         "id": m.id, "name": m.name, "base_url": m.base_url, "model": m.model,
         "temperature": m.temperature, "top_p": m.top_p, "max_tokens": m.max_tokens,
         "frequency_penalty": m.frequency_penalty, "presence_penalty": m.presence_penalty,
-        "is_default": m.is_default, "backend_type": m.backend_type or "openai",
+        "is_default": m.is_default, "reasoning_model": m.reasoning_model or False,
+        "backend_type": m.backend_type or "openai",
         "provider": m.provider or m.backend_type or "openai",
         "embedding_model": m.embedding_model or "",
         "created_at": m.created_at.isoformat() if m.created_at else "",

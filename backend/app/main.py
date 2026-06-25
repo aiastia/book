@@ -158,6 +158,8 @@ async def _auto_migrate():
         ("writing_styles", "ADD COLUMN reference_text TEXT DEFAULT ''"),
         ("writing_styles", "ADD COLUMN style_traits TEXT DEFAULT '{}'"),  # 存 JSON 文本，默认空对象
         ("writing_styles", "ADD COLUMN traits_updated_at DATETIME"),
+        # 第16批：推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3，强制 temperature=1，不发 top_p/penalty）
+        ("ai_model_configs", "ADD COLUMN reasoning_model BOOLEAN DEFAULT 0"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

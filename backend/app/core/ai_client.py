@@ -56,13 +56,28 @@ class AIClient:
     """
 
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
-                 provider: str = "openai", embedding_model: str = None):
+                 provider: str = "openai", embedding_model: str = None,
+                 reasoning_model: bool = False):
         self.base_url = base_url or settings.AI_BASE_URL
         self.api_key = api_key or settings.AI_API_KEY
         self.model = model or settings.AI_MODEL
         self.provider = (provider or "openai").lower()
         self.embedding_model = embedding_model or ""
+        # 推理模型（Kimi K2 / DeepSeek-R1 / o1-o3）：强制 temperature=1，不发 top_p/penalty
+        self.reasoning_model = bool(reasoning_model)
         self._client = None
+
+    def _apply_reasoning(self, kwargs: dict) -> dict:
+        """推理模型参数调整：在 kwargs 组装完成后统一拦截。
+        推理模型强制 temperature=1，且不接受 top_p / frequency_penalty / presence_penalty，
+        否则报 400 invalid temperature / top_p。
+        """
+        if self.reasoning_model:
+            kwargs["temperature"] = 1
+            kwargs.pop("top_p", None)
+            kwargs.pop("frequency_penalty", None)
+            kwargs.pop("presence_penalty", None)
+        return kwargs
 
     @classmethod
     async def from_user_config(cls, db, user_id: int) -> "AIClient":
@@ -84,6 +99,7 @@ class AIClient:
                     model=cfg.model,
                     provider=cfg.provider or cfg.backend_type or "openai",
                     embedding_model=cfg.embedding_model or "",
+                    reasoning_model=cfg.reasoning_model or False,
                 )
         except Exception:
             pass
@@ -136,6 +152,8 @@ class AIClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+        # 推理模型：强制 temperature=1，移除 top_p/penalty
+        self._apply_reasoning(kwargs)
         try:
             resp = await self.client.chat.completions.create(**kwargs)
             message = resp.choices[0].message
@@ -193,6 +211,8 @@ class AIClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+        # 推理模型：强制 temperature=1，移除 top_p/penalty
+        self._apply_reasoning(kwargs)
         try:
             stream = await self.client.chat.completions.create(**kwargs)
             content_parts = []
@@ -262,6 +282,8 @@ class AIClient:
             "max_tokens": max_tokens if max_tokens is not None else settings.AI_DEFAULT_MAX_TOKENS,
             "stream": True,
         }
+        # 推理模型：强制 temperature=1，移除 top_p/penalty
+        self._apply_reasoning(kwargs)
         stream = await self.client.chat.completions.create(**kwargs)
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:

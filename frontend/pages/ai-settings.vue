@@ -10,6 +10,7 @@ const editing = ref<any>(null)
 const form = reactive({
   id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
   temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+  reasoning_model: false,
   frequency_penalty: null as number | null, presence_penalty: null as number | null,
   backend_type: 'openai' as string,
   provider: 'openai' as 'openai' | 'anthropic' | 'gemini',
@@ -46,6 +47,7 @@ function openAdd() {
   Object.assign(form, {
     id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
     temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+    reasoning_model: false,
     frequency_penalty: null, presence_penalty: null,
     backend_type: 'openai', provider: 'openai', embedding_model: '',
   })
@@ -60,6 +62,7 @@ function openEdit(m: any) {
     backend_type: m.backend_type || 'openai',
     provider: m.provider || m.backend_type || 'openai',
     embedding_model: m.embedding_model || '',
+    reasoning_model: m.reasoning_model ?? false,
   })
   remoteModels.value = []
   modelSearch.value = ''
@@ -506,6 +509,14 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
         <div class="slider-range"><span>-2.0 (聚焦主题)</span><span>0</span><span>2.0 (鼓励发散)</span></div>
         <a-button size="small" type="link" @click="form.presence_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>
       </div>
+
+      <a-form-item>
+        <a-switch v-model:checked="form.reasoning_model" />
+        <span style="margin-left: 8px;">推理模型</span>
+        <div style="font-size:12px;color:#999;margin-top:4px;">
+          勾选后：温度强制为 1，不发送 Top P / 惩罚参数。适用于 Kimi K2、DeepSeek-R1、o1/o3 等推理模型
+        </div>
+      </a-form-item>
 
       <a-form-item>
         <a-switch v-model:checked="form.is_default" />

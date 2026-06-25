@@ -20,6 +20,8 @@ class AIModelConfig(Base):
     frequency_penalty = Column(Integer, nullable=True, default=None)  # *100 存储，NULL=不发送
     presence_penalty = Column(Integer, nullable=True, default=None)   # *100 存储，NULL=不发送
     is_default = Column(Boolean, default=False)
+    # 推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3 等）：勾选后强制 temperature=1，不发送 top_p/penalty
+    reasoning_model = Column(Boolean, default=False)
     backend_type = Column(String(20), default="openai")  # openai, claude_code（兼容字段）
     # AI 厂商：openai(openai兼容，含 deepseek/moonshot/自定义)、anthropic、gemini
     provider = Column(String(20), default="openai")

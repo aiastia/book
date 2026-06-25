@@ -216,6 +216,7 @@ class ChapterService:
                     model=config.model,
                     provider=config.provider or config.backend_type or "openai",
                     embedding_model=config.embedding_model or "",
+                    reasoning_model=config.reasoning_model or False,
                 )
         return AIClient()
 

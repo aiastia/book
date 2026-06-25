@@ -100,6 +100,7 @@ async def _build_client_with_model(db: AsyncSession, user_id: int, model: str) -
                 model=model,
                 provider=cfg.provider or cfg.backend_type or "openai",
                 embedding_model=cfg.embedding_model or "",
+                reasoning_model=cfg.reasoning_model or False,
             )
     except Exception as e:
         logger.warning(f"[batch] 构建指定模型客户端失败: {e}")
