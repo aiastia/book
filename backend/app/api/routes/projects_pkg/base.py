@@ -166,6 +166,10 @@ class OutlineContinueRequest(BaseModel):
 
 class OutlineExpandRequest(BaseModel):
     target_chapter_count: int = 3
+    # 展开模式：new=首次展开（已展开则报错）/ replace=覆盖旧章节重新规划 / append=在已有章节后追加
+    mode: str = "new"
+    # 展开策略：balanced=均衡分配 / climax=高潮重点 / detail=细节丰富
+    strategy: str = "balanced"
 
 
 class BatchExpandRequest(BaseModel):

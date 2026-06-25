@@ -150,7 +150,7 @@ interface OutlineGroup {
 }
 
 const groupedChapters = computed<OutlineGroup[]>(() => {
-  if (outlineMode.value !== 'one-to-many') return []
+  if (outlineMode.value !== 'one_to_many') return []
   const groups: Record<string, any[]> = {}
   for (const ch of sortedChapters.value) {
     const key = ch.outline_id || 'uncategorized'
@@ -164,7 +164,7 @@ const groupedChapters = computed<OutlineGroup[]>(() => {
       return {
         outlineId: outline?.id ?? null,
         outlineTitle: outline?.title || '未分类',
-        outlineOrder: outline?.sort_order ?? 999,
+        outlineOrder: outline?.chapter_number ?? 999,
         chapters: chs,
       }
     })
@@ -727,8 +727,8 @@ async function onPlanSaved() {
     <div class="page-header">
       <div class="page-header-left">
         <h2 class="page-title">📖 章节管理</h2>
-        <a-tag :color="outlineMode === 'one-to-one' ? 'blue' : 'green'" style="width: fit-content">
-          {{ outlineMode === 'one-to-one' ? '传统模式：章节由大纲管理' : '细化模式：章节可在大纲页面展开' }}
+        <a-tag :color="outlineMode === 'one_to_one' ? 'blue' : 'green'" style="width: fit-content">
+          {{ outlineMode === 'one_to_one' ? '传统模式：章节由大纲管理' : '细化模式：章节可在大纲页面展开' }}
         </a-tag>
       </div>
       <div class="page-header-right">
@@ -738,7 +738,7 @@ async function onPlanSaved() {
           allow-clear
           style="width: 240px"
         />
-        <a-button v-if="outlineMode === 'one-to-many'" @click="openManualCreate">
+        <a-button v-if="outlineMode === 'one_to_many'" @click="openManualCreate">
           + 手动创建
         </a-button>
         <a-button
@@ -754,9 +754,9 @@ async function onPlanSaved() {
       </div>
     </div>
 
-    <!-- 从大纲创建（未创建的大纲） -->
+    <!-- 从大纲创建（仅 1对1 模式；1对多模式下章节由大纲页面"展开为多章"产生，不在此建空壳） -->
     <a-card
-      v-if="outlines && outlines.filter((o: any) => !createdChapterNos.has(o.chapter_number)).length"
+      v-if="outlineMode === 'one_to_one' && outlines && outlines.filter((o: any) => !createdChapterNos.has(o.chapter_number)).length"
       size="small"
       title="从大纲创建章节"
       style="margin-bottom: 12px"
@@ -779,7 +779,7 @@ async function onPlanSaved() {
     <!-- ===== 章节列表 ===== -->
     <template v-if="sortedChapters.length">
       <!-- one-to-many 按大纲分组显示（仅当有多个分组时） -->
-      <a-collapse v-if="outlineMode === 'one-to-many' && groupedChapters.length > 1" :default-active-key="pagedGroupedChapters.map((_: any, i: number) => String(i))" style="background: transparent">
+      <a-collapse v-if="outlineMode === 'one_to_many'" :default-active-key="pagedGroupedChapters.length > 0 ? ['0'] : []" style="background: transparent">
         <a-collapse-panel
           v-for="(group, gi) in pagedGroupedChapters"
           :key="String(gi)"
@@ -818,8 +818,8 @@ async function onPlanSaved() {
               <div class="ch-row-actions" @click.stop>
                 <a-button type="text" size="small" :disabled="!c.word_count" @click.stop="goReader(c)">📖 阅读</a-button>
                 <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
-                <a-button v-if="outlineMode === 'one-to-many' && c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
-                <a-button v-if="outlineMode === 'one-to-many'" type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
+                <a-button v-if="outlineMode === 'one_to_many' && c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
+                <a-button v-if="outlineMode === 'one_to_many'" type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
                   <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
                 <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
                 <a-popconfirm title="确认删除该章节？" @confirm="onDelete(c.id)">

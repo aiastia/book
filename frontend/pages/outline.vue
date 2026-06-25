@@ -103,8 +103,18 @@ const expanding = ref(false)
 const showExpand = ref(false)
 const expandTarget = ref<any>(null)
 const expandCount = ref(3)
+const expandStrategy = ref('balanced')  // 展开策略：balanced / climax / detail
+const expandMode = ref<'new' | 'replace' | 'append'>('new')  // 展开模式：首次/覆盖/追加
 const showPreview = ref(false)
 const previewData = ref<any>(null)
+// 批量展开
+const batchExpanding = ref(false)
+const showBatchExpand = ref(false)
+const batchCount = ref(3)
+// 展开/批量展开都可用时，是否有未展开的大纲（控制「批量展开」按钮显隐）
+const hasUnexpanded = computed(() => !!(outlines.value && outlines.value.some((o: any) => !o.has_chapters)))
+// 预览弹窗 collapse：默认展开所有章节面板（key 统一用字符串，匹配 ant-design-vue 要求）
+const previewActiveKeys = ref<string[]>([])
 
 // 额外字段的中文标签映射（AI 生成的英文字段名 → 中文展示名）
 const FIELD_LABELS: Record<string, string> = {
@@ -145,6 +155,32 @@ function fieldToText(v: any): string {
     return parts.join('\n')
   }
   return String(v)
+}
+// 展开预览：从 expansion_plan 提取富字段（爽点/钩子/情绪弧/场景锚点等），排除已单独展示的字段
+const PREVIEW_SKIP_KEYS = new Set(['plot_summary', 'summary', 'scenes', 'key_events', 'character_focus'])
+function getPlanExtraFields(plan: any | null): Array<{ key: string; label: string; value: string }> {
+  if (!plan || typeof plan !== 'object') return []
+  const out: Array<{ key: string; label: string; value: string }> = []
+  for (const [k, v] of Object.entries(plan)) {
+    if (PREVIEW_SKIP_KEYS.has(k)) continue
+    const text = fieldToText(v)
+    if (text) out.push({ key: k, label: fieldLabel(k), value: text })
+  }
+  return out
+}
+// 展开预览：key_events 数组 → 字符串（带优先级标记保留）
+function planKeyEvents(plan: any): string[] {
+  if (!plan || !Array.isArray(plan.key_events)) return []
+  return plan.key_events.map((e: any) => typeof e === 'string' ? e : fieldToText(e)).filter(Boolean)
+}
+function planFocus(plan: any): string {
+  if (!plan || !Array.isArray(plan.character_focus)) return ''
+  return plan.character_focus.join('、')
+}
+// 节奏标签颜色映射
+function rhythmColor(tag: string): string {
+  const m: Record<string, string> = { '起': 'blue', '承': 'orange', '小高潮': 'red', '高潮': 'volcano', '转': 'purple', '合': 'green' }
+  return m[tag] || 'blue'
 }
 
 // 解析 structure（含 scenes/characters/key_events 等额外字段）
@@ -199,12 +235,17 @@ async function onGenerate() {
     trackTask({ id: task_id, task_type: 'outline_new', title: `生成${genCount.value}章大纲` })
     showGen.value = false
     msg.success('大纲生成任务已提交，可在右下角查看进度')
-    // 轮询完成后刷新
-    setTimeout(() => refresh(), 5000)
   }
   catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { generating.value = false }
 }
+
+// 任务完成时自动刷新列表（比 setTimeout 轮询更准）
+// onTaskCompleted 用前缀匹配，覆盖 outline_new / outline_continue / outline_expand
+const { onTaskCompleted } = useBackgroundTasks()
+onTaskCompleted('outline_new', () => { refresh() })
+onTaskCompleted('outline_continue', () => { refresh() })
+onTaskCompleted('outline_expand', () => { refresh() })
 
 function openContinue() {
   // 检查是否已有大纲
@@ -255,7 +296,6 @@ async function onContinue() {
     trackTask({ id: task_id, task_type: 'outline_continue', title: `续写${continueForm.chapter_count}章大纲` })
     showContinue.value = false
     msg.success('大纲续写任务已提交，可在右下角查看进度')
-    setTimeout(() => refresh(), 5000)
   }
   catch (e: any) { msg.error('续写失败：' + formatError(e)) }
   finally { generating.value = false }
@@ -342,23 +382,94 @@ async function onDelete(id: number) {
 }
 
 function openExpand(o: any) {
+  // 已展开 → 直接预览
   if (o.has_chapters) { viewExpansion(o); return }
+
+  // 顺序展开校验（同 mumu：放置未展开的卷在前，必须先展开它）
+  if (outlines.value && outlines.value.length > 1) {
+    const sorted = [...outlines.value].sort((a: any, b: any) => a.chapter_number - b.chapter_number)
+    const idx = sorted.findIndex((x: any) => x.id === o.id)
+    if (idx > 0) {
+      const prevUnExpanded = sorted.slice(0, idx).filter((x: any) => !x.has_chapters)
+      if (prevUnExpanded.length) {
+        const prev = prevUnExpanded[0]
+        msg.warning(`请先展开第${prev.chapter_number}卷《${prev.title}》`)
+        return
+      }
+    }
+  }
+
   expandTarget.value = o
   expandCount.value = 3
+  expandMode.value = 'new'
   showExpand.value = true
 }
 async function doExpand() {
   if (!expandTarget.value) return
+  const mode = expandMode.value
   expanding.value = true
   try {
-    const r = await api.expandOutline(expandTarget.value.id, { target_chapter_count: expandCount.value })
-    await refresh(); showExpand.value = false
-    msg.success(`已展开为 ${r.count} 章`)
+    const { task_id } = await api.expandOutlineAsync(expandTarget.value.id, {
+      target_chapter_count: expandCount.value,
+      strategy: expandStrategy.value,
+      mode,
+    })
+    const { trackTask } = useBackgroundTasks()
+    const titleMap = { new: '展开', replace: '重新展开', append: '继续展开' }
+    trackTask({ id: task_id, task_type: 'outline_expand', title: `${titleMap[mode]}第${expandTarget.value.chapter_number}卷` })
+    showExpand.value = false
+    msg.success(`${titleMap[mode]}任务已提交，可在右下角查看进度`)
   } catch (e: any) { msg.error('展开失败：' + formatError(e)) }
   finally { expanding.value = false }
 }
+// 预览弹窗里点「重新展开（覆盖）」：先确认，再进入覆盖模式展开弹窗
+async function reExpandFromPreview() {
+  const o = previewData.value?.outline
+  if (!o) return
+  const oldCount = previewData.value?.chapter_count || 0
+  if (!await msg.confirm(
+    `确认删除当前 ${oldCount} 章并重新展开？\n旧章节内容将永久删除，新规划从原章号开始。`,
+    '重新展开确认',
+  )) return
+  expandTarget.value = o
+  expandCount.value = 3
+  expandMode.value = 'replace'
+  showPreview.value = false
+  showExpand.value = true
+}
+// 预览弹窗里点「继续展开（追加）」：保留旧章节，在后面追加 N 章
+function appendFromPreview() {
+  const o = previewData.value?.outline
+  if (!o) return
+  expandTarget.value = o
+  expandCount.value = 2
+  expandMode.value = 'append'
+  showPreview.value = false
+  showExpand.value = true
+}
+function openBatchExpand() {
+  batchCount.value = 3
+  showBatchExpand.value = true
+}
+async function doBatchExpand() {
+  batchExpanding.value = true
+  try {
+    const { task_id, pending_count } = await api.batchExpandOutlinesAsync({ target_chapter_count: batchCount.value })
+    const { trackTask } = useBackgroundTasks()
+    trackTask({ id: task_id, task_type: 'outline_expand', title: `批量展开 ${pending_count} 卷大纲` })
+    showBatchExpand.value = false
+    msg.success(`批量展开任务已提交（${pending_count} 卷），可在右下角查看进度`)
+  } catch (e: any) { msg.error('批量展开失败：' + formatError(e)) }
+  finally { batchExpanding.value = false }
+}
 async function viewExpansion(o: any) {
-  try { previewData.value = { outline: o, ...await api.getOutlineChapters(o.id) }; showPreview.value = true }
+  try {
+    const data = await api.getOutlineChapters(o.id)
+    previewData.value = { outline: o, ...data }
+    // 默认展开所有章节面板（key 用字符串匹配 ant-design-vue）
+    previewActiveKeys.value = (data.chapters || []).map((c: any) => String(c.id))
+    showPreview.value = true
+  }
   catch (e: any) { msg.error('加载失败：' + formatError(e)) }
 }
 async function deleteExpansion() {
@@ -373,6 +484,9 @@ async function deleteExpansion() {
   <div class="outline-page">
     <div class="page-actions">
       <a-tag :color="isOneToMany ? 'green' : 'blue'" style="font-size:13px;padding:2px 12px;">{{ modeLabel }}</a-tag>
+      <a-button v-if="isOneToMany && hasUnexpanded" @click="openBatchExpand" :loading="batchExpanding">
+        批量展开
+      </a-button>
       <a-button type="primary" :loading="generating" @click="openContinue">
         {{ outlines && outlines.length ? '续写大纲' : 'AI 生成大纲' }}
       </a-button>
@@ -389,7 +503,7 @@ async function deleteExpansion() {
             <a-tag v-else color="default" size="small">未展开</a-tag>
           </template>
           <div class="item-actions">
-            <a-button v-if="isOneToMany" type="link" size="small" @click="openExpand(o)">{{ o.has_chapters ? '查看' : '展开' }}</a-button>
+            <a-button v-if="isOneToMany" type="link" size="small" @click="openExpand(o)">展开</a-button>
             <a-button type="link" size="small" @click="toggleExpand(o.id)">{{ expandedItems.has(o.id) ? '收起详情' : '展开详情' }}</a-button>
           </div>
         </div>
@@ -612,28 +726,94 @@ async function deleteExpansion() {
     </a-modal>
 
     <!-- 展开弹窗 -->
-    <a-modal v-model:open="showExpand" title="展开为多章" width="440px">
-      <p>将第{{ expandTarget?.chapter_number }}卷「{{ expandTarget?.title }}」展开：</p>
-      <a-input-number v-model:value="expandCount" :min="2" :max="10" addon-before="章节数" style="width:100%" />
-      <template #footer><a-button @click="showExpand = false">取消</a-button><a-button type="primary" :loading="expanding" @click="doExpand">{{ expanding ? '规划中…' : '展开' }}</a-button></template>
+    <a-modal v-model:open="showExpand" :title="expandMode === 'replace' ? '重新展开（覆盖）' : expandMode === 'append' ? '继续展开（追加）' : '展开为多章'" width="440px">
+      <a-alert v-if="expandMode === 'replace'" type="warning" show-icon style="margin-bottom:12px;" message="将删除该卷当前所有章节，重新生成规划" />
+      <a-alert v-else-if="expandMode === 'append'" type="info" show-icon style="margin-bottom:12px;" message="保留已有章节，在其后追加新章节（sub_index 续接）" />
+      <p>将第{{ expandTarget?.chapter_number }}卷「{{ expandTarget?.title }}」{{ expandMode === 'replace' ? '覆盖重展为' : expandMode === 'append' ? '继续追加' : '展开为' }} {{ expandCount }} 章：</p>
+      <a-input-number v-model:value="expandCount" :min="2" :max="10" addon-before="章节数" style="width:100%;margin-bottom:12px" />
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:12px;color:#8C8C8C">展开策略：</span>
+        <a-radio-group v-model:value="expandStrategy" size="small">
+          <a-radio-button value="balanced">均衡</a-radio-button>
+          <a-radio-button value="climax">高潮重点</a-radio-button>
+          <a-radio-button value="detail">细节丰富</a-radio-button>
+        </a-radio-group>
+      </div>
+      <template #footer>
+        <a-button @click="showExpand = false">取消</a-button>
+        <a-button type="primary" :danger="expandMode === 'replace'" :loading="expanding" @click="doExpand">
+          {{ expanding ? '规划中…' : (expandMode === 'replace' ? '确认覆盖重展' : expandMode === 'append' ? '继续追加' : '展开') }}
+        </a-button>
+      </template>
     </a-modal>
 
-    <!-- 已展开预览 -->
-    <a-modal v-model:open="showPreview" :title="`展开预览 — 第${previewData?.outline?.chapter_number}卷`" width="600px" :footer="null">
+    <!-- 批量展开弹窗 -->
+    <a-modal v-model:open="showBatchExpand" title="批量展开所有大纲" width="440px">
+      <p>将所有未展开的大纲卷一次性展开为多章（后台按顺序执行）：</p>
+      <a-input-number v-model:value="batchCount" :min="2" :max="10" addon-before="每卷章节数" style="width:100%" />
+      <p style="font-size:12px;color:#8C8C8C;margin-top:8px;">建议每卷 2-5 章。任务可在右下角浮窗查看进度。</p>
+      <template #footer>
+        <a-button @click="showBatchExpand = false">取消</a-button>
+        <a-button type="primary" :loading="batchExpanding" @click="doBatchExpand">{{ batchExpanding ? '提交中…' : '开始批量展开' }}</a-button>
+      </template>
+    </a-modal>
+
+    <!-- 已展开预览（Tab 浏览器模式 + 彩色标签） -->
+    <a-modal v-model:open="showPreview" :title="`展开预览 — 第${previewData?.outline?.chapter_number}卷`" width="780px" :footer="null">
       <div v-if="previewData">
         <div style="margin-bottom:12px;">
           <a-tag color="success">已展开 {{ previewData.chapter_count }} 章</a-tag>
+          <a-button size="small" style="margin-left:8px" @click="appendFromPreview">➕ 继续展开</a-button>
+          <a-button size="small" style="margin-left:8px" @click="reExpandFromPreview">🔄 重新展开</a-button>
           <a-button danger size="small" style="margin-left:8px" @click="deleteExpansion">删除展开</a-button>
         </div>
-        <div v-for="ch in (previewData.chapters || [])" :key="ch.id" class="preview-chap">
-          <div class="preview-chap-head">
-            <span class="preview-chap-no">第{{ ch.chapter_number }}章</span>
-            <span class="preview-chap-title">{{ ch.title }}</span>
-          </div>
-          <div v-if="ch.expansion_plan" class="preview-plan">
-            <div v-if="ch.expansion_plan.plot_summary">{{ ch.expansion_plan.plot_summary }}</div>
-          </div>
-        </div>
+        <a-tabs v-model:active-key="previewActiveKeys[0] || String(previewData.chapters?.[0]?.id)" type="card" size="small">
+          <a-tab-pane v-for="ch in (previewData.chapters || [])" :key="String(ch.id)">
+            <template #tab>
+              <span style="font-weight:500">第{{ ch.sub_index }}节</span>
+              <span style="margin-left:4px;font-size:12px;color:#595959">{{ ch.title }}</span>
+              <a-tag v-if="ch.expansion_plan?.rhythm_tag" :color="rhythmColor(ch.expansion_plan.rhythm_tag)" size="small" style="margin-left:6px;">{{ ch.expansion_plan.rhythm_tag }}</a-tag>
+            </template>
+            <div v-if="ch.expansion_plan" class="preview-plan" style="max-height:500px;overflow-y:auto;padding:8px 0">
+              <!-- 基础标签行 -->
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+                <a-tag v-if="ch.expansion_plan.emotional_tone" color="purple">{{ ch.expansion_plan.emotional_tone }}</a-tag>
+                <a-tag v-if="ch.expansion_plan.conflict_type" color="orange">{{ ch.expansion_plan.conflict_type }}</a-tag>
+                <a-tag v-if="ch.expansion_plan.estimated_words" color="green">约{{ ch.expansion_plan.estimated_words }}字</a-tag>
+              </div>
+              <!-- 剧情摘要 -->
+              <div v-if="ch.expansion_plan.plot_summary" class="plan-field">
+                <div class="plan-field-label">📝 剧情摘要</div>
+                <div class="plan-field-text">{{ ch.expansion_plan.plot_summary }}</div>
+              </div>
+              <!-- 关键事件 -->
+              <div v-if="planKeyEvents(ch.expansion_plan).length" class="plan-field">
+                <div class="plan-field-label">⚡ 关键事件</div>
+                <div class="plan-field-text">
+                  <div v-for="(ev, i) in planKeyEvents(ch.expansion_plan)" :key="i">• {{ ev }}</div>
+                </div>
+              </div>
+              <!-- 聚焦角色 -->
+              <div v-if="planFocus(ch.expansion_plan)" class="plan-field">
+                <div class="plan-field-label">👥 聚焦角色</div>
+                <div class="tag-row">
+                  <a-tag v-for="(name, i) in (ch.expansion_plan.character_focus || [])" :key="i" color="purple">{{ name }}</a-tag>
+                </div>
+              </div>
+              <!-- 叙事目标 -->
+              <div v-if="ch.expansion_plan.narrative_goal" class="plan-field">
+                <div class="plan-field-label">🎯 叙事目标</div>
+                <div class="plan-field-text">{{ ch.expansion_plan.narrative_goal }}</div>
+              </div>
+              <!-- 余下富字段 -->
+              <div v-for="f in getPlanExtraFields(ch.expansion_plan)" :key="f.key" class="plan-field">
+                <div class="plan-field-label">{{ f.label }}</div>
+                <div class="plan-field-text" style="white-space:pre-wrap;">{{ f.value }}</div>
+              </div>
+            </div>
+            <div v-else class="plan-empty">暂无规划数据</div>
+          </a-tab-pane>
+        </a-tabs>
       </div>
     </a-modal>
 
@@ -702,4 +882,12 @@ async function deleteExpansion() {
 .preview-chap-no { font-size: 12px; color: #4D8088; font-weight: 600; }
 .preview-chap-title { font-size: 14px; }
 .preview-plan { font-size: 13px; color: #595959; }
+.plan-field { margin-bottom: 10px; }
+.plan-field-label { font-size: 12px; font-weight: 600; color: #8C8C8C; margin-bottom: 4px; }
+.plan-field-text { font-size: 13px; color: #595959; line-height: 1.7; }
+.plan-field-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; }
+.plan-field-inline { font-size: 13px; color: #595959; }
+.plan-field-inline .plan-field-label { display: inline; margin-bottom: 0; margin-right: 2px; }
+.plan-empty { font-size: 12px; color: #BFBFBF; padding: 8px 0; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
 </style>

@@ -1,7 +1,5 @@
 <script setup lang="ts">
-// 章节规划编辑器（对标 MuMuAINovel ExpansionPlanEditor）
-// 编辑 expansion_plan：情节概要 / 关键事件 / 涉及角色 / 情感基调 / 冲突类型 / 叙事目标 / 预估字数
-// 后端 expansion_plan 字段已存在（Chapter.expansion_plan JSON），保存走 updateChapter。
+// 章节规划编辑器 — 编辑基础字段，保存时合并回原 plan 保留 AI 生成的富字段
 import { apiGet } from '~/composables/useApi'
 import { useProject } from '~/composables/useProject'
 import { useProjectApi } from '~/composables/useProjectApi'
@@ -26,12 +24,12 @@ const msg = useMessage()
 
 // 表单字段
 const summary = ref('')
-const emotionalTone = ref('紧张激烈')
-const conflictType = ref('人物冲突')
+const emotionalTone = ref('')
+const conflictType = ref('')
 const narrativeGoal = ref('')
 const estimatedWords = ref(4000)
 
-// 关键事件（标签）
+// 关键事件
 const keyEvents = ref<string[]>([])
 const keyEventInput = ref('')
 
@@ -42,9 +40,45 @@ const loadingCharacters = ref(false)
 
 const saving = ref(false)
 
-// 冲突类型候选项
+// 冲突类型/情感基调候选项
 const conflictTypeOptions = ['人物冲突', '环境冲突', '内心冲突', '理念冲突', '势力冲突', '命运冲突']
 const emotionalToneOptions = ['紧张激烈', '温馨治愈', '悲壮压抑', '轻松幽默', '悬疑烧脑', '热血激昂', '哀婉凄美']
+
+// ===== 富字段参考（只读，保存时自动保留）=====
+const FIELD_LABELS: Record<string, string> = {
+  plot_summary: '剧情摘要', summary: '剧情摘要',
+  key_events: '关键事件', character_focus: '涉及角色',
+  emotional_tone: '情感基调', conflict_type: '冲突类型',
+  narrative_goal: '叙事目标', estimated_words: '预估字数',
+  emotional_arc: '情绪弧线', hook: '结尾钩子',
+  hook_type: '钩子类型', shuang_design: '爽点设计',
+  reader_hook: '读者追读理由', rhythm_tag: '节奏标记',
+  scene_anchor: '场景锚点', character_intents: '角色微意图',
+  ending_type: '结尾类型', chapter_breath: '章节节奏',
+  obstacle_type: '障碍类型', scenes: '场景设定',
+}
+
+const EDIT_KEYS = new Set([
+  'plot_summary', 'summary', 'key_events', 'character_focus',
+  'emotional_tone', 'conflict_type', 'narrative_goal', 'estimated_words',
+])
+
+type FieldEntry = { key: string; label: string; value: string }
+const extraFields = computed<FieldEntry[]>(() => {
+  const plan = props.planData
+  if (!plan || typeof plan !== 'object') return []
+  const entries: FieldEntry[] = []
+  for (const [k, v] of Object.entries(plan)) {
+    if (EDIT_KEYS.has(k)) continue
+    if (v == null || v === '' || v === [] || (typeof v === 'object' && Object.keys(v).length === 0)) continue
+    const label = FIELD_LABELS[k] || k
+    const text = Array.isArray(v)
+      ? v.map((x: any) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join('；')
+      : typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)
+    if (text) entries.push({ key: k, label, value: text })
+  }
+  return entries
+})
 
 // 加载项目角色
 async function loadCharacters() {
@@ -52,8 +86,7 @@ async function loadCharacters() {
   try {
     const list = await apiGet<any[]>(`/api/projects/${currentProjectId.value}/characters`)
     availableCharacters.value = (list || []).map((c: any) => ({
-      name: c.name,
-      role: c.role || '',
+      name: c.name, role: c.role || '',
       label: c.role ? `${c.name}（${c.role}）` : c.name,
     }))
   } catch (e: any) {
@@ -69,11 +102,12 @@ watch(
   ([isOpen]) => {
     if (!isOpen) return
     const plan = props.planData || {}
-    summary.value = plan.summary ?? props.chapterSummary ?? ''
+    // 摘要：优先 plot_summary（AI 格式），回退 summary（兼容旧数据）
+    summary.value = plan.plot_summary || plan.summary || props.chapterSummary || ''
     keyEvents.value = Array.isArray(plan.key_events) ? [...plan.key_events] : []
     characterFocus.value = Array.isArray(plan.character_focus) ? [...plan.character_focus] : []
-    emotionalTone.value = plan.emotional_tone || '紧张激烈'
-    conflictType.value = plan.conflict_type || '人物冲突'
+    emotionalTone.value = plan.emotional_tone || ''
+    conflictType.value = plan.conflict_type || ''
     narrativeGoal.value = plan.narrative_goal || ''
     estimatedWords.value = plan.estimated_words || 4000
     keyEventInput.value = ''
@@ -114,8 +148,11 @@ async function onSave() {
   }
   saving.value = true
   try {
-    const plan = {
-      summary: summary.value,
+    // 合并回原 plan（保留 AI 生成的富字段，不丢失）
+    const originalPlan = props.planData && typeof props.planData === 'object' ? { ...props.planData } : {}
+    const merged = {
+      ...originalPlan,                  // 先保留全部原有字段
+      plot_summary: summary.value,      // 覆盖编辑过的字段
       key_events: keyEvents.value,
       character_focus: characterFocus.value,
       emotional_tone: emotionalTone.value,
@@ -123,9 +160,9 @@ async function onSave() {
       narrative_goal: narrativeGoal.value,
       estimated_words: estimatedWords.value,
     }
-    await api.updateChapter(props.chapterId, { expansion_plan: plan })
+    await api.updateChapter(props.chapterId, { expansion_plan: merged })
     msg.success('规划保存成功')
-    emit('saved', plan)
+    emit('saved', merged)
     close()
   } catch (e: any) {
     msg.error('保存失败：' + formatError(e))
@@ -139,7 +176,7 @@ async function onSave() {
   <a-modal
     :open="open"
     :title="`📋 编辑章节规划 · 第${chapterNumber}章`"
-    :width="680"
+    :width="700"
     centered
     :destroy-on-close="true"
     :ok-text="saving ? '保存中…' : '保存'"
@@ -152,25 +189,13 @@ async function onSave() {
     <a-form layout="vertical" class="plan-form">
       <!-- 情节概要 -->
       <a-form-item label="情节概要" tooltip="简要描述本章的主要情节和故事走向">
-        <a-textarea
-          v-model:value="summary"
-          :rows="4"
-          placeholder="例如：主角得知身世真相，与反派在悬崖展开最终对决……"
-        />
+        <a-textarea v-model:value="summary" :rows="4" placeholder="例如：主角得知身世真相，与反派在悬崖展开最终对决……" />
       </a-form-item>
 
       <!-- 关键事件 -->
       <a-form-item label="关键事件">
         <div class="tag-row">
-          <a-tag
-            v-for="(ev, i) in keyEvents"
-            :key="i"
-            closable
-            color="blue"
-            @close="removeKeyEvent(i)"
-          >
-            {{ ev }}
-          </a-tag>
+          <a-tag v-for="(ev, i) in keyEvents" :key="i" closable color="blue" @close="removeKeyEvent(i)">{{ ev }}</a-tag>
         </div>
         <a-input-search
           v-model:value="keyEventInput"
@@ -197,12 +222,12 @@ async function onSave() {
       <a-row :gutter="16">
         <a-col :span="12">
           <a-form-item label="情感基调">
-            <a-select v-model:value="emotionalTone" :options="emotionalToneOptions.map(o => ({ value: o, label: o }))" />
+            <a-select v-model:value="emotionalTone" :options="emotionalToneOptions.map(o => ({ value: o, label: o }))" allow-clear placeholder="选择或清空" />
           </a-form-item>
         </a-col>
         <a-col :span="12">
           <a-form-item label="冲突类型">
-            <a-select v-model:value="conflictType" :options="conflictTypeOptions.map(o => ({ value: o, label: o }))" />
+            <a-select v-model:value="conflictType" :options="conflictTypeOptions.map(o => ({ value: o, label: o }))" allow-clear placeholder="选择或清空" />
           </a-form-item>
         </a-col>
       </a-row>
@@ -217,18 +242,31 @@ async function onSave() {
         <a-input-number v-model:value="estimatedWords" :min="500" :max="10000" :step="100" style="width: 160px" />
         <span class="word-hint">字</span>
       </a-form-item>
+
+      <!-- AI 生成的其他富字段（只读参考，保存时不丢失） -->
+      <div v-if="extraFields.length" class="extra-ref">
+        <div class="extra-ref-title">📌 AI 生成的其他设定（保存时自动保留）</div>
+        <div class="extra-grid">
+          <div v-for="f in extraFields" :key="f.key" class="extra-item">
+            <span class="extra-label">{{ f.label }}</span>
+            <span class="extra-value">{{ f.value }}</span>
+          </div>
+        </div>
+      </div>
     </a-form>
   </a-modal>
 </template>
 
 <style scoped>
-.plan-subtitle {
-  font-size: 13px;
-  color: #8C8C8C;
-  margin-bottom: 12px;
-}
+.plan-subtitle { font-size: 13px; color: #8C8C8C; margin-bottom: 12px; }
 .plan-form { max-height: 60vh; overflow-y: auto; padding-right: 4px; }
 .tag-row { margin-bottom: 8px; min-height: 24px; }
 .tag-row :deep(.ant-tag) { margin-bottom: 4px; }
 .word-hint { margin-left: 8px; color: #8C8C8C; font-size: 13px; }
+.extra-ref { background: #FFFBE6; border: 1px dashed #FFE58F; border-radius: 8px; padding: 12px 14px; margin-top: 8px; }
+.extra-ref-title { font-size: 12px; font-weight: 600; color: #AD6800; margin-bottom: 10px; }
+.extra-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.extra-item { display: flex; flex-direction: column; gap: 2px; }
+.extra-label { font-size: 12px; font-weight: 600; color: #AD6800; }
+.extra-value { font-size: 13px; color: #595959; line-height: 1.7; word-break: break-word; white-space: pre-wrap; }
 </style>

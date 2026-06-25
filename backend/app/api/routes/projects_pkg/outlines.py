@@ -759,11 +759,20 @@ async def _expand_outline_core(
     target_chapter_count: int,
     user_id: int,
     skip_existing_check: bool = False,
+    replace_existing: bool = False,
+    append_existing: bool = False,
+    strategy: str = "balanced",
 ) -> dict:
     """大纲展开为多章的核心逻辑（同步/异步/批量复用）。
 
     AI 将一条大纲拆成 N 个章节计划，创建 N 个 Chapter（关联 outline_id，
     含 sub_index + expansion_plan）。
+
+    三种模式：
+    - 默认（new）：首次展开，已展开则报错
+    - replace_existing=True：覆盖模式，先删旧章节，新章节从旧起始号开始
+    - append_existing=True：追加模式，保留旧章节，新章节接在后面（sub_index 续接），
+      并把已有规划喂给 AI 做差异化（避免重复）
 
     Args:
         db: 数据库会话
@@ -772,9 +781,12 @@ async def _expand_outline_core(
         target_chapter_count: 目标章节数
         user_id: 用户ID（用于构建 AI 客户端）
         skip_existing_check: 跳过"已展开"检查（批量模式下由调用方统一校验）
+        replace_existing: True 时先删除该大纲已展开的旧章节再重新展开（覆盖模式）
+        append_existing: True 时保留旧章节，在后面追加新章节（追加模式）
+        strategy: 展开策略 balanced/climax/detail（默认 balanced）
 
     Returns:
-        {"expanded": [...], "count": int, "start_chapter": int}
+        {"expanded": [...], "count": int, "start_chapter": int, "replaced": int, "appended": bool}
 
     Raises:
         HTTPException: 大纲不存在 / 已展开 / AI 返回格式错误
@@ -783,34 +795,98 @@ async def _expand_outline_core(
     outline = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
     if not outline:
         raise HTTPException(404, "大纲不存在")
-    if not skip_existing_check:
+
+    replaced_count = 0
+    old_start_chapter = None
+    append_base_sub_index = 0  # 追加模式：新章节 sub_index 从此值+1 开始
+    if replace_existing:
+        # 覆盖模式：先删除该大纲已展开的旧章节，新章节从旧起始号开始（保证章号连续，不留空洞）
+        old_chapters = (await db.execute(
+            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+            .order_by(Chapter.chapter_number)
+        )).scalars().all()
+        if old_chapters:
+            old_start_chapter = old_chapters[0].chapter_number  # 删除前记下起始号
+            deleted_words = sum(c.word_count or 0 for c in old_chapters)
+            for c in old_chapters:
+                await db.delete(c)
+            await db.flush()
+            replaced_count = len(old_chapters)
+            # 回收项目字数
+            if deleted_words > 0:
+                proj.current_words = max(0, (proj.current_words or 0) - deleted_words)
+            logger.info(f"[expand] 覆盖模式：删除大纲 {outline_id} 的旧 {replaced_count} 章（{deleted_words}字），新章节将从第{old_start_chapter}章开始")
+    elif append_existing:
+        # 追加模式：读取已有章节，记下最大 sub_index 供新章节续接，并拼成上下文喂给 AI
+        existing = (await db.execute(
+            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+            .order_by(Chapter.sub_index)
+        )).scalars().all()
+        if existing:
+            append_base_sub_index = max(c.sub_index or 0 for c in existing)
+            logger.info(f"[expand] 追加模式：大纲 {outline_id} 已有 {len(existing)} 章（sub_index 最大 {append_base_sub_index}），将追加 {target_chapter_count} 章")
+    elif not skip_existing_check:
         existing_chapters = (await db.execute(
             select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
         )).scalars().all()
         if existing_chapters:
             raise HTTPException(400, f"此大纲已展开为 {len(existing_chapters)} 章，请先删除再重新展开")
 
+    # 追加模式：把已有规划摘要拼进 user_prompt，让 AI 做差异化续写
+    existing_context = ""
+    if append_existing and append_base_sub_index > 0:
+        existing_list = (await db.execute(
+            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+            .order_by(Chapter.sub_index)
+        )).scalars().all()
+        parts = []
+        for c in existing_list:
+            plan = c.expansion_plan if isinstance(c.expansion_plan, dict) else {}
+            summary = (plan.get("plot_summary") if isinstance(plan, dict) else "") or c.summary or ""
+            events = plan.get("key_events") if isinstance(plan, dict) else []
+            events_str = "、".join(events[:3]) if events else ""
+            line = f"  第{c.sub_index}节《{c.title}》：{summary[:120]}"
+            if events_str:
+                line += f"（关键事件：{events_str}）"
+            parts.append(line)
+        existing_context = (
+            f"\n\n【🔴 已有章节（必须延续，不得重复）】\n该大纲此前已展开 {len(existing_list)} 节：\n"
+            + "\n".join(parts)
+            + f"\n\n请在此基础上【继续追加】{target_chapter_count} 节，sub_index 从 {append_base_sub_index + 1} 开始。"
+            "新章节必须承接已有内容的剧情走向，不得与上述关键事件重复。"
+        )
+
     ctx = await _project_context(db, project_id, proj, use_tools=True)
     engine, ai_client = await make_engine_and_client(db, user_id)
+    strategy_instructions = {
+        "balanced": "均衡分配：将大纲内容均匀拆分到各章节，每章有独立但连贯的剧情推进",
+        "climax": "高潮重点：将关键冲突和高潮集中到中间的章节，前后作为铺垫和收尾",
+        "detail": "细节丰富：每章深度展开场景细节、人物心理和对话，节奏较慢但描写充分",
+    }
     result = await engine.execute_skill("outline_expand_single", ai_client, {
         "outline_order_index": str(outline.chapter_number), "outline_title": outline.title or "无标题",
         "outline_summary": outline.summary or "", "target_chapter_count": str(target_chapter_count),
         "project_title": proj.title, "project_genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
         "organizations_info": ctx["organizations_info"],
-        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_tone(情感基调)、narrative_goal(叙事目标)、conflict_type(冲突类型)。返回JSON数组。",
+        "strategy_instruction": strategy_instructions.get(strategy, strategy_instructions["balanced"]),
+        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_tone(情感基调)、narrative_goal(叙事目标)、conflict_type(冲突类型)。返回JSON数组。{existing_context}",
     })
     check_skill_error(result)
     expanded_data = result.get("json") or []
     if not isinstance(expanded_data, list):
         raise HTTPException(500, "AI 返回的展开格式不正确")
 
-    # 计算起始章号：取当前已存在的最大 chapter_number + 1
-    # 这样即使前置大纲未展开，章号也不会冲突
-    max_ch = await db.scalar(select(func.max(Chapter.chapter_number)).where(
-        Chapter.project_id == project_id,
-    ))
-    start_chapter = (max_ch or 0) + 1
+    # 计算起始章号
+    if replace_existing and old_start_chapter is not None:
+        # 覆盖模式：新章节从旧章节的起始号开始（保证章号连续，不留空洞）
+        start_chapter = old_start_chapter
+    else:
+        # 新展开：取当前已存在的最大 chapter_number + 1，前置大纲未展开也不会冲突
+        max_ch = await db.scalar(select(func.max(Chapter.chapter_number)).where(
+            Chapter.project_id == project_id,
+        ))
+        start_chapter = (max_ch or 0) + 1
 
     # 创建 N 个 Chapter
     created = []
@@ -831,7 +907,7 @@ async def _expand_outline_core(
             project_id=project_id,
             outline_id=outline_id,
             chapter_number=start_chapter + idx,
-            sub_index=idx + 1,
+            sub_index=(append_base_sub_index + idx + 1) if append_existing else (idx + 1),
             title=plan.get("title", f"第{start_chapter + idx}章"),
             summary=plan_data["plot_summary"][:300] if plan_data["plot_summary"] else "",
             status="draft",
@@ -847,7 +923,7 @@ async def _expand_outline_core(
             "key_events": plan_data["key_events"],
         })
     await db.commit()
-    return {"expanded": created, "count": len(created), "start_chapter": start_chapter}
+    return {"expanded": created, "count": len(created), "start_chapter": start_chapter, "replaced": replaced_count, "appended": append_existing}
 
 
 @router.post("/{project_id}/outlines/{outline_id}/expand")
@@ -864,37 +940,56 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
 async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """大纲展开为多章（异步队列版）：立即返回 task_id，后台执行。
 
-    完成后通过 WebSocket 推送，前端轮询/浮窗查看进度。task_type = outline_expand。
+    三种模式（req.mode）：
+    - new：首次展开，已展开则报错
+    - replace：覆盖旧章节重新规划
+    - append：在已有章节后追加（旧章节保留）
+
+    完成后通过 WebSocket 推送，前端浮窗查看进度。task_type = outline_expand。
     """
     proj = await get_user_project(db, project_id, user)
-    # 提前校验大纲存在 + 未展开，避免任务跑半天才发现错误
     outline = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
     if not outline:
         raise HTTPException(404, "大纲不存在")
-    existing = (await db.execute(
-        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-    )).scalars().all()
-    if existing:
-        raise HTTPException(400, f"此大纲已展开为 {len(existing)} 章，请先删除再重新展开")
+    mode = (req.mode or "new").lower()
+    if mode not in ("new", "replace", "append"):
+        raise HTTPException(400, "mode 只能是 new / replace / append")
+    # new 模式才校验「已展开」；replace/append 允许已存在章节
+    if mode == "new":
+        existing = (await db.execute(
+            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+        )).scalars().all()
+        if existing:
+            raise HTTPException(400, f"此大纲已展开为 {len(existing)} 章，请先删除再重新展开")
 
     from app.services.async_ai_service import submit_async_task
 
     async def _run_expand(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
         tracker = bgs.TaskProgressTracker(task_id)
-        await tracker.update(stage="preparing", message="准备展开大纲...")
+        m = payload.get("mode", "new")
+        tag = {"replace": "（覆盖旧章节）", "append": "（追加新章节）"}.get(m, "")
+        await tracker.update(stage="preparing", message=f"准备展开大纲...{tag}")
         async with async_session() as task_db:
             await tracker.update(stage="generating", message=f"AI 正在展开为 {payload['target_chapter_count']} 章...")
             res = await _expand_outline_core(
                 task_db, payload["project_id"], payload["outline_id"],
                 payload["target_chapter_count"], payload["user_id"],
                 skip_existing_check=True,  # 提前校验过了
+                replace_existing=(m == "replace"),
+                append_existing=(m == "append"),
+                strategy=payload.get("strategy", "balanced"),
             )
             await tracker.update(stage="saving", message="保存展开章节...")
-        await tracker.complete(
-            message=f"已展开为 {res['count']} 章（起始第{res['start_chapter']}章）",
-            result=res,
-        )
+        replaced = res.get("replaced", 0)
+        appended = res.get("appended", False)
+        if replaced:
+            done_msg = f"已覆盖旧 {replaced} 章并重新展开为 {res['count']} 章（起始第{res['start_chapter']}章）"
+        elif appended:
+            done_msg = f"已追加 {res['count']} 章到第{res['start_chapter']}章"
+        else:
+            done_msg = f"已展开为 {res['count']} 章（起始第{res['start_chapter']}章）"
+        await tracker.complete(message=done_msg, result=res)
 
     task_id = await submit_async_task(
         user_id=user.id, project_id=project_id,
@@ -903,6 +998,8 @@ async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExp
         payload={
             "project_id": project_id, "outline_id": outline_id,
             "target_chapter_count": req.target_chapter_count, "user_id": user.id,
+            "mode": mode,
+            "strategy": req.strategy,
         },
         runner=_run_expand,
     )

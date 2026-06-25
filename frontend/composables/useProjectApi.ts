@@ -261,6 +261,12 @@ export function useProjectApi() {
   function expandOutline(outlineId: number, body: { target_chapter_count: number }) {
     return apiPost<{ expanded: any[]; count: number; start_chapter: number }>(`/api/projects/${pid()}/outlines/${outlineId}/expand`, body, { timeout: 120000 })
   }
+  function expandOutlineAsync(outlineId: number, body: { target_chapter_count: number; mode?: 'new' | 'replace' | 'append'; strategy?: string }) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/outlines/${outlineId}/expand-async`, body, { timeout: 10000 })
+  }
+  function batchExpandOutlinesAsync(body: { target_chapter_count: number }) {
+    return apiPost<{ task_id: number; pending_count: number }>(`/api/projects/${pid()}/outlines/batch-expand-async`, body, { timeout: 10000 })
+  }
   function getOutlineChapters(outlineId: number) {
     return apiGet<{ has_chapters: boolean; chapter_count: number; chapters: any[] }>(`/api/projects/${pid()}/outlines/${outlineId}/chapters`)
   }
@@ -720,6 +726,8 @@ export function useProjectApi() {
     deleteOutline,
     continueOutlinesAsync,
     expandOutline,
+    expandOutlineAsync,
+    batchExpandOutlinesAsync,
     getOutlineChapters,
     deleteOutlineChapters,
     // 章节
