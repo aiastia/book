@@ -516,6 +516,7 @@ class AIClient:
         temperature: float = None,
         max_tokens: int = 16384,
         max_rounds: int = 5,
+        post_tool_messages: list[dict] = None,
     ) -> dict:
         """带工具调用的聊天循环（对标 MuMu _handle_tool_calls）。
 
@@ -548,6 +549,7 @@ class AIClient:
             ),
         }
         current_messages = [budget_hint] + list(messages)
+        post_tool_inserted = False
 
         for round_num in range(max_rounds):
             is_last_round = (round_num == max_rounds - 1)
@@ -605,6 +607,11 @@ class AIClient:
                     "tool_call_id": tc.get("id", ""),
                     "content": tool_result,
                 })
+
+            # 首次工具调用完成后，注入延迟消息（如写作指导）
+            if not post_tool_inserted and post_tool_messages:
+                current_messages.extend(post_tool_messages)
+                post_tool_inserted = True
 
             # 最后一轮：模型无视 tool_choice=none 仍调了工具，再给它一次机会强制输出
             if is_last_round:

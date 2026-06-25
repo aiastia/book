@@ -316,52 +316,6 @@ async def run_batch_generation(task_id: int):
                                f"第{chapter_id}章生成失败: {last_err[:200]}", error=last_err[:2000])
             return
 
-        # 生成成功后自动分析（若启用）
-        if enable_analysis:
-            analysis_ok = False
-            analysis_err = ""
-            try:
-                async with async_session() as adb:
-                    c = (await adb.execute(
-                        select(Chapter).where(Chapter.id == chapter_id)
-                    )).scalar_one_or_none()
-                    if c and c.content and len(c.content.strip()) >= 50:
-                        await _update_progress(task_id, idx, chapter_id, c.chapter_number, 0,
-                                               f"分析第{c.chapter_number}章...",
-                                               phase="analyzing",
-                                               sub_progress={"generation": {"done": completed, "total": len(chapter_ids)},
-                                                            "analysis": {"done": completed, "total": len(chapter_ids)},
-                                                            "phase": "analyzing"})
-                        svc = ChapterService(adb, project_id, user_id)
-                        await svc._auto_analyze(c)
-                        analysis_ok = True
-                        logger.info(f"[batch] 第{c.chapter_number}章分析完成")
-            except Exception as e:
-                analysis_err = str(e)[:300]
-                logger.warning(f"[batch] 第{chapter_id}章分析失败: {analysis_err}")
-
-            if not analysis_ok:
-                async with async_session() as fdb:
-                    ch = (await fdb.execute(select(Chapter).where(Chapter.id == chapter_id))).scalar_one_or_none()
-                    failed.append({
-                        "chapter_id": chapter_id,
-                        "chapter_number": ch.chapter_number if ch else None,
-                        "error": f"分析失败: {analysis_err}",
-                    })
-                    await fdb.execute(
-                        update(BatchGenerationTask).where(BatchGenerationTask.id == task_id).values(
-                            failed_chapters=failed,
-                            completed_chapters=completed,
-                            updated_at=datetime.utcnow(),
-                        )
-                    )
-                    await fdb.commit()
-                ch_num = ch.chapter_number if ch else "?"
-                await _mark_status(task_id, "failed",
-                                   f"第{ch_num}章分析失败: {analysis_err[:200]}",
-                                   error=f"分析失败: {analysis_err[:2000]}")
-                return
-
         # 更新完成数
         async with async_session() as pdb:
             progress = int((completed / len(chapter_ids)) * 100) if chapter_ids else 100

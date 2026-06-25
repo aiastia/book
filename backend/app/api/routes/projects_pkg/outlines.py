@@ -216,29 +216,44 @@ def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_c
     return "\n\n".join(parts) if parts else "暂无伏笔"
 
 
-async def _project_context(db: AsyncSession, project_id: int, project: Project) -> dict:
+async def _project_context(db: AsyncSession, project_id: int, project: Project, use_tools: bool = False) -> dict:
     """收集项目的世界观/角色/组织上下文信息（生成大纲时复用）。
 
     分层策略：近的全量、远的精简。
     - 主角/反派 → 完整信息
     - 最近章节涉及的配角 → 中等信息
     - 其他角色 → 仅名字+定位
+
+    如果 use_tools=True（AI 有工具调用能力），则精简上下文：
+    只发核心世界观 + 角色名单，不传详细设定。AI 首次调用时通过
+    list_available_entities + query_* 工具按需获取信息，大幅节省首轮 token。
     """
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
     orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
 
-    # 世界设定：核心四维度 + 最近10条详细设定
+    # 世界设定：核心四维度始终发送；详细设定仅非工具模式发送
     core_parts = []
     if project.world_time_period: core_parts.append(f"时间背景：{project.world_time_period}")
     if project.world_location: core_parts.append(f"地理位置：{project.world_location}")
     if project.world_atmosphere: core_parts.append(f"氛围基调：{project.world_atmosphere}")
     if project.world_rules: core_parts.append(f"世界规则：{project.world_rules}")
     core = "\n".join(core_parts)
-    detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
-    world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
 
-    # 角色：分层注入
+    if use_tools:
+        # 工具模式：角色信息照样发（系统直接提供），世界设定条目不传，引导 AI 用工具查
+        detail_items = ""  # 不传详细设定，AI 通过工具按需查询
+        tool_hint = (
+            "\n\n💡 世界设定条目（地理/历史/文化等）、组织详情、地点信息等辅助资料可通过工具查询。"
+            "角色信息已提供，无需查询。建议先调用 list_available_entities 了解可查内容。"
+        )
+        world_info = ("【核心世界观】\n" + (core or "暂无") + tool_hint)
+    else:
+        detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
+        world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
+
+    # 角色：分层注入（无论工具模式都发，角色信息由系统直接提供，不走工具查询）
+    char_parts = []
     # 查最近大纲中涉及的角色名（用于判断"最近活跃"）
     recent_char_names = set()
     try:
@@ -253,13 +268,11 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project) 
     except Exception:
         pass
 
-    char_parts = []
     for c in chars:
         is_core = c.role in ("主角", "反派")
-        is_recent = c.name in recent_char_names or not recent_char_names  # 无大纲数据时全部中等
+        is_recent = c.name in recent_char_names or not recent_char_names
 
         if is_core:
-            # 核心角色：完整信息
             lines = [f"- {c.name}（{c.role}，{c.gender or ''}，{c.age or '?'}岁）"]
             if c.identity: lines.append(f"  身份：{c.identity}")
             if c.personality: lines.append(f"  性格：{c.personality}")
@@ -271,22 +284,22 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project) 
             if c.ability: lines.append(f"  能力：{c.ability}")
             char_parts.append("\n".join(lines))
         elif is_recent:
-            # 近期活跃角色：中等信息
             lines = [f"- {c.name}（{c.role}，{c.gender or ''}）"]
             if c.personality: lines.append(f"  性格：{c.personality[:120]}")
             if c.occupation: lines.append(f"  职业：{c.occupation}")
             if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
             char_parts.append("\n".join(lines))
         else:
-            # 远处角色：仅名字
             char_parts.append(f"- {c.name}（{c.role}）")
 
     chars_info = "\n\n".join(char_parts) if char_parts else "暂无"
 
-    # 组织：全部显示但限制长度
-    orgs_info = "\n".join(
-        [f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}" for o in orgs]
-    ) or "暂无"
+    # 组织：全部显示但限制长度（工具模式跳过）
+    orgs_info = ""
+    if not use_tools:
+        orgs_info = "\n".join(
+            [f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}" for o in orgs]
+        ) or "暂无"
 
     char_names = {c.name for c in chars}
     org_names = {o.name for o in orgs}
@@ -306,7 +319,7 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project) 
 @router.post("/{project_id}/outlines/generate")
 async def generate_outlines(project_id: int, req: OutlineGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     project = await get_user_project(db, project_id, user)
-    ctx = await _project_context(db, project_id, project)
+    ctx = await _project_context(db, project_id, project, use_tools=True)
     engine, ai_client = await make_engine_and_client(db, user.id)
     result = await engine.execute_skill("outline_create", ai_client, {
         **ctx,
@@ -506,7 +519,7 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
     chapters = (await db.execute(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number))).scalars().all()
     foreshadows_list = (await db.execute(select(Foreshadow).where(Foreshadow.project_id == project_id, Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
-    ctx = await _project_context(db, project_id, proj)
+    ctx = await _project_context(db, project_id, proj, use_tools=True)
 
     # ===== 大纲上下文截断优化 =====
     full_limit = settings.OUTLINE_CONTEXT_CHAPTERS  # 默认 20
@@ -819,7 +832,7 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
     if existing_chapters:
         raise HTTPException(400, f"此大纲已展开为 {len(existing_chapters)} 章，请先删除再重新展开")
 
-    ctx = await _project_context(db, project_id, proj)
+    ctx = await _project_context(db, project_id, proj, use_tools=True)
     engine, ai_client = await make_engine_and_client(db, user.id)
     result = await engine.execute_skill("outline_expand_single", ai_client, {
         "outline_order_index": str(outline.chapter_number), "outline_title": outline.title or "无标题",

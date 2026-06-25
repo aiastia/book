@@ -212,6 +212,14 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
         if not all_careers and main_data.get("name"):
             all_careers.append(main_data)
 
+    # 主职业为空 = 题材不需要职业体系，跳过副职业请求，直接完成本步骤
+    if not all_careers:
+        task.status_message = "AI 判断本作不需要职业体系，已跳过"
+        await db.commit()
+        import logging
+        logging.getLogger(__name__).info(f"[init] 职业体系：AI 判断不需要（主职业返回空数组），跳过")
+        return None  # 正常完成，不是错误
+
     # 第二次：生成副职业（8 个，进阶阶段精简）
     task.status_message = "生成副职业..."
     await db.commit()

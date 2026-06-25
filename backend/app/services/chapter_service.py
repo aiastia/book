@@ -221,6 +221,35 @@ class ChapterService:
                 )
         return AIClient()
 
+    async def _preload_chapter_data(
+        self, chapter: Chapter, project: Project,
+    ) -> str:
+        """轻量预加载：大纲 + 角色概要 + 前2章摘要。不调 AI，详细数据由 Writer 按需 tool-calling。"""
+        parts = []
+
+        # 大纲（核心，告诉 AI 这章要写什么）
+        ol = await self._get_outline_for_chapter(chapter.chapter_number)
+        if ol:
+            parts.append(f"<outline>\n{ol}\n</outline>")
+
+        # 角色列表（仅名称+定位，详细信息让 AI 用 query_character 工具查）
+        chars = await self._list_chapter_characters(chapter)
+        if chars:
+            parts.append("以下角色已创建，如需详细信息请使用 query_character 工具查询：")
+            char_lines = []
+            for c in chars:
+                char_lines.append(f"  - {c.name}（{c.role}）")
+            parts.append("\n".join(char_lines))
+
+        # 前2章摘要（让 AI 知道最近发生了什么，无需逐章查询）
+        start_n = max(1, chapter.chapter_number - 2)
+        for n in range(start_n, chapter.chapter_number):
+            summary = await self._query_chapter_summary(n)
+            if summary:
+                parts.append(f"第{n}章摘要：{summary}")
+
+        return "\n\n".join(parts) if parts else ""
+
     async def _run_planner_and_fetch(
         self, chapter: Chapter, project: Project,
         base_context: dict, ai_client: AIClient,
@@ -502,19 +531,11 @@ class ChapterService:
                 if overrides.get("author_name"):
                     context["author_name"] = str(overrides["author_name"])
 
-            # ===== Phase 1: Planner（判断需要哪些资料） =====
+            # ===== 预加载：大纲 + 角色列表（轻量，不调 AI，详细数据由 Writer 按需 tool-calling）=====
             use_legacy = (overrides or {}).get("use_legacy", False)
             chapter_data = ""
             if not use_legacy:
-                try:
-                    chapter_data = await self._run_planner_and_fetch(
-                        chapter, project, context, ai_client
-                    )
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        f"[planner] Planner 失败，回退旧流程: {e}")
-                    use_legacy = True
+                chapter_data = await self._preload_chapter_data(chapter, project)
 
             # 章节生成始终提供工具（AI 可按需查询角色/物品/地点/伏笔/大纲等）
             from app.services.chapter_tools import get_chapter_tools, make_tool_executor
@@ -522,7 +543,7 @@ class ChapterService:
             tool_exec = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
 
             if use_legacy:
-                # 回退：全量构建上下文 + 适配新 Writer prompt
+                # 回退：全量构建上下文（手动启用 use_legacy 时使用）
                 context = await self.context_service.build_chapter_context(chapter, project)
                 if overrides:
                     if overrides.get("narrative_pov"):
@@ -541,17 +562,9 @@ class ChapterService:
                     tools=chapter_tools, tool_executor=tool_exec,
                 )
             else:
-                # ===== Phase 3: Writer（新流程，有工具调用）=====
+                # ===== Writer：大纲 + 角色列表已提供，其余按需 tool-calling =====
                 context["chapter_data"] = chapter_data
-                context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。在写作过程中如需确认角色设定、物品归属、地点环境、伏笔状态等，可使用提供的工具查询。"
-
-                try:
-                    full_ctx = await self.context_service.build_chapter_context(chapter, project)
-                    for key, value in full_ctx.items():
-                        if key not in context:
-                            context[key] = str(value) if not isinstance(value, str) else value
-                except Exception:
-                    pass
+                context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
 
                 result = await self.skill_engine.execute_skill(
                     skill_name, ai_client, context,
@@ -869,28 +882,28 @@ class ChapterService:
 
     async def _post_generation(self, chapter: Chapter):
         """生成后处理"""
-        # 1. 自动埋入 pending 伏笔
-        await self.foreshadow_service.auto_plant_pending_foreshadows(chapter.chapter_number)
-
-        # 2. 自动生成摘要
+        # 1. 自动生成摘要
         try:
             await self._generate_summary(chapter)
         except Exception as e:
             print(f"[chapter_service] 自动摘要失败: {e}", flush=True)
 
-        # 3. 自动剧情分析
+        # 2. 自动剧情分析（内部同步伏笔状态 + 角色状态 + 记忆提取等）
         try:
             await self._auto_analyze(chapter)
         except Exception as e:
             print(f"[chapter_service] 自动剧情分析失败（不影响章节）: {e}", flush=True)
 
-        # 3.5 章节正文按自然段切分入库向量（精细检索）
+        # 3. 兜底埋入：分析未覆盖的规划伏笔（pending + plant_chapter_number 匹配）
+        await self.foreshadow_service.auto_plant_pending_foreshadows(chapter.chapter_number)
+
+        # 4. 章节正文按自然段切分入库向量（精细检索）
         try:
             await self._index_chapter_chunks(chapter)
         except Exception as e:
             print(f"[chapter_service] 正文向量切分失败: {e}", flush=True)
 
-        # 4. 卷摘要生成（方案 A：每 VOLUME_SIZE 章自动生成卷摘要）
+        # 5. 卷摘要生成（每 VOLUME_SIZE 章自动生成卷摘要）
         try:
             await self._maybe_generate_volume_summary(chapter)
         except Exception as e:

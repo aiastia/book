@@ -4,7 +4,7 @@
 // 任务完成后保留 24 小时，支持手动关闭
 import { apiGet, apiPost } from '~/composables/useApi'
 
-const { tasks, isActive, hasAnyTasks, cancelTask, dismissTask, clearDoneTasks, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
+const { tasks, isActive, hasAnyTasks, refreshTasks, cancelTask, dismissTask, clearDoneTasks, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
 const msg = useMessage()
 const collapsed = ref(true)
 const resuming = ref(false)
@@ -151,6 +151,7 @@ const hasDoneTasks = computed(() =>
       <span v-if="failedTasks.length" class="float-badge warning">{{ failedTasks.length }} 个失败</span>
       <span v-else-if="isActive" class="float-badge">{{ tasks.length }} 个</span>
       <span v-else-if="hasDoneTasks" class="float-badge done">{{ tasks.length }} 个已完成</span>
+      <a-button size="small" type="link" @click.stop="refreshTasks()" :style="{ marginLeft: '8px', padding: '0 4px' }" title="刷新">&#x21BB;</a-button>
       <span class="float-toggle">{{ collapsed ? '&#9650;' : '&#9660;' }}</span>
     </div>
     <div v-show="!collapsed" class="float-body">

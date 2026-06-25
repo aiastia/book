@@ -287,7 +287,7 @@ export function useBackgroundTasks() {
   function startPolling() {
     if (pollTimer) return
     poll()
-    pollTimer = setInterval(poll, 3000)
+    pollTimer = setInterval(poll, 1500)  // 1.5秒轮询，进度条更新更及时
   }
 
   function stopPolling() {
@@ -403,6 +403,7 @@ export function useBackgroundTasks() {
     hasAnyTasks,
     trackTask,
     startLegacy,    // 向下兼容：旧代码调 start(id)
+    refreshTasks,   // 手动刷新任务列表
     cancelTask,
     dismissTask,
     clearDoneTasks,

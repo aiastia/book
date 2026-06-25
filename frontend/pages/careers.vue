@@ -266,7 +266,17 @@ async function onAutoAssign() {
         </div>
       </a-card>
     </div>
-    <a-empty v-else description="暂无职业，点击「AI 生成体系」" />
+    <a-empty v-else>
+      <template #description>
+        <div style="max-width:360px;margin:0 auto;">
+          <p style="margin-bottom:8px;">暂无职业体系</p>
+          <p style="font-size:12px;color:#999;">
+            部分题材（虐恋、纯言情、古风宫斗等）不需要力量/职业进阶体系，
+            AI 初始化时会自动判断并跳过。如需手动创建，点击下方按钮。
+          </p>
+        </div>
+      </template>
+    </a-empty>
 
     <!-- 添加 -->
     <a-modal v-model:open="showAdd" title="添加职业" width="480px">

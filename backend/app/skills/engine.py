@@ -285,8 +285,39 @@ class SkillEngine:
         ]
 
         # ===== 自动注入上下文（按 skill 类型选择性注入）=====
-        _injected = _inject_context_blocks(context, skill_name)
-        messages.extend(_injected)
+        all_blocks = _inject_context_blocks(context, skill_name)
+        info_blocks = []
+        write_blocks = []
+        info_markers = ["角色", "世界观", "小说信息", "组织", "伏笔", "大纲", "章节", "前章", "data", "人物", "地点"]
+        for m in all_blocks:
+            content = m.get("content", "")
+            if any(marker in content for marker in info_markers):
+                info_blocks.append(m)
+            else:
+                write_blocks.append(m)
+        messages.extend(info_blocks)
+        if write_blocks:
+            context["_post_tool_messages"] = write_blocks
+
+        # ===== 如果启用工具模式，将写作指导（commercial_design/constraints/output）从 skill prompt 中分拆到 post_tool ====
+        if tools and tool_executor and skill and len(messages) > 0:
+            sp = messages[0].get("content", "")
+            # 查找写作指导标签的起始位置
+            for tag_start in ("<commercial_design", "<constraints", "<output>"):
+                idx = sp.find(tag_start)
+                if idx > 0:
+                    # 在 tag 开始前的最后一个完整标签结尾切开
+                    split_at = sp.rfind("</", 0, idx)
+                    if split_at > 0:
+                        split_at = sp.find(">", split_at) + 1  # 跳到闭环标签后
+                        pre = sp[:split_at].strip()
+                        post = sp[split_at:].strip()
+                        if pre and post:
+                            messages[0]["content"] = pre
+                            post_msgs = context.get("_post_tool_messages") or []
+                            post_msgs.insert(0, {"role": "system", "content": post})
+                            context["_post_tool_messages"] = post_msgs
+                        break  # 只处理第一个匹配的标签
 
         # 用户指令：如果模板里本来就有 {user_prompt}（已替换进 system 消息），则不重复添加。
         user_text = str(context.get("user_prompt", ""))
@@ -343,6 +374,7 @@ class SkillEngine:
                         model=model,
                         temperature=temperature,
                         max_tokens=max_tokens,
+                        post_tool_messages=context.get("_post_tool_messages"),
                     )
                 else:
                     result = await ai_client.chat_stream_collect(
