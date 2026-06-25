@@ -1,7 +1,8 @@
-"""写作风格管理：预设/CRUD/设为项目默认。
+"""写作风格管理：预设/CRUD/设为项目默认/文风提炼。
 
 对标 MuMuAINovel writing_styles API。功能等价版。
 """
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -19,15 +20,21 @@ router = APIRouter(prefix="/api/writing-styles", tags=["写作风格"])
 class StyleCreate(BaseModel):
     name: str
     description: str = ""
+    author_name: str = ""
     config: dict = {}
     custom_prompt: str = ""
+    reference_text: str = ""
+    style_traits: Optional[dict] = None
 
 
 class StyleUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    author_name: Optional[str] = None
     config: Optional[dict] = None
     custom_prompt: Optional[str] = None
+    reference_text: Optional[str] = None
+    style_traits: Optional[dict] = None
 
 
 # 内置风格预设（对标原项目的 init-defaults）
@@ -60,8 +67,11 @@ async def list_styles(db: AsyncSession = Depends(get_db), user=Depends(get_curre
 
 @router.post("")
 async def create_style(req: StyleCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    style = WritingStyle(user_id=user.id, name=req.name, description=req.description,
-                         config=req.config, custom_prompt=req.custom_prompt)
+    style = WritingStyle(
+        user_id=user.id, name=req.name, description=req.description,
+        author_name=req.author_name, config=req.config, custom_prompt=req.custom_prompt,
+        reference_text=req.reference_text, style_traits=req.style_traits or {},
+    )
     db.add(style)
     await db.commit()
     await db.refresh(style)
@@ -101,9 +111,57 @@ async def apply_to_project(style_id: int, project_id: int, db: AsyncSession = De
     if not proj:
         raise HTTPException(404, "项目不存在")
     proj.writing_style = {
+        "style_id": style.id,  # 记录来源风格，生成时据此读取最新的文风特征/范文
         "name": style.name, "description": style.description,
+        "author_name": style.author_name or "",
         "custom_prompt": style.custom_prompt or "",
+        "reference_text": style.reference_text or "",
+        "style_traits": style.style_traits or {},
         **(style.config or {}),
     }
     await db.commit()
     return {"ok": True, "project_id": project_id, "style_name": style.name}
+
+
+@router.post("/{style_id}/analyze")
+async def analyze_style(style_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """用 AI 从风格中的范文中提炼结构化文风特征，写回 style_traits。
+
+    范文为空时报错；成功后更新 traits_updated_at。
+    """
+    s = (await db.execute(select(WritingStyle).where(WritingStyle.id == style_id, WritingStyle.user_id == user.id))).scalar_one_or_none()
+    if not s:
+        raise HTTPException(404, "风格不存在")
+    ref = (s.reference_text or "").strip()
+    if not ref:
+        raise HTTPException(400, "请先粘贴范文（reference_text）再提炼")
+
+    # 复用项目通用的引擎/客户端构建（与 inspire、去味等 AI 路由同链路）
+    from app.api.routes.projects_pkg.base import make_engine_and_client, check_skill_error
+    engine, ai_client = await make_engine_and_client(db, user.id)
+    if not ai_client:
+        raise HTTPException(500, "未找到可用的 AI 模型配置，请先在 AI 设置中配置模型")
+
+    context = {
+        "reference_text": ref[:4000],  # 截断防止超长
+        "author_hint": f"目标作家：{s.author_name}" if s.author_name else "",
+        "user_prompt": "请提炼上述范文的文风特征，严格按 JSON schema 输出。",
+    }
+    result = await engine.execute_skill("style_analysis", ai_client, context)
+    if result.get("error"):
+        raise HTTPException(500, f"文风提炼失败：{result['error']}")
+
+    traits = result.get("json") or {}
+    if not traits:
+        # 极少数模型可能把 JSON 放在 content 里，兜底解析
+        import json as _json
+        content = result.get("content") or ""
+        try:
+            traits = _json.loads(content)
+        except Exception:
+            raise HTTPException(500, "文风提炼返回格式异常，请重试或更换模型")
+
+    s.style_traits = traits
+    s.traits_updated_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True, "style_traits": traits}

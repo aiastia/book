@@ -256,6 +256,247 @@ async def full_import(
     }
 
 
+# ============ 拆书导入（持久化 + 一键拆解） ============
+# 流程：上传 TXT → 解析并存库 → 一键拆解（采样立项 + 建项目 + 拆前N章大纲）
+def _sample_chapters_text(chapters: list[dict], side: str, count: int) -> str:
+    """从已切分章节中采样正文：side=head 取前 count 章，side=tail 取后 count 章。
+
+    返回拼接后的纯文本（带章节标题），用于喂给 AI。
+    """
+    if not chapters:
+        return ""
+    if side == "tail":
+        picked = chapters[-count:] if count < len(chapters) else chapters[:]
+    else:
+        picked = chapters[:count] if count < len(chapters) else chapters[:]
+    parts = []
+    for c in picked:
+        title = c.get("title") or f"第{c.get('chapter_number', 0)}章"
+        parts.append(f"{title}\n{c.get('content', '')}")
+    return "\n\n".join(parts)
+
+
+@router.post("/book-import/upload")
+async def book_import_upload(req: BookImportUploadRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """上传 TXT 并解析入库。
+
+    req: { filename?, title?, text?, base64? }（text / base64 二选一）
+    返回书籍摘要信息（不含正文）。
+    """
+    import base64 as _b64
+    import os
+    from app.services.txt_parser_service import parse_txt_file
+    from app.models.imported_book import ImportedBook
+
+    raw: bytes | None = None
+    if req.base64:
+        try:
+            raw = _b64.b64decode(req.base64)
+        except Exception:
+            raise HTTPException(400, "base64 解码失败")
+    elif req.text:
+        raw = req.text.encode("utf-8")
+    else:
+        raise HTTPException(400, "请提供 text 或 base64")
+
+    parsed = parse_txt_file(raw)
+    chapters = parsed.get("chapters", [])
+    stats = parsed.get("stats", {})
+
+    # 推断书名：显式传入 > 文件名（去扩展名）> 兜底
+    title = (req.title or "").strip()
+    if not title:
+        fn = (req.filename or "").strip()
+        if fn:
+            title = os.path.splitext(fn)[0]
+    if not title:
+        title = "导入小说"
+
+    book = ImportedBook(
+        user_id=user.id,
+        title=title,
+        source_filename=(req.filename or "")[:300],
+        total_chapters=len(chapters),
+        total_chars=stats.get("total_chars", 0),
+        raw_text=parsed.get("text", ""),
+        has_strong_titles=1 if stats.get("has_strong_titles") else 0,
+        status="imported",
+    )
+    db.add(book)
+    await db.commit()
+    await db.refresh(book)
+    return book.to_dict()
+
+
+@router.get("/book-import/{book_id}")
+async def book_import_detail(book_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """书籍详情 + 前 10 章预览（标题/字数，不含正文）。"""
+    from app.services.txt_parser_service import parse_txt_file
+    from app.models.imported_book import ImportedBook
+
+    result = await db.execute(
+        select(ImportedBook).where(ImportedBook.id == book_id, ImportedBook.user_id == user.id)
+    )
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(404, "书籍不存在或无权访问")
+
+    # 按需切分一次取预览（不存章节，临时切）
+    preview = []
+    if book.raw_text:
+        parsed = parse_txt_file(book.raw_text.encode("utf-8"))
+        for c in parsed.get("chapters", [])[:10]:
+            preview.append({
+                "chapter_number": c.get("chapter_number", 0),
+                "title": c.get("title", ""),
+                "word_count": len(c.get("content", "")),
+            })
+    info = book.to_dict()
+    info["preview"] = preview
+    return info
+
+
+@router.delete("/book-import/{book_id}")
+async def book_import_delete(book_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """删除导入书籍记录。"""
+    from app.models.imported_book import ImportedBook
+
+    result = await db.execute(
+        select(ImportedBook).where(ImportedBook.id == book_id, ImportedBook.user_id == user.id)
+    )
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(404, "书籍不存在或无权访问")
+    await db.delete(book)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/book-import/{book_id}/deconstruct")
+async def book_import_deconstruct(
+    book_id: int,
+    req: BookImportDeconstructRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """一键拆解：采样立项 → 建项目 → 拆前 N 章大纲。
+
+    req: { sample_side: head|tail, sample_count=5, outline_chapters=20 }
+    全流程在一次请求内完成（不流式），前端转圈等待。timeout 建议设 300s。
+
+    返回 { project_id, project_info, outline_count, batches_done }
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    from app.services.txt_parser_service import parse_txt_file
+    from app.models.imported_book import ImportedBook
+
+    # 1. 取书
+    result = await db.execute(
+        select(ImportedBook).where(ImportedBook.id == book_id, ImportedBook.user_id == user.id)
+    )
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(404, "书籍不存在或无权访问")
+    if not book.raw_text:
+        raise HTTPException(400, "书籍正文为空，无法拆解")
+
+    chapters = parse_txt_file(book.raw_text.encode("utf-8")).get("chapters", [])
+    if not chapters:
+        raise HTTPException(400, "未识别到章节，无法拆解")
+
+    engine, ai_client = await make_engine_and_client(db, user.id)
+
+    # 2. 立项采样 → 反向项目建议
+    sample_count = max(1, req.sample_count or 5)
+    sampled_text = _sample_chapters_text(chapters, req.sample_side, sample_count)
+    sug_result = await engine.execute_skill("book_import_reverse_project_suggestion", ai_client, {
+        "title": book.title or "未知书名", "sampled_text": sampled_text,
+        "user_prompt": f"请从以下小说文本中提取项目信息（书名：{book.title}）。",
+    })
+    check_skill_error(sug_result)
+    project_info = sug_result.get("json") or {}
+
+    # 3. 建项目
+    genre = project_info.get("genre") or ""
+    synopsis = project_info.get("description") or project_info.get("synopsis") or ""
+    new_proj = Project(
+        user_id=user.id,
+        title=project_info.get("title") or book.title,
+        genre=genre,
+        synopsis=synopsis,
+        chapter_count=req.outline_chapters,
+        current_word_count=0,
+        target_word_count=project_info.get("target_words") or 0,
+        narrative_pov=project_info.get("narrative_perspective") or "第三人称",
+        status="active",
+    )
+    db.add(new_proj)
+    await db.commit()
+    await db.refresh(new_proj)
+
+    # 4. 拆前 N 章大纲（按 5 章/批循环）
+    outline_chapters = max(5, req.outline_chapters or 20)
+    available = min(outline_chapters, len(chapters))
+    theme = project_info.get("theme") or ""
+    narrative_pov = project_info.get("narrative_perspective") or "第三人称"
+    created_outlines = 0
+    batches_done = 0
+    batch_size = 5
+
+    for start_no in range(1, available + 1, batch_size):
+        end_no = min(start_no + batch_size - 1, available)
+        # 取对应章节正文（章节号从 1 开始，列表索引从 0 开始）
+        batch_chapters = chapters[start_no - 1: end_no]
+        batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
+        if not batch_text.strip():
+            continue
+        try:
+            o_result = await engine.execute_skill("book_import_reverse_outlines", ai_client, {
+                "title": new_proj.title, "genre": genre or "网文",
+                "theme": theme, "narrative_perspective": narrative_pov,
+                "start_chapter": str(start_no), "end_chapter": str(end_no),
+                "expected_count": str(end_no - start_no + 1),
+                "chapters_text": batch_text,
+                "user_prompt": f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。",
+            })
+            if o_result.get("error"):
+                logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
+                continue
+            outlines_data = o_result.get("json") or []
+            if not isinstance(outlines_data, list):
+                continue
+            for item in outlines_data:
+                db.add(Outline(
+                    project_id=new_proj.id,
+                    chapter_number=item.get("chapter_number", start_no),
+                    title=item.get("title", ""),
+                    summary=item.get("summary", ""),
+                    scenes=item.get("scenes", []),
+                    key_points=item.get("key_points", []),
+                    emotion=item.get("emotion", ""),
+                    goal=item.get("goal", ""),
+                    structure=item,
+                ))
+                created_outlines += 1
+            batches_done += 1
+        except Exception as e:
+            logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
+            continue
+
+    # 5. 回填状态
+    book.status = "project_created"
+    book.created_project_id = new_proj.id
+    await db.commit()
+
+    return {
+        "project_id": new_proj.id,
+        "project_info": project_info,
+        "outline_count": created_outlines,
+        "batches_done": batches_done,
+    }
+
+
 # ============ MCP 增强 ============
 @router.post("/{project_id}/mcp/test-tool")
 async def mcp_test_tool(project_id: int, req: McpToolTestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):

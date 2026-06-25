@@ -1,0 +1,12 @@
+{
+  "name": "style_analysis",
+  "display_name": "文风特征提炼",
+  "description": "从作家范文原文中提炼结构化文风特征，供章节生成时模仿",
+  "category": "world",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "style_analysis.md"
+}

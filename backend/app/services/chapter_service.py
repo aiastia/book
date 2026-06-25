@@ -477,11 +477,22 @@ class ChapterService:
                     context["target_word_count"] = str(overrides["target_word_count"])
                 if overrides.get("style_config"):
                     import json as _json
-                    context["writing_style"] = _json.dumps(overrides["style_config"], ensure_ascii=False)
+                    _sc = overrides["style_config"]
+                    context["writing_style"] = _json.dumps(_sc, ensure_ascii=False)
+                    # 维度配置开关（disable_dimensions 存在 style_config 里）
+                    context["style_disable_dimensions"] = bool(_sc.get("disable_dimensions")) if isinstance(_sc, dict) else False
                 if overrides.get("style_name"):
                     context["style_name"] = str(overrides["style_name"])
                 if overrides.get("style_custom_prompt"):
                     context["style_custom_prompt"] = str(overrides["style_custom_prompt"])
+                if overrides.get("style_traits"):
+                    import json as _json
+                    _t = overrides["style_traits"]
+                    context["style_traits"] = _json.dumps(_t, ensure_ascii=False) if isinstance(_t, dict) else str(_t)
+                if overrides.get("style_reference_text"):
+                    context["style_reference_text"] = str(overrides["style_reference_text"])
+                if overrides.get("author_name"):
+                    context["author_name"] = str(overrides["author_name"])
 
             # ===== Phase 1: Planner（判断需要哪些资料） =====
             use_legacy = (overrides or {}).get("use_legacy", False)
@@ -792,13 +803,58 @@ class ChapterService:
         if vol:
             parts.append(f"<volume_summaries>{vol}</volume_summaries>")
 
-        # 写作风格
+        # 写作风格：①作家文风特征 与 ②自定义提示词 互斥（只注入其一，文风优先）；
+        # ③维度配置作为基础底色注入，可由用户开关关闭。
         style = context.get('writing_style', '')
-        if style:
-            parts.append(f"<writing_style>{style}</writing_style>")
         style_custom = context.get('style_custom_prompt', '')
-        if style_custom:
-            parts.append(f"<style_custom_prompt>{style_custom}</style_custom_prompt>")
+        style_traits = context.get('style_traits', '')
+        style_ref = context.get('style_reference_text', '')
+        disable_dim = bool(context.get('style_disable_dimensions'))
+        has_traits = bool(style_traits)
+        # 互斥：有文风特征时，自定义提示词不再注入（文风优先）
+        has_custom = bool(style_custom) and not has_traits
+        # 维度配置：用户可关闭（disable_dimensions=True 时不注入）
+        has_base = bool(style) and style != "默认网文风格，节奏明快" and not disable_dim
+        if has_traits or has_custom or has_base or style_ref:
+            # 动态生成总纲：只列出实际生效的层，避免空洞指令
+            circled = ["①", "②", "③", "④"]
+            layers = []
+            idx = 0
+            if has_traits:
+                layers.append(f"{circled[idx]}作家文风特征(<style_traits>)——仿写准则"); idx += 1
+            if has_custom:
+                layers.append(f"{circled[idx]}自定义提示词(<style_custom_prompt>)——文字指令"); idx += 1
+            if has_base:
+                layers.append(f"{circled[idx]}维度配置(<writing_style>)——基础底色")
+            note = ("\n注意：<style_reference> 是范文体感参考，仅供体会笔法，严禁照抄其内容，"
+                    "且不得与 <style_traits> 冲突。" if style_ref else "")
+            directive = (
+                "<style_directive>\n"
+                "下面给出了关于「写作风格」的指令（作家文风与自定义提示词不会同时出现）：\n"
+                + "\n".join(layers) + "\n\n"
+                "规则：当各层指令不冲突时，尽量同时满足（叠加生效）；"
+                "一旦发生冲突，以靠前的层为准，忽略其后层的冲突部分。"
+                + note
+                + "\n</style_directive>"
+            )
+            parts.append(directive)
+            if has_base:
+                parts.append(f"<writing_style>{style}</writing_style>")
+            if has_custom:
+                parts.append(f"<style_custom_prompt>{style_custom}</style_custom_prompt>")
+            if has_traits:
+                parts.append(
+                    f"<style_traits>\n这是目标文风的结构化特征档案（句式/用词/意象/节奏/语气/标志手法）"
+                    f"，作为仿写准则。\n{style_traits}\n</style_traits>"
+                )
+            if style_ref:
+                parts.append(
+                    '<style_reference>\n'
+                    '以下范文仅供体会笔法（节奏、语气、句式、意象的整体感觉），'
+                    '严禁抄袭其中的具体内容/意象/句子，只学笔法不学内容：\n'
+                    + style_ref[:800]
+                    + '\n</style_reference>'
+                )
 
         return "\n\n".join(parts)
 

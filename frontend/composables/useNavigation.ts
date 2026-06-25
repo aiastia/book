@@ -50,6 +50,7 @@ const writingNav: NavItem[] = [
 // 全局管理菜单（书架层 / 未选书时显示）
 const globalNav: NavItem[] = [
   { label: '我的书架', to: '/books', icon: 'book' },
+  { label: '拆书导入', to: '/book-import', icon: 'edit' },
   { label: '灵感模式', to: '/inspire', icon: 'message' },
   { label: 'AI 设置', to: '/ai-settings', icon: 'bot' },
   { label: '提示词模板', to: '/prompts', icon: 'message' },

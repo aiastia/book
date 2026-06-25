@@ -8,30 +8,35 @@ const { data: imported, refresh } = await useApi<any[]>('/api/imported-books', {
 const uploading = ref(false)
 const fileList = ref<any[]>([])
 
-// 反向解析状态
+// 拆解流程状态
+// parseStep: 0=未开始, 1=配置采样, 2=拆解中, 3=完成
+const parseStep = ref(0)
 const parseTarget = ref<any>(null)
-const parseStep = ref(0) // 0=未开始, 1=提取项目信息, 2=确认创建, 3=生成大纲, 4=完成
 const parseLoading = ref(false)
-const parseResult = ref<any>(null)
-const createdProjectId = ref<number | null>(null)
-const outlineProgress = ref({ current: 0, total: 0 })
+const sampleSide = ref<'head' | 'tail'>('head')   // 立项采样方向
+const sampleCount = ref(5)                          // 立项采样章数
+const outlineChapters = ref(20)                     // 大纲拆解章数
+const deconstructResult = ref<any>(null)            // 拆解结果
 
 async function handleUpload(options: any) {
   const file = options.file
   if (!file) return
   uploading.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const config = useRuntimeConfig()
-    const base = config.public.apiBase
-    const token = localStorage.getItem('moyu_token')
-    const resp = await $fetch(base + '/api/projects/book-import', {
-      method: 'POST',
-      body: formData,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // 读取文件为 base64
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = String(reader.result || '')
+        // data:text/plain;base64,xxxx
+        const idx = result.indexOf(',')
+        resolve(idx >= 0 ? result.slice(idx + 1) : result)
+      }
+      reader.onerror = () => reject(new Error('读取文件失败'))
+      reader.readAsDataURL(file)
     })
-    msg.success('导入成功！')
+    await api.uploadBookImport({ filename: file.name, base64 })
+    msg.success('导入成功！已解析章节并入库')
     await refresh()
   } catch (e: any) {
     msg.error('导入失败：' + formatError(e))
@@ -43,92 +48,39 @@ async function handleUpload(options: any) {
 async function onDeleteImport(b: any) {
   if (!await msg.confirm('确认删除此导入记录？')) return
   try {
-    await apiDelete(`/api/imported-books/${b.id}`)
+    await api.deleteImportedBook(b.id)
     msg.success('已删除')
     await refresh()
   } catch { msg.error('删除失败') }
 }
 
-// 反向解析流程
+// 启动拆解：打开配置弹窗
 function startParse(b: any) {
   parseTarget.value = b
   parseStep.value = 1
-  parseResult.value = null
-  createdProjectId.value = null
-  outlineProgress.value = { current: 0, total: 0 }
-  onExtractProjectInfo()
+  deconstructResult.value = null
+  // 默认采样不超过该书的章数
+  sampleCount.value = Math.min(5, b.total_chapters || b.chapters || 5) || 5
 }
 
-async function onExtractProjectInfo() {
+// 确认配置 → 执行一键拆解
+async function onDeconstruct() {
   if (!parseTarget.value) return
   parseLoading.value = true
+  parseStep.value = 2
   try {
-    // 模拟采样前3章文本（实际需要后端提供章节内容接口）
-    const sampled = parseTarget.value.sampled_text || `书名：${parseTarget.value.title}，共${parseTarget.value.chapters || 0}章`
-    const res = await api.bookImportSuggest({
-      title: parseTarget.value.title,
-      sampled_text: sampled,
+    const res = await api.bookImportDeconstruct(parseTarget.value.id, {
+      sample_side: sampleSide.value,
+      sample_count: sampleCount.value,
+      outline_chapters: outlineChapters.value,
     })
-    parseResult.value = res
-    parseStep.value = 2
-  } catch (e: any) {
-    msg.error('提取失败：' + formatError(e))
-    parseStep.value = 0
-  } finally {
-    parseLoading.value = false
-  }
-}
-
-async function onCreateProject() {
-  if (!parseResult.value) return
-  parseLoading.value = true
-  try {
-    const res = await api.createProject({
-      title: parseResult.value.title || parseTarget.value.title,
-      genre: parseResult.value.genre || '',
-      synopsis: parseResult.value.description || parseResult.value.synopsis || '',
-    })
-    createdProjectId.value = res.id
+    deconstructResult.value = res
     parseStep.value = 3
-    msg.success('项目已创建，开始生成大纲')
-    await onGenerateOutlines()
+    msg.success(`拆解完成！已生成 ${res.outline_count} 章大纲`)
+    await refresh()
   } catch (e: any) {
-    msg.error('创建失败：' + formatError(e))
-  } finally {
-    parseLoading.value = false
-  }
-}
-
-async function onGenerateOutlines() {
-  if (!createdProjectId.value || !parseTarget.value) return
-  const totalChapters = parseTarget.value.chapters || 0
-  if (totalChapters === 0) {
-    parseStep.value = 4
-    return
-  }
-  const batchSize = 5
-  const totalBatches = Math.ceil(totalChapters / batchSize)
-  outlineProgress.value = { current: 0, total: totalBatches }
-  parseLoading.value = true
-
-  try {
-    for (let i = 0; i < totalBatches; i++) {
-      const start = i * batchSize + 1
-      const end = Math.min(start + batchSize - 1, totalChapters)
-      // 使用导入的章节文本（实际需要从后端获取章节内容）
-      const chaptersText = `第${start}-${end}章内容（来自导入的书籍）`
-      await api.bookImportReverseOutlines({
-        project_id: createdProjectId.value!,
-        start_chapter: start,
-        end_chapter: end,
-        chapters_text: chaptersText,
-      })
-      outlineProgress.value.current = i + 1
-    }
-    parseStep.value = 4
-    msg.success('大纲生成完成！')
-  } catch (e: any) {
-    msg.error('大纲生成失败：' + formatError(e))
+    msg.error('拆解失败：' + formatError(e))
+    parseStep.value = 1
   } finally {
     parseLoading.value = false
   }
@@ -137,10 +89,10 @@ async function onGenerateOutlines() {
 function closeParse() {
   parseStep.value = 0
   parseTarget.value = null
-  parseResult.value = null
+  deconstructResult.value = null
 }
 
-// ===== #23 直接 TXT 导入（解析 + 批量落库，不走 AI）=====
+// ===== 直接 TXT 导入（解析 + 批量落库，不走 AI）=====
 const directMode = ref(false)
 const directText = ref('')
 const directParsing = ref(false)
@@ -148,6 +100,9 @@ const directResult = ref<{ chapters: any[]; stats: any } | null>(null)
 const directTitle = ref('')
 const directGenre = ref('')
 const directImporting = ref(false)
+
+// 格式要求面板：默认展开，用户可在页面上折叠/展开
+const activeFmtPanel = ref<string[]>(['fmt'])
 
 async function onDirectParse() {
   if (!directText.value.trim()) { msg.warning('请粘贴小说文本'); return }
@@ -210,6 +165,26 @@ function onDirectUpload(file: any) {
       </a-radio-group>
     </div>
 
+    <!-- 格式要求说明（两种模式共用） -->
+    <a-collapse v-model:active-key="activeFmtPanel" :bordered="false" ghost style="margin-bottom:16px">
+      <a-collapse-panel key="fmt" header="📄 TXT 格式要求（点击收起/展开）">
+        <div class="fmt-help">
+          <p class="fmt-line fmt-good">✅ <b>最佳格式</b>：每章以「第X章」独占一行开头，识别最准。</p>
+          <pre class="fmt-example">第一章 山村少年
+
+正文内容……
+
+第二章 初入仙门
+
+正文内容……</pre>
+          <p class="fmt-line">识别的标题：<code>第X章/卷/节/回/集/部/篇</code>（中文数字或阿拉伯数字均可）、<code>Chapter N</code>、<code>Chap. 1</code>、纯数字 <code>1.</code></p>
+          <p class="fmt-line fmt-warn">⚠️ <b>无「第X章」标记</b>：若有短标题行（前后空行、无句号、含数字或「章/节/回」）也能切；完全没有标记则按约 4000 字机械切章，精度较低。</p>
+          <p class="fmt-line fmt-tip">💡 <b>编码</b>：自动识别 UTF-8 / GBK / GB18030 / Big5，无需手动转码。</p>
+          <p class="fmt-line fmt-tip">💡 <b>建议</b>：上传后留意「章节标记是否清晰」标记，不清晰请补上「第X章」再重新上传，否则 AI 拆出的大纲对不上真实章节边界。</p>
+        </div>
+      </a-collapse-panel>
+    </a-collapse>
+
     <!-- 直接 TXT 导入模式 -->
     <template v-if="directMode">
       <a-card title="📄 直接 TXT 导入" style="margin-bottom:16px">
@@ -259,13 +234,13 @@ function onDirectUpload(file: any) {
         :auto-upload="true"
         :show-file-list="false"
         :custom-request="handleUpload"
-        accept=".txt,.epub,.md,.markdown"
+        accept=".txt"
         class="upload-area"
       >
         <div class="upload-inner">
           <UploadOutlined style="font-size:48px;color:#c0c4cc;" />
-          <div style="font-size:15px;color:#606266;margin-top:12px;">拖拽小说文件到此处，或点击选择</div>
-          <div style="font-size:13px;color:#909399;margin-top:6px;">支持 TXT (GBK/UTF-8) / EPUB / Markdown</div>
+          <div style="font-size:15px;color:#606266;margin-top:12px;">拖拽小说 TXT 到此处，或点击选择</div>
+          <div style="font-size:13px;color:#909399;margin-top:6px;">支持 TXT (GBK/UTF-8)，上传后可一键 AI 拆解</div>
         </div>
       </a-upload-dragger>
 
@@ -281,12 +256,14 @@ function onDirectUpload(file: any) {
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
             <div style="font-weight:500;">{{ b.title }}</div>
-            <div style="font-size:12px;color:#888;margin-top:4px;">{{ b.chapters || 0 }} 章 · {{ b.updated || '' }}</div>
+            <div style="font-size:12px;color:#888;margin-top:4px;">{{ b.total_chapters ?? b.chapters ?? 0 }} 章 · {{ (b.total_chars ?? 0).toLocaleString() }} 字 · {{ b.updated || '' }}</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
-            <a-tag :color="b.tag === '已完成' ? 'success' : 'default'" size="small">{{ b.tag || '导入' }}</a-tag>
-            <a-button type="primary" size="small" @click="startParse(b)">智能解析</a-button>
-            <a-button type="primary" size="small" danger @click="onDeleteImport(b)">删除</a-button>
+            <a-tag :color="b.tag === '已拆解' ? 'success' : 'processing'" size="small">{{ b.tag || '待拆解' }}</a-tag>
+            <a-button type="primary" size="small" :disabled="b.tag === '已拆解'" @click="startParse(b)">
+              {{ b.tag === '已拆解' ? '已拆解' : 'AI 拆解' }}
+            </a-button>
+            <a-button size="small" danger @click="onDeleteImport(b)">删除</a-button>
           </div>
         </div>
       </a-card>
@@ -294,57 +271,71 @@ function onDirectUpload(file: any) {
     <a-empty v-else description="暂无导入记录" :image-style="{ height: '60px' }" />
   </div>
 
-  <!-- 反向解析弹窗 -->
+  <!-- AI 拆解弹窗 -->
   <a-modal
     :open="parseStep > 0"
-    title="智能解析 — 反向生成项目"
-    width="600px"
+    title="AI 拆解 — 一键生成项目"
+    width="560px"
     :footer="null"
+    :mask-closable="false"
     @cancel="closeParse"
   >
-    <!-- 步骤1: 提取项目信息 -->
-    <div v-if="parseStep === 1" style="text-align:center;padding:20px;">
-      <LoadingOutlined :spin="true" style="font-size:24px;color:#4D8088;" />
-      <p style="margin-top:12px;color:#666;">正在分析「{{ parseTarget?.title }}」提取项目信息…</p>
-    </div>
-
-    <!-- 步骤2: 确认项目信息 -->
-    <div v-if="parseStep === 2 && parseResult">
-      <h4 style="color:#4D8088;margin-bottom:12px;">提取的项目信息</h4>
-      <a-descriptions bordered :column="1" size="small">
-        <a-descriptions-item label="书名">{{ parseResult.title || parseTarget?.title }}</a-descriptions-item>
-        <a-descriptions-item label="题材">{{ parseResult.genre || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="主题">{{ parseResult.theme || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="简介">{{ parseResult.description || parseResult.synopsis || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="叙事视角">{{ parseResult.narrative_perspective || parseResult.narrative_pov || '-' }}</a-descriptions-item>
-        <a-descriptions-item label="目标字数">{{ parseResult.target_words || parseResult.target_word_count || '-' }}</a-descriptions-item>
+    <!-- 步骤1: 配置采样 -->
+    <div v-if="parseStep === 1">
+      <a-alert type="info" show-icon :closable="false" style="margin-bottom:16px">
+        <template #message>将基于采样章节反向提炼立项信息，并连续拆解前 {{ outlineChapters }} 章大纲，一次性生成完整项目。</template>
+      </a-alert>
+      <a-descriptions :column="1" size="small" bordered style="margin-bottom:16px">
+        <a-descriptions-item label="书名">{{ parseTarget?.title }}</a-descriptions-item>
+        <a-descriptions-item label="总章数">{{ parseTarget?.total_chapters ?? parseTarget?.chapters ?? 0 }} 章</a-descriptions-item>
       </a-descriptions>
-      <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px;">
+
+      <div style="margin-bottom:16px">
+        <div style="font-weight:500;margin-bottom:8px;">① 立项采样（用于提炼简介/题材/视角）</div>
+        <a-radio-group v-model:value="sampleSide" button-style="solid">
+          <a-radio-button value="head">采样前 {{ sampleCount }} 章（看开头定调）</a-radio-button>
+          <a-radio-button value="tail">采样后 {{ sampleCount }} 章（看结局走向）</a-radio-button>
+        </a-radio-group>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <div style="font-weight:500;margin-bottom:8px;">② 大纲深度（连续拆解前 N 章）</div>
+        <a-radio-group v-model:value="outlineChapters" button-style="solid">
+          <a-radio-button :value="10">前 10 章</a-radio-button>
+          <a-radio-button :value="20">前 20 章</a-radio-button>
+          <a-radio-button :value="30">前 30 章</a-radio-button>
+        </a-radio-group>
+        <div style="font-size:12px;color:#909399;margin-top:6px;">章数越多 token 消耗越大。拆解含多批 AI 调用，预计耗时 1-3 分钟。</div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
         <a-button @click="closeParse">取消</a-button>
-        <a-button type="primary" :loading="parseLoading" @click="onCreateProject">创建项目并生成大纲</a-button>
+        <a-button type="primary" @click="onDeconstruct">开始拆解</a-button>
       </div>
     </div>
 
-    <!-- 步骤3: 生成大纲中 -->
-    <div v-if="parseStep === 3">
-      <div style="text-align:center;padding:20px;">
-        <LoadingOutlined :spin="true" style="font-size:24px;color:#4D8088;" />
-        <p style="margin-top:12px;color:#666;">正在反向生成大纲…</p>
-        <a-progress
-          :percent="outlineProgress.total > 0 ? Math.round(outlineProgress.current / outlineProgress.total * 100) : 0"
-          :format="() => `${outlineProgress.current}/${outlineProgress.total} 批`"
-          style="max-width:300px;margin:12px auto;"
-        />
-      </div>
+    <!-- 步骤2: 拆解中 -->
+    <div v-if="parseStep === 2" style="text-align:center;padding:30px 20px;">
+      <LoadingOutlined :spin="true" style="font-size:28px;color:#4D8088;" />
+      <p style="margin-top:14px;color:#666;font-size:15px;">正在拆解「{{ parseTarget?.title }}」…</p>
+      <p style="color:#909399;font-size:13px;margin-top:4px;">采样立项 + 拆解前 {{ outlineChapters }} 章大纲，预计 1-3 分钟，请勿关闭</p>
     </div>
 
-    <!-- 步骤4: 完成 -->
-    <div v-if="parseStep === 4" style="text-align:center;padding:20px;">
-      <div style="font-size:48px;margin-bottom:12px;">✅</div>
-      <h3 style="color:#4D8088;margin-bottom:8px;">解析完成！</h3>
-      <p style="color:#666;">已创建项目并生成大纲，前往书架查看</p>
+    <!-- 步骤3: 完成 -->
+    <div v-if="parseStep === 3 && deconstructResult" style="padding:8px 4px;">
+      <div style="text-align:center;margin-bottom:16px;">
+        <div style="font-size:40px;">✅</div>
+        <h3 style="color:#4D8088;margin:8px 0;">拆解完成！</h3>
+        <p style="color:#666;font-size:13px;">生成 {{ deconstructResult.outline_count }} 章大纲 · 共 {{ deconstructResult.batches_done }} 批</p>
+      </div>
+      <a-descriptions bordered :column="1" size="small">
+        <a-descriptions-item label="书名">{{ deconstructResult.project_info?.title || parseTarget?.title }}</a-descriptions-item>
+        <a-descriptions-item label="题材">{{ deconstructResult.project_info?.genre || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="叙事视角">{{ deconstructResult.project_info?.narrative_perspective || '-' }}</a-descriptions-item>
+        <a-descriptions-item label="简介">{{ deconstructResult.project_info?.description || '-' }}</a-descriptions-item>
+      </a-descriptions>
       <div style="margin-top:16px;display:flex;justify-content:center;gap:8px;">
-        <NuxtLink v-if="createdProjectId" :to="`/outline?pid=${createdProjectId}`">
+        <NuxtLink :to="`/outline?pid=${deconstructResult.project_id}`">
           <a-button type="primary">查看大纲</a-button>
         </NuxtLink>
         <a-button @click="closeParse">关闭</a-button>
@@ -368,4 +359,17 @@ function onDirectUpload(file: any) {
 .upload-area{width:100%;}
 .upload-area :deep(.ant-upload-drag){width:100%;padding:48px 20px;border-radius:6px;}
 .upload-inner{display:flex;flex-direction:column;align-items:center;}
+
+/* 格式要求面板 */
+.fmt-help { font-size: 13px; color: #595959; }
+.fmt-line { margin: 6px 0; line-height: 1.7; }
+.fmt-line code { background: #F0EDE6; padding: 1px 6px; border-radius: 3px; font-size: 12px; color: #4D8088; }
+.fmt-good { color: #389e0d; }
+.fmt-warn { color: #d48806; }
+.fmt-tip { color: #595959; }
+.fmt-example {
+  background: #FAFAF7; border: 1px solid #F0EDE6; border-radius: 6px;
+  padding: 10px 12px; margin: 8px 0; font-size: 12.5px; color: #595959;
+  white-space: pre-wrap; line-height: 1.6;
+}
 </style>

@@ -153,6 +153,11 @@ async def _auto_migrate():
         ("skill_configs", "ADD COLUMN system_prompt_snapshot TEXT DEFAULT ''"),
         # 第14批：大纲验证补全步骤
         ("project_init_tasks", "ADD COLUMN validate_done INTEGER DEFAULT 0"),
+        # 第15批：作家文风模仿（范文 + AI 提炼的结构化特征）
+        ("writing_styles", "ADD COLUMN author_name VARCHAR(100) DEFAULT ''"),
+        ("writing_styles", "ADD COLUMN reference_text TEXT DEFAULT ''"),
+        ("writing_styles", "ADD COLUMN style_traits TEXT DEFAULT '{}'"),  # 存 JSON 文本，默认空对象
+        ("writing_styles", "ADD COLUMN traits_updated_at DATETIME"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:
@@ -217,6 +222,27 @@ async def lifespan(app: FastAPI):
                 pt.current_version_id = ver.id
                 synced += 1
             else:
+                # 兜底修复：旧数据可能存在 PromptTemplate 但无 PromptVersion（current_version_id 为 NULL，
+                # 版本表为空），导致「提示词模板」页面点开后右侧空白。这里自动补建一个 v1 激活版本。
+                if not existing_pt.current_version_id:
+                    existing_versions = (await db.execute(
+                        select(PromptVersion).where(PromptVersion.template_id == existing_pt.id)
+                    )).scalars().all()
+                    if not existing_versions:
+                        ver = PromptVersion(
+                            template_id=existing_pt.id,
+                            version=1,
+                            system_prompt=skill.system_prompt or "",
+                            user_prompt="",
+                            variables=skill.parameters or {},
+                            config={},
+                            is_active=True,
+                        )
+                        db.add(ver)
+                        await db.flush()
+                        existing_pt.current_version_id = ver.id
+                        synced += 1
+                        continue
                 if existing_pt.current_version_id:
                     active_ver = (await db.execute(
                         select(PromptVersion).where(PromptVersion.id == existing_pt.current_version_id)

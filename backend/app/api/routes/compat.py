@@ -399,11 +399,31 @@ async def mcp_servers():
     return []
 
 
-# ---------- 导入书籍（后端暂未实现，返回空 + 占位） ----------
+# ---------- 导入书籍（拆书） ----------
 @router.get("/imported-books")
-async def imported_books():
-    """拆书导入（后端暂无实现，返回空列表占位）。"""
-    return []
+async def imported_books(db: AsyncSession = Depends(get_db), user: User = Depends(get_user_dev)):
+    """拆书导入列表：返回当前用户的已导入书籍（按时间倒序）。
+
+    字段对齐前端期望：{id, title, chapters, updated, tag, ...}。
+    """
+    from app.models.imported_book import ImportedBook
+    if not user:
+        return []
+    rows = (
+        await db.execute(
+            select(ImportedBook)
+            .where(ImportedBook.user_id == user.id)
+            .order_by(ImportedBook.created_at.desc())
+        )
+    ).scalars().all()
+    items = []
+    for b in rows:
+        d = b.to_dict()
+        d["chapters"] = d.get("total_chapters", 0)
+        d["updated"] = (d.get("updated_at") or d.get("created_at") or "")[:16].replace("T", " ")
+        d["tag"] = "已拆解" if b.status == "project_created" else "待拆解"
+        items.append(d)
+    return items
 
 
 # ---------- AI 对话历史（后端暂未实现，返回空 + 占位） ----------

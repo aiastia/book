@@ -25,6 +25,7 @@ from app.models.batch_generation_task import BatchGenerationTask
 from app.models.regeneration_task import RegenerationTask
 from app.models.character_change_log import CharacterChangeLog
 from app.models.relation_change_log import RelationChangeLog
+from app.models.imported_book import ImportedBook
 
 __all__ = [
     "User", "Project", "WorldSetting", "Character", "CharacterRelation",
@@ -33,4 +34,5 @@ __all__ = [
     "AIModelConfig", "GenerationHistory", "WritingStyle", "Career", "ProjectInitTask",
     "BackgroundTask", "Item", "Location", "OrganizationMember", "CharacterCareer",
     "BatchGenerationTask", "RegenerationTask", "CharacterChangeLog", "RelationChangeLog",
+    "ImportedBook",
 ]

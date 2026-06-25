@@ -175,6 +175,9 @@ async def run_batch_generation(task_id: int):
         style_config = None
         style_name = ""
         style_custom_prompt = ""
+        style_traits = {}
+        style_reference_text = ""
+        author_name = ""
         if style_id:
             try:
                 from app.models.writing_style import WritingStyle
@@ -185,6 +188,9 @@ async def run_batch_generation(task_id: int):
                     style_config = ws.config or {}
                     style_name = ws.name
                     style_custom_prompt = (ws.custom_prompt or "").strip()
+                    style_traits = ws.style_traits or {}
+                    style_reference_text = (ws.reference_text or "").strip()
+                    author_name = (ws.author_name or "").strip()
             except Exception as e:
                 logger.warning(f"[batch] 加载写作风格 {style_id} 失败: {e}")
 
@@ -199,6 +205,13 @@ async def run_batch_generation(task_id: int):
             overrides["style_name"] = style_name
         if style_custom_prompt:
             overrides["style_custom_prompt"] = style_custom_prompt
+        # 作家文风模仿：特征 + 范文 + 作家名
+        if style_traits:
+            overrides["style_traits"] = style_traits
+        if style_reference_text:
+            overrides["style_reference_text"] = style_reference_text
+        if author_name:
+            overrides["author_name"] = author_name
 
         # 标记开始
         task.status = "running"

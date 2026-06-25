@@ -763,16 +763,47 @@ class ChapterContextService:
         proj = (await self.db.execute(select(Project).where(Project.id == self.project_id))).scalar_one_or_none()
         writing_style = ""
         style_custom_prompt = ""
+        style_traits = ""
+        style_reference_text = ""
+        author_name = ""
+        style_disable_dimensions = False
         if proj and proj.writing_style:
             ws = proj.writing_style
             # 提取用户自定义提示词（高级），单独注入让 AI 明确遵循
             style_custom_prompt = (ws.get("custom_prompt") or "").strip()
+            # 是否关闭维度配置注入（跟随 apply 快照，与维度数据同属一套）
+            style_disable_dimensions = bool(ws.get("disable_dimensions"))
+            # 作家文风模仿：若记录了来源 style_id，则读取「最新」的特征/范文/作家名，
+            # 这样用户重新提炼后无需再次"设为项目默认"即可生效。
+            latest_traits = None
+            latest_ref = None
+            latest_author = None
+            _sid = ws.get("style_id")
+            if isinstance(_sid, int):
+                from app.models.writing_style import WritingStyle as _WS
+                ws_row = (await db.execute(select(_WS).where(_WS.id == _sid))).scalar_one_or_none()
+                if ws_row:
+                    latest_traits = ws_row.style_traits or {}
+                    latest_ref = (ws_row.reference_text or "").strip()
+                    latest_author = (ws_row.author_name or "").strip()
+            # 覆盖快照：优先用最新值，没有则回退快照
+            _traits = latest_traits if latest_traits is not None else ws.get("style_traits")
+            if isinstance(_traits, dict) and _traits:
+                style_traits = json.dumps(_traits, ensure_ascii=False)
+            elif isinstance(_traits, str) and _traits.strip():
+                style_traits = _traits.strip()
+            author_name = (latest_author if latest_author is not None else (ws.get("author_name") or "")).strip()
+            style_reference_text = (latest_ref if latest_ref is not None else (ws.get("reference_text") or "")).strip()
             writing_style = json.dumps(ws, ensure_ascii=False)
 
         return {
             "characters_info": characters_info,
             "writing_style": writing_style or "默认网文风格，节奏明快",
             "style_custom_prompt": style_custom_prompt,
+            "style_traits": style_traits,
+            "style_reference_text": style_reference_text,
+            "author_name": author_name,
+            "style_disable_dimensions": style_disable_dimensions,
         }
 
     async def _get_reference_context(self, chapter: Chapter) -> dict:

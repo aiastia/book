@@ -227,6 +227,21 @@ class BookImportOutlinesRequest(BaseModel):
     chapters_text: str
 
 
+class BookImportUploadRequest(BaseModel):
+    """拆书上传：text 或 base64 二选一，filename 可选（用于推断书名）。"""
+    filename: str = ""
+    title: str = ""
+    text: str = ""
+    base64: str = ""
+
+
+class BookImportDeconstructRequest(BaseModel):
+    """一键拆解：采样方向 + 采样章数 + 大纲拆解章数。"""
+    sample_side: str = "head"   # head(前N章) / tail(后N章)
+    sample_count: int = 5       # 立项采样章数
+    outline_chapters: int = 20  # 大纲拆解章数（连续前N章，按5章/批）
+
+
 class McpToolTestRequest(BaseModel):
     plugin_name: str
     tool_list: list = []

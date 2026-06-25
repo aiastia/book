@@ -136,6 +136,16 @@ function openCreate() {
   Object.assign(createForm, { name: '', display_name: '', description: '', category: 'custom', system_prompt: '' })
 }
 
+/** 复制 Skill 标识（= 源文件名，对应 backend/app/skills/prompts/{name}.json） */
+async function copySkillName(s: any) {
+  try {
+    await navigator.clipboard.writeText(s.name)
+    msg.success(`已复制：${s.name}`)
+  } catch {
+    msg.error('复制失败')
+  }
+}
+
 const grouped = computed(() => {
   const g: Record<string, any[]> = {}
   for (const s of skills.value || []) {
@@ -178,6 +188,9 @@ const grouped = computed(() => {
                 {{ s.display_name || s.name }}
                 <a-tag v-if="s.is_customized" color="purple" size="small" style="margin-left:4px;">已自定义</a-tag>
                 <a-tag v-if="s.system_updated" color="orange" size="small" style="margin-left:4px;">系统已更新</a-tag>
+              </div>
+              <div class="skill-key" :title="`源文件：backend/app/skills/prompts/${s.name}.json（点击复制）`" @click.stop="copySkillName(s)">
+                <code>{{ s.name }}.json</code>
               </div>
               <a-tag
                 :color="s.skill_type === 'custom' ? 'warning' : 'default'"
@@ -307,6 +320,9 @@ description: 描述
 .skill-custom-row{display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px dashed #E8E4DC;}
 .skill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
 .skill-name{font-size:15px;font-weight:600;margin-bottom:4px;}
+.skill-key{display:block;width:fit-content;font-size:11px;color:#722ED1;background:#F5F0FF;border:1px solid #E8DCFF;border-radius:3px;padding:1px 6px;margin-bottom:4px;cursor:pointer;user-select:none;transition:background .15s;}
+.skill-key:hover{background:#EBE0FF;}
+.skill-key code{font-family:monospace;}
 .skill-desc{font-size:13px;color:#888;margin-bottom:8px;line-height:1.5;}
 .skill-prompt{font-size:12px;color:#aaa;background:#f9f9f9;padding:8px;border-radius:4px;margin-bottom:8px;font-family:monospace;line-height:1.4;max-height:120px;overflow:hidden;cursor:pointer;}
 .skill-actions{display:flex;gap:8px;}

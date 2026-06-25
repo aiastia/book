@@ -226,6 +226,25 @@ async def list_versions(
         .order_by(PromptVersion.version.desc())
     )
     versions = ver_result.scalars().all()
+
+    # 兜底：旧数据可能存在 PromptTemplate 但无 PromptVersion（current_version_id 为 NULL 且版本表为空），
+    # 导致「提示词模板」页面点开后右侧空白。这里从 Skill 表回填一个临时版本，不改库。
+    if not versions:
+        from app.models.skill import Skill
+        skill_name = (template.name or "").lower()
+        skill = (await db.execute(
+            select(Skill).where(Skill.name == skill_name)
+        )).scalar_one_or_none()
+        if skill and (skill.system_prompt or "").strip():
+            placeholder = PromptVersion(
+                template_id=template_id, version=1,
+                system_prompt=skill.system_prompt,
+                user_prompt="", variables=skill.parameters or {},
+                config={}, is_active=True,
+                created_at=template.created_at,
+            )
+            versions = [placeholder]
+
     return [_version_to_dict(v) for v in versions]
 
 

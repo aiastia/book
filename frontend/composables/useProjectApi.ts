@@ -652,6 +652,31 @@ export function useProjectApi() {
     return apiPost<{ project_id: number; title: string; chapter_count: number; total_words: number }>('/api/projects/book-import/full-import', body, { timeout: 60000 })
   }
 
+  // ============ 拆书导入（持久化 + 一键拆解） ============
+  /** 上传 TXT 文本到后端解析入库（text 或 base64 二选一）。 */
+  function uploadBookImport(body: { filename?: string; title?: string; text?: string; base64?: string }) {
+    return apiPost<any>('/api/projects/book-import/upload', body, { timeout: 60000 })
+  }
+
+  /** 书籍详情 + 前 10 章预览。 */
+  function getImportedBook(id: number) {
+    return apiGet<any>(`/api/projects/book-import/${id}`)
+  }
+
+  /** 删除导入书籍。 */
+  function deleteImportedBook(id: number) {
+    return apiDelete(`/api/projects/book-import/${id}`)
+  }
+
+  /** 一键拆解：采样立项 + 建项目 + 拆前 N 章大纲（慢，300s）。 */
+  function bookImportDeconstruct(bookId: number, body: { sample_side?: 'head' | 'tail'; sample_count?: number; outline_chapters?: number }) {
+    return apiPost<{ project_id: number; project_info: any; outline_count: number; batches_done: number }>(
+      `/api/projects/book-import/${bookId}/deconstruct`,
+      { sample_side: 'head', sample_count: 5, outline_chapters: 20, ...body },
+      { timeout: 300000 },
+    )
+  }
+
   function getPromptTemplate(id: number) {
     return useApi<any>(`/api/prompt-templates/${id}`, { key: `prompt-template-${id}` })
   }
@@ -820,6 +845,10 @@ export function useProjectApi() {
     applyPartialRegen,
     parseTxt,
     fullImport,
+    uploadBookImport,
+    getImportedBook,
+    deleteImportedBook,
+    bookImportDeconstruct,
     createCareer,
     deleteCareer,
     // 剧情分析
