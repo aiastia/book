@@ -20,6 +20,10 @@ export default defineNuxtConfig({
       viewport: 'width=device-width, initial-scale=1',
       title: '墨语',
       meta: [{ name: 'description', content: '墨语 — AI 网文创作平台' }],
+      script: [
+        // 在 Vue 初始化前拦截 console.warn，抑制 <Suspense> 实验性警告
+        { innerHTML: '(function(){var _w=console.warn;console.warn=function(){if(typeof arguments[0]==="string"&&arguments[0].indexOf("<Suspense>")!==-1)return;_w.apply(console,arguments)}})()' },
+      ],
     },
   },
 

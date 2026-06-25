@@ -5,6 +5,7 @@
 #   ./dev.sh backend  只启后端
 #   ./dev.sh frontend 只启前端
 #   ./dev.sh stop     停止
+#   ./dev.sh restart  重启
 #   ./dev.sh docker   用 Docker 启动
 #   ./dev.sh status   查看运行状态
 set -e
@@ -76,7 +77,12 @@ stop_all() {
     fi
   done
   for port in 8000 3000; do
-    lsof -ti :$port 2>/dev/null | xargs kill -9 2>/dev/null || true
+    pids=$(lsof -ti :$port 2>/dev/null) || true
+    if [ -n "$pids" ]; then
+      echo "$pids" | xargs kill 2>/dev/null || true
+      sleep 1
+      lsof -ti :$port 2>/dev/null | xargs kill -9 2>/dev/null || true
+    fi
   done
   log "已清理"
 }
@@ -128,6 +134,16 @@ case "${1:-all}" in
     ;;
   stop)
     stop_all
+    ;;
+  restart)
+    stop_all
+    sleep 1
+    check_cmd python3 || exit 1
+    check_cmd npm || exit 1
+    start_backend
+    sleep 2
+    start_frontend
+    log "前端: http://localhost:3000  后端: http://localhost:8000"
     ;;
   docker)
     check_cmd docker || { warn "需要 docker"; exit 1; }

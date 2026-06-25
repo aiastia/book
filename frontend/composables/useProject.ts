@@ -73,8 +73,6 @@ export function useProject() {
 
     // 客户端同步：将 cookie 和 localStorage 统一到当前权威值
     if (import.meta.client && currentProjectId.value !== null) {
-      // URL 是最高优先级 — 如果 URL 有 pid，以 URL 为准同步 cookie 和 localStorage
-      // 如果 cookie 与 URL 不一致，更新 cookie（不反向覆盖 URL）
       const cookieVal = projectIdCookie.value && projectIdCookie.value !== false
         ? projectIdCookie.value.value
         : null

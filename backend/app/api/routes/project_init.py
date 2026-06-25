@@ -471,6 +471,7 @@ async def _link_org_memberships(db, pid, raw_chars):
                 )
                 if not existing:
                     db.add(OrganizationMember(
+                        project_id=pid,
                         organization_id=org_id,
                         character_id=char.id,
                         position=item.get("org_role", "成员")[:50] if isinstance(item.get("org_role"), str) else "成员",
@@ -929,6 +930,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
                 )
                 if not existing:
                     db.add(OrganizationMember(
+                        project_id=pid,
                         organization_id=oid,
                         character_id=cid,
                         position=role,
@@ -950,9 +952,16 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
 async def _step_org(db, task, pid, proj, engine, ai_client):
     """步骤5：组织势力生成"""
     from app.models.organization import Organization
+    from sqlalchemy import func
 
-    task.status_message = "生成组织势力..."
-    await db.commit()
+    existing_orgs = (await db.execute(
+        select(func.count(Organization.id)).where(Organization.project_id == pid)
+    )).scalar() or 0
+    if existing_orgs >= 3:
+        task.org_done = 1
+        task.status_message = f"已有 {existing_orgs} 个组织，跳过生成"
+        await db.commit()
+        return None
 
     org_result, oerr = await _safe_skill_call(engine, ai_client, "organization_generate", {
         "title": proj.title, "genre": proj.genre or "网文",
@@ -1089,7 +1098,7 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
                 )
             )
             if not existing:
-                db.add(OrganizationMember(organization_id=oid, character_id=cid, position=role, status="active", source="ai"))
+                db.add(OrganizationMember(project_id=pid, organization_id=oid, character_id=cid, position=role, status="active", source="ai"))
                 assigned += 1
     await db.commit()
     logger.info(f"[init] 角色-组织关联完成：{assigned}/{len(unassigned)} 个角色已分配")
@@ -1189,6 +1198,16 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
     from app.models.world import WorldSetting
     from app.models.character import Character
     from app.models.organization import Organization
+    from sqlalchemy import func
+
+    existing_outlines = (await db.execute(
+        select(func.count(Outline.id)).where(Outline.project_id == pid)
+    )).scalar() or 0
+    if existing_outlines >= 3:
+        task.outline_done = 1
+        task.status_message = f"已有 {existing_outlines} 章大纲，跳过生成"
+        await db.commit()
+        return None
 
     task.status_message = "生成大纲..."
     await db.commit()

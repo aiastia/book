@@ -3,16 +3,6 @@
 // 原理：共享 createCache() 实例，StyleProvider 确保两端 CSS hash 一致
 import Antd, { createCache, extractStyle } from 'ant-design-vue'
 
-// 尽早拦截 console.warn：Vue 的 <Suspense> 实验性警告在模块初始化阶段触发
-if (import.meta.client) {
-  const rawWarn = console.warn
-  console.warn = (...args: any[]) => {
-    const msg = String(args[0] || '')
-    if (msg.includes('<Suspense> is an experimental feature')) return
-    rawWarn.apply(console, args)
-  }
-}
-
 export default defineNuxtPlugin((nuxtApp) => {
   const cache = createCache()
 
