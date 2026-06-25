@@ -11,6 +11,7 @@ const props = defineProps<{
   chapterTitle?: string
   planData?: Record<string, any> | null
   chapterSummary?: string
+  outlineId?: number | null  // 所属大纲 ID，用于触发 AI 重新规划
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +40,35 @@ const characterFocus = ref<string[]>([])
 const loadingCharacters = ref(false)
 
 const saving = ref(false)
+const regenerating = ref(false)
+
+// AI 重新规划：对该卷重新展开（覆盖模式），AI 重新生成所有子章节的规划
+// 仅在章节有关联大纲时可用
+const canRegenerate = computed(() => props.outlineId != null && props.outlineId > 0)
+
+async function onRegenerate() {
+  if (!props.outlineId) return
+  if (!await msg.confirm(
+    `AI 将重新规划第${props.chapterNumber}章所属卷的所有子章节。\n旧规划数据将被覆盖。`,
+    'AI 重新规划确认',
+  )) return
+  regenerating.value = true
+  try {
+    const { task_id } = await api.expandOutlineAsync(props.outlineId, {
+      target_chapter_count: 3,  // 默认3章，用户后续可在大纲页调整
+      mode: 'replace',
+    })
+    const { trackTask } = useBackgroundTasks()
+    trackTask({ id: task_id, task_type: 'outline_expand', title: `重新规划第${props.chapterNumber}章所属卷` })
+    msg.success('重新规划任务已提交，完成后刷新查看')
+    emit('saved', {})
+    close()
+  } catch (e: any) {
+    msg.error('重新规划失败：' + formatError(e))
+  } finally {
+    regenerating.value = false
+  }
+}
 
 // 冲突类型/情感基调候选项
 const conflictTypeOptions = ['人物冲突', '环境冲突', '内心冲突', '理念冲突', '势力冲突', '命运冲突']
@@ -179,9 +209,7 @@ async function onSave() {
     :width="700"
     centered
     :destroy-on-close="true"
-    :ok-text="saving ? '保存中…' : '保存'"
-    :confirm-loading="saving"
-    @ok="onSave"
+    :footer="null"
     @cancel="close"
   >
     <div v-if="chapterTitle" class="plan-subtitle">章节：{{ chapterTitle }}</div>
@@ -254,6 +282,16 @@ async function onSave() {
         </div>
       </div>
     </a-form>
+    <template #footer>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <a-button v-if="canRegenerate" :loading="regenerating" @click="onRegenerate">🤖 AI 重新规划</a-button>
+        <span v-else></span>
+        <div>
+          <a-button @click="close" :disabled="saving || regenerating">取消</a-button>
+          <a-button type="primary" :loading="saving" @click="onSave" style="margin-left:8px">{{ saving ? '保存中…' : '保存' }}</a-button>
+        </div>
+      </div>
+    </template>
   </a-modal>
 </template>
 

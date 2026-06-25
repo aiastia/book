@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
+import { reactive } from 'vue'
 useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
@@ -91,11 +92,10 @@ const isOneToMany = computed(() => (project.value?.outline_mode || 'one_to_one')
 const modeLabel = computed(() => isOneToMany.value ? '细化模式 (1→N)' : '传统模式 (1→1)')
 const unitLabel = computed(() => isOneToMany.value ? '卷' : '章')
 
-// 展开折叠
-const expandedItems = ref<Set<number>>(new Set())
+// 展开折叠（用 reactive 对象，Set 在模板 has() 可能不响应式）
+const expandedItems = reactive<Record<number, boolean>>({})
 function toggleExpand(id: number) {
-  if (expandedItems.value.has(id)) expandedItems.value.delete(id)
-  else expandedItems.value.add(id)
+  expandedItems[id] = !expandedItems[id]
 }
 
 // 展开为多章
@@ -114,7 +114,7 @@ const batchCount = ref(3)
 // 展开/批量展开都可用时，是否有未展开的大纲（控制「批量展开」按钮显隐）
 const hasUnexpanded = computed(() => !!(outlines.value && outlines.value.some((o: any) => !o.has_chapters)))
 // 预览弹窗 collapse：默认展开所有章节面板（key 统一用字符串，匹配 ant-design-vue 要求）
-const previewActiveKeys = ref<string[]>([])
+const activeTab = ref('')  // 预览 Tab 的 active key
 
 // 额外字段的中文标签映射（AI 生成的英文字段名 → 中文展示名）
 const FIELD_LABELS: Record<string, string> = {
@@ -466,8 +466,8 @@ async function viewExpansion(o: any) {
   try {
     const data = await api.getOutlineChapters(o.id)
     previewData.value = { outline: o, ...data }
-    // 默认展开所有章节面板（key 用字符串匹配 ant-design-vue）
-    previewActiveKeys.value = (data.chapters || []).map((c: any) => String(c.id))
+    // 默认选中第一个 tab
+    activeTab.value = String(data.chapters?.[0]?.id || '')
     showPreview.value = true
   }
   catch (e: any) { msg.error('加载失败：' + formatError(e)) }
@@ -504,7 +504,7 @@ async function deleteExpansion() {
           </template>
           <div class="item-actions">
             <a-button v-if="isOneToMany" type="link" size="small" @click="openExpand(o)">展开</a-button>
-            <a-button type="link" size="small" @click="toggleExpand(o.id)">{{ expandedItems.has(o.id) ? '收起详情' : '展开详情' }}</a-button>
+            <a-button type="link" size="small" @click="toggleExpand(o.id)">{{ expandedItems[o.id] ? '收起详情' : '展开详情' }}</a-button>
           </div>
         </div>
 
@@ -552,7 +552,7 @@ async function deleteExpansion() {
           </div>
 
           <!-- 场景设定（从 structure 解析，展开时显示） -->
-          <div v-if="expandedItems.has(o.id) && getScenes(o).length" class="content-section">
+          <div v-if="expandedItems[o.id] && getScenes(o).length" class="content-section">
             <div class="section-label">🎬 场景设定（{{ getScenes(o).length }}）</div>
             <div class="scene-list">
               <div v-for="(sc, i) in getScenes(o)" :key="i" class="scene-item">
@@ -569,7 +569,7 @@ async function deleteExpansion() {
           </div>
 
           <!-- AI 额外字段（爽点设计/读者钩子/伏笔等，仅展开时显示） -->
-          <div v-if="expandedItems.has(o.id) && getExtraFields(o).length" class="content-section extra-sec">
+          <div v-if="expandedItems[o.id] && getExtraFields(o).length" class="content-section extra-sec">
             <div class="section-label">✨ AI 额外字段（{{ getExtraFields(o).length }}）</div>
             <div class="extra-list">
               <div v-for="f in getExtraFields(o)" :key="f.key" class="extra-item">
@@ -767,13 +767,12 @@ async function deleteExpansion() {
           <a-button size="small" style="margin-left:8px" @click="reExpandFromPreview">🔄 重新展开</a-button>
           <a-button danger size="small" style="margin-left:8px" @click="deleteExpansion">删除展开</a-button>
         </div>
-        <a-tabs v-model:active-key="previewActiveKeys[0] || String(previewData.chapters?.[0]?.id)" type="card" size="small">
-          <a-tab-pane v-for="ch in (previewData.chapters || [])" :key="String(ch.id)">
-            <template #tab>
-              <span style="font-weight:500">第{{ ch.sub_index }}节</span>
-              <span style="margin-left:4px;font-size:12px;color:#595959">{{ ch.title }}</span>
-              <a-tag v-if="ch.expansion_plan?.rhythm_tag" :color="rhythmColor(ch.expansion_plan.rhythm_tag)" size="small" style="margin-left:6px;">{{ ch.expansion_plan.rhythm_tag }}</a-tag>
-            </template>
+        <a-tabs v-model:active-key="activeTab" type="card" size="small">
+          <a-tab-pane
+            v-for="ch in (previewData.chapters || [])"
+            :key="String(ch.id)"
+            :tab="'第' + ch.sub_index + '节 ' + ch.title + (ch.expansion_plan?.rhythm_tag ? ' 「' + ch.expansion_plan.rhythm_tag + '」' : '')"
+          >
             <div v-if="ch.expansion_plan" class="preview-plan" style="max-height:500px;overflow-y:auto;padding:8px 0">
               <!-- 基础标签行 -->
               <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">

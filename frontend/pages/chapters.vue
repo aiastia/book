@@ -805,9 +805,14 @@ async function onPlanSaved() {
                   <span class="ch-row-title">第{{ c.chapter_number }}章：{{ c.title || '无标题' }}</span>
                   <a-tag :color="statusColor(c.status)" size="small">{{ statusText(c.status) }}</a-tag>
                   <a-tag v-if="c.word_count" color="success" size="small">{{ (c.word_count || 0).toLocaleString() }}字</a-tag>
-                  <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
                   <a-tag v-if="c.word_count >= 50 && c.analyzed" color="cyan" size="small">📊 已分析</a-tag>
                   <a-tag v-if="c.word_count >= 50 && !c.analyzed" color="orange" size="small">⏳ 待分析</a-tag>
+                  <a-tooltip v-if="outlineMode === 'one_to_many' && c.has_expansion_plan" title="查看规划">
+                    <a-button type="text" size="small" style="padding:0 3px;font-size:13px;color:#1677ff;min-width:auto;height:auto;line-height:1" @click.stop="openPlanView(c)">◉</a-button>
+                  </a-tooltip>
+                  <a-tooltip v-if="outlineMode === 'one_to_many'" title="编辑规划">
+                    <a-button type="text" size="small" style="padding:0 3px;font-size:13px;color:#8C8C8C;min-width:auto;height:auto;line-height:1" @click.stop="openPlanEditor(c)">✎</a-button>
+                  </a-tooltip>
                   <a-tooltip v-if="!canGenerateChapter(c)" :title="getGenerateDisabledReason(c)">
                     <a-tag color="warning" size="small">🔒 {{ getGenerateDisabledReason(c).includes('分析') ? '需先分析前章' : '需前置章节' }}</a-tag>
                   </a-tooltip>
@@ -818,9 +823,7 @@ async function onPlanSaved() {
               <div class="ch-row-actions" @click.stop>
                 <a-button type="text" size="small" :disabled="!c.word_count" @click.stop="goReader(c)">📖 阅读</a-button>
                 <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
-                <a-button v-if="outlineMode === 'one_to_many' && c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
-                <a-button v-if="outlineMode === 'one_to_many'" type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
-                  <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
+                <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
                 <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
                 <a-popconfirm title="确认删除该章节？" @confirm="onDelete(c.id)">
                   <a-button type="text" size="small" danger @click.stop>🗑️ 删除</a-button>
@@ -843,6 +846,12 @@ async function onPlanSaved() {
               <a-tag v-if="c.has_expansion_plan" color="purple" size="small">📋 已规划</a-tag>
               <a-tag v-if="c.word_count >= 50 && c.analyzed" color="cyan" size="small">📊 已分析</a-tag>
               <a-tag v-if="c.word_count >= 50 && !c.analyzed" color="orange" size="small">⏳ 待分析</a-tag>
+              <a-tooltip v-if="outlineMode === 'one_to_many' && c.has_expansion_plan" title="查看规划">
+                <a-button type="text" size="small" style="padding:0 3px;font-size:13px;color:#1677ff;min-width:auto;height:auto;line-height:1" @click.stop="openPlanView(c)">◉</a-button>
+              </a-tooltip>
+              <a-tooltip v-if="outlineMode === 'one_to_many'" title="编辑规划">
+                <a-button type="text" size="small" style="padding:0 3px;font-size:13px;color:#8C8C8C;min-width:auto;height:auto;line-height:1" @click.stop="openPlanEditor(c)">✎</a-button>
+              </a-tooltip>
               <a-tag v-if="c.quality_alert?.includes('consistency_issue')" color="red" size="small">⚠️矛盾</a-tag>
               <a-tag v-if="c.quality_alert?.includes('low_score')" color="orange" size="small">低分</a-tag>
               <a-tag v-if="c.quality_score" color="processing" size="small">评分{{ c.quality_score }}</a-tag>
@@ -857,8 +866,6 @@ async function onPlanSaved() {
           <div class="ch-row-actions" @click.stop>
             <a-button type="text" size="small" :disabled="!c.word_count" @click.stop="goReader(c)">📖 阅读</a-button>
             <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
-            <a-button v-if="c.has_expansion_plan" type="text" size="small" @click.stop="openPlanView(c)">📋 规划</a-button>
-            <a-button type="text" size="small" @click.stop="openPlanEditor(c)">{{ c.has_expansion_plan ? '✏️ 改规划' : '📋 规划' }}</a-button>
             <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
             <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
           </div>
@@ -1110,6 +1117,7 @@ async function onPlanSaved() {
       :chapter-title="planEditingChapter.title"
       :plan-data="planCurrent"
       :chapter-summary="planSummary"
+      :outline-id="planEditingChapter.outline_id"
       @saved="onPlanSaved"
     />
 
