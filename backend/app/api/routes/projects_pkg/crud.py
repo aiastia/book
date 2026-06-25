@@ -153,8 +153,6 @@ async def export_project(
             select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
         )).scalars().all()
         lines = [p.title or "未命名", ""]
-        if p.synopsis:
-            lines += [p.synopsis, ""]
         lines.append("=" * 40)
         for ch in chapters:
             lines += ["", f"第{ch.chapter_number}章 {ch.title or ''}", ""]

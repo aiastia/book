@@ -168,6 +168,10 @@ class OutlineExpandRequest(BaseModel):
     target_chapter_count: int = 3
 
 
+class BatchExpandRequest(BaseModel):
+    target_chapter_count: int = 3
+
+
 class InspireRequest(BaseModel):
     idea: str
 

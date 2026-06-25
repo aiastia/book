@@ -752,41 +752,60 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
     return {"task_id": task_id}
 
 
-@router.post("/{project_id}/outlines/{outline_id}/expand")
-async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """大纲展开为多章（1对多模式核心）：AI 将一条大纲拆成 N 个章节计划，创建 N 个 Chapter。
+async def _expand_outline_core(
+    db: AsyncSession,
+    project_id: int,
+    outline_id: int,
+    target_chapter_count: int,
+    user_id: int,
+    skip_existing_check: bool = False,
+) -> dict:
+    """大纲展开为多章的核心逻辑（同步/异步/批量复用）。
 
-    - 章号分配：当前大纲起始章号 = 前置所有大纲（chapter_number 更小）已展开的章节数总和 + 1
-    - 每个 Chapter 关联 outline_id，含 sub_index + expansion_plan
+    AI 将一条大纲拆成 N 个章节计划，创建 N 个 Chapter（关联 outline_id，
+    含 sub_index + expansion_plan）。
+
+    Args:
+        db: 数据库会话
+        project_id: 项目ID
+        outline_id: 大纲ID
+        target_chapter_count: 目标章节数
+        user_id: 用户ID（用于构建 AI 客户端）
+        skip_existing_check: 跳过"已展开"检查（批量模式下由调用方统一校验）
+
+    Returns:
+        {"expanded": [...], "count": int, "start_chapter": int}
+
+    Raises:
+        HTTPException: 大纲不存在 / 已展开 / AI 返回格式错误
     """
-    proj = await get_user_project(db, project_id, user)
+    proj = await get_user_project(db, project_id, type("U", (), {"id": user_id})())
     outline = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
     if not outline:
         raise HTTPException(404, "大纲不存在")
-    # 若已展开则不允许重复
-    existing_chapters = (await db.execute(
-        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-    )).scalars().all()
-    if existing_chapters:
-        raise HTTPException(400, f"此大纲已展开为 {len(existing_chapters)} 章，请先删除再重新展开")
+    if not skip_existing_check:
+        existing_chapters = (await db.execute(
+            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+        )).scalars().all()
+        if existing_chapters:
+            raise HTTPException(400, f"此大纲已展开为 {len(existing_chapters)} 章，请先删除再重新展开")
 
     ctx = await _project_context(db, project_id, proj, use_tools=True)
-    engine, ai_client = await make_engine_and_client(db, user.id)
+    engine, ai_client = await make_engine_and_client(db, user_id)
     result = await engine.execute_skill("outline_expand_single", ai_client, {
         "outline_order_index": str(outline.chapter_number), "outline_title": outline.title or "无标题",
-        "outline_summary": outline.summary or "", "target_chapter_count": str(req.target_chapter_count),
+        "outline_summary": outline.summary or "", "target_chapter_count": str(target_chapter_count),
         "project_title": proj.title, "project_genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
         "organizations_info": ctx["organizations_info"],
-        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{req.target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_tone(情感基调)、narrative_goal(叙事目标)、conflict_type(冲突类型)。返回JSON数组。",
+        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_tone(情感基调)、narrative_goal(叙事目标)、conflict_type(冲突类型)。返回JSON数组。",
     })
     check_skill_error(result)
     expanded_data = result.get("json") or []
     if not isinstance(expanded_data, list):
         raise HTTPException(500, "AI 返回的展开格式不正确")
 
-    # 计算起始章号
-    # 策略：取当前已存在的最大 chapter_number + 1（而非累加前置大纲章节数）
+    # 计算起始章号：取当前已存在的最大 chapter_number + 1
     # 这样即使前置大纲未展开，章号也不会冲突
     max_ch = await db.scalar(select(func.max(Chapter.chapter_number)).where(
         Chapter.project_id == project_id,
@@ -795,7 +814,7 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
 
     # 创建 N 个 Chapter
     created = []
-    for idx, plan in enumerate(expanded_data[:req.target_chapter_count]):
+    for idx, plan in enumerate(expanded_data[:target_chapter_count]):
         if not isinstance(plan, dict):
             continue
         plan_data = {
@@ -829,6 +848,158 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
         })
     await db.commit()
     return {"expanded": created, "count": len(created), "start_chapter": start_chapter}
+
+
+@router.post("/{project_id}/outlines/{outline_id}/expand")
+async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """大纲展开为多章（1对多模式核心，同步版）：AI 将一条大纲拆成 N 个章节计划，创建 N 个 Chapter。
+
+    - 章号分配：取当前已存在最大 chapter_number + 1（避免前置未展开导致冲突）
+    - 每个 Chapter 关联 outline_id，含 sub_index + expansion_plan
+    """
+    return await _expand_outline_core(db, project_id, outline_id, req.target_chapter_count, user.id)
+
+
+@router.post("/{project_id}/outlines/{outline_id}/expand-async")
+async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """大纲展开为多章（异步队列版）：立即返回 task_id，后台执行。
+
+    完成后通过 WebSocket 推送，前端轮询/浮窗查看进度。task_type = outline_expand。
+    """
+    proj = await get_user_project(db, project_id, user)
+    # 提前校验大纲存在 + 未展开，避免任务跑半天才发现错误
+    outline = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
+    if not outline:
+        raise HTTPException(404, "大纲不存在")
+    existing = (await db.execute(
+        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+    )).scalars().all()
+    if existing:
+        raise HTTPException(400, f"此大纲已展开为 {len(existing)} 章，请先删除再重新展开")
+
+    from app.services.async_ai_service import submit_async_task
+
+    async def _run_expand(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        await tracker.update(stage="preparing", message="准备展开大纲...")
+        async with async_session() as task_db:
+            await tracker.update(stage="generating", message=f"AI 正在展开为 {payload['target_chapter_count']} 章...")
+            res = await _expand_outline_core(
+                task_db, payload["project_id"], payload["outline_id"],
+                payload["target_chapter_count"], payload["user_id"],
+                skip_existing_check=True,  # 提前校验过了
+            )
+            await tracker.update(stage="saving", message="保存展开章节...")
+        await tracker.complete(
+            message=f"已展开为 {res['count']} 章（起始第{res['start_chapter']}章）",
+            result=res,
+        )
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id,
+        task_type="outline_expand",
+        title=f"展开第{outline.chapter_number}卷《{outline.title or ''}》",
+        payload={
+            "project_id": project_id, "outline_id": outline_id,
+            "target_chapter_count": req.target_chapter_count, "user_id": user.id,
+        },
+        runner=_run_expand,
+    )
+    return {"task_id": task_id}
+
+
+@router.post("/{project_id}/outlines/batch-expand-async")
+async def batch_expand_outlines_async(project_id: int, req: BatchExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """批量展开所有未展开的大纲（异步队列版）：一个后台任务内按序展开每卷。
+
+    - 自动跳过已展开的大纲
+    - 按大纲 order 逐卷展开（前置完成后再展开下一卷，保证章号连续）
+    - progress_details 推送 {done, total, current_outline} 供前端显示进度
+    - task_type = outline_expand（完成回调与单卷展开共用）
+
+    请求体：
+        target_chapter_count: int  每卷展开的章节数（默认 3）
+    """
+    proj = await get_user_project(db, project_id, user)
+    if (proj.outline_mode or "one_to_one") != "one_to_many":
+        raise HTTPException(400, "批量展开仅在「细化模式(1→N)」下可用")
+    # 拉取所有大纲（按章号），确认有待展开项，避免建空任务
+    outlines_all = (await db.execute(
+        select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number)
+    )).scalars().all()
+    # 查已展开的大纲ID集合（has_chapters 是 list_outlines 拼的虚拟字段，这里用 Chapter 表统计）
+    expanded_ids: set = set()
+    if outlines_all:
+        rows = (await db.execute(
+            select(Chapter.outline_id).where(
+                Chapter.project_id == project_id, Chapter.outline_id.isnot(None)
+            ).distinct()
+        )).all()
+        expanded_ids = {r[0] for r in rows}
+    pending = [o for o in outlines_all if o.id not in expanded_ids]
+    if not pending:
+        raise HTTPException(400, "没有可展开的大纲（所有大纲都已展开）")
+
+    from app.services.async_ai_service import submit_async_task
+    target_count = req.target_chapter_count
+    pending_snapshot = [{"id": o.id, "chapter_number": o.chapter_number, "title": o.title or ""} for o in pending]
+    project_id_snap = project_id
+    user_id_snap = user.id
+
+    async def _run_batch_expand(task_id: int, payload: dict):
+        from app.services import background_task_service as bgs
+        tracker = bgs.TaskProgressTracker(task_id)
+        items = payload["items"]
+        total = len(items)
+        await tracker.update(stage="preparing", message=f"准备批量展开 {total} 卷...", progress_details={"done": 0, "total": total})
+        done = 0
+        failed = []
+        total_chapters = 0
+        for item in items:
+            if await tracker.is_cancelled():
+                await tracker.fail("用户已取消")
+                return
+            await tracker.update(
+                stage="generating",
+                message=f"正在展开第 {item['chapter_number']} 卷《{item['title']}》（{done + 1}/{total}）...",
+                progress=int(20 + (done / total) * 65),
+                progress_details={"done": done, "total": total, "current_outline": item},
+            )
+            try:
+                async with async_session() as task_db:
+                    res = await _expand_outline_core(
+                        task_db, payload["project_id"], item["id"],
+                        payload["target_chapter_count"], payload["user_id"],
+                        skip_existing_check=True,
+                    )
+                    total_chapters += res["count"]
+            except HTTPException as e:
+                # 单卷失败不阻断整体，记录后继续
+                failed.append({"outline_id": item["id"], "title": item["title"], "error": e.detail})
+                logger.warning(f"[batch-expand] 第{item['chapter_number']}卷展开失败: {e.detail}")
+            except Exception as e:
+                failed.append({"outline_id": item["id"], "title": item["title"], "error": str(e)})
+                logger.warning(f"[batch-expand] 第{item['chapter_number']}卷展开异常: {e}")
+            done += 1
+            await tracker.update(
+                stage="saving",
+                message=f"已完成 {done}/{total} 卷",
+                progress=int(20 + (done / total) * 72),
+                progress_details={"done": done, "total": total, "current_outline": item},
+            )
+
+        summary = f"批量展开完成：{total} 卷 → {total_chapters} 章" + (f"，{len(failed)} 卷失败" if failed else "")
+        await tracker.complete(message=summary, result={"total_outlines": total, "total_chapters": total_chapters, "failed": failed})
+
+    task_id = await submit_async_task(
+        user_id=user.id, project_id=project_id_snap,
+        task_type="outline_expand",
+        title=f"批量展开 {len(pending)} 卷大纲",
+        payload={"project_id": project_id_snap, "user_id": user_id_snap, "items": pending_snapshot, "target_chapter_count": target_count},
+        runner=_run_batch_expand,
+    )
+    return {"task_id": task_id, "pending_count": len(pending)}
 
 
 @router.get("/{project_id}/outlines/{outline_id}/chapters")
