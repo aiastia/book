@@ -222,7 +222,7 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
 }
 function getSummaryPreview(o: any): string {
   const summary = o.summary || ''
-  const isExpanded = expandedItems.value.has(o.id)
+  const isExpanded = expandedItems[o.id]
   if (isExpanded || summary.length <= 120) return summary
   return summary.substring(0, 120) + '…'
 }
