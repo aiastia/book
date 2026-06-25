@@ -612,10 +612,15 @@ async def generate_career_system(
             )
 
     engine, ai_client = await make_engine_and_client(db, user.id)
-    default_prompt = f"请为这部{proj.genre or '网文'}生成职业体系：精确 2 个主职业 + 3 个副职业。主职业需有完整的进阶境界体系。"
-    if append_mode and count:
-        type_hint = f"生成 {count} 个{'主职业' if req_type == 'main' else '副职业' if req_type == 'sub' else ''}".strip()
-        default_prompt = f"在现有职业体系基础上{type_hint}，补充新的职业（不要与已有重复）。{existing_info}"
+    default_prompt = f"请为这部{proj.genre or '网文'}生成职业体系。如果该题材不需要职业体系（如快穿甜宠/纯言情等），返回空数组即可。"
+    if count and count > 0:
+        type_hint = f"生成 {count} 个{'主职业' if req_type == 'main' else '副职业' if req_type == 'sub' else '职业'}"
+        if append_mode:
+            default_prompt = f"在现有职业体系基础上{type_hint}，补充新的职业（不要与已有重复）。{existing_info}"
+        else:
+            default_prompt += f" 本次需{type_hint}。"
+    elif append_mode:
+        default_prompt = f"在现有职业体系基础上补充新的职业（不要与已有重复）。{existing_info}"
     if user_prompt:
         default_prompt += f"\n额外要求：{user_prompt}"
 

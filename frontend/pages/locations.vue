@@ -24,7 +24,7 @@ const form = reactive({
   importance: 'normal', first_appear_chapter: null as number | null, danger_level: 'safe',
 })
 
-const typeList = ['城市', '区域', '建筑', '秘境', '自然景观', '国家', '大陆', '其他']
+const typeList = ['城市', '区域', '建筑', '秘境', '自然景观', '国家', '大陆', '枢纽空间', '其他']
 const importanceMeta: Record<string, { label: string; color: string }> = {
   minor: { label: '次要', color: 'default' },
   normal: { label: '普通', color: 'blue' },

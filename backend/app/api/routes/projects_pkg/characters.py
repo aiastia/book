@@ -103,17 +103,30 @@ async def create_character(project_id: int, req: CharacterCreate, db: AsyncSessi
 @router.post("/{project_id}/characters/generate")
 async def generate_character(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """AI 生成单个角色并存库"""
-    await get_user_project(db, project_id, user)
+    proj = await get_user_project(db, project_id, user)
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
     world_info = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds]) or "暂无"
     existing_chars = ", ".join([f"{c.name}({c.role})" for c in chars]) or "暂无"
 
+    # 补充职业体系和组织上下文（让 AI 能精准匹配 occupation / organization_memberships）
+    from app.models.career import Career
+    from app.models.organization import Organization
+    all_careers = (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
+    career_info = "、".join(c.name for c in all_careers[:8]) if all_careers else "暂无"
+    orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
+    org_info = "、".join(o.name for o in orgs[:10]) if orgs else "暂无"
+
     engine, ai_client = await make_engine_and_client(db, user.id)
     result = await engine.execute_skill("character_generate", ai_client, {
+        "title": proj.title, "genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
         "world_info": world_info, "role_type": req.get("role_type", "配角"),
         "existing_chars": existing_chars,
-        "user_prompt": f"请生成一个{req.get('role_type', '配角')}角色。{req.get('extra', '')}",
+        "user_prompt": (
+            f"请生成一个{req.get('role_type', '配角')}角色。{req.get('extra', '')}\n"
+            f"【重要】职业（occupation）务必从已有职业体系中选择：{career_info}\n"
+            f"【重要】所属组织（organization_memberships）务必从已有组织中选择：{org_info}。无组织则返回空数组 []"
+        ),
     })
     check_skill_error(result)
     data = result.get("json") or {}

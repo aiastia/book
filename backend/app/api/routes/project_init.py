@@ -194,9 +194,9 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
         "title": proj.title, "genre": proj.genre or "网文",
         "world_info": world_info,
         "user_prompt": (
-            f"请为《{proj.title}》设计 5 个主职业（career_type=\"main\"）。"
-            f"每个主职业需有完整的进阶境界体系（stages 数组，5-9 个阶段，每阶段含 name/level/requirement/ability/power_level）。"
-            f"主职业是世界观的核心力量体系，请设计得详细且有特色。"
+            f"请为《{proj.title}》设计主职业（career_type=\"main\"）。"
+            f"如果本作题材需要完整职业体系（修真/玄幻/游戏等），设计 5 个主职业，每个有 5-9 个阶段。"
+            f"如果本作题材不需要职业体系（如快穿甜宠/纯言情等），返回空数组即可。"
         ),
     }, "主职业")
     if cerr:
@@ -219,9 +219,9 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
         "title": proj.title, "genre": proj.genre or "网文",
         "world_info": world_info,
         "user_prompt": (
-            f"请为《{proj.title}》设计 8 个副职业（career_type=\"sub\"）。"
-            f"副职业是主职业的补充和变体，有 3-5 个精简的进阶阶段。"
-            f"可以和已生成的主职业有关联，但不要重复。直接输出副职业的 JSON 数组。"
+            f"请为《{proj.title}》设计副职业（career_type=\"sub\"）。"
+            f"如果主职业已生成，副职业作为补充和变体，有 3-5 个精简阶段。"
+            f"如果主职业返回了空数组（题材不需要职业体系），副职业也返回空数组。"
         ),
     }, "副职业")
     if cerr:
