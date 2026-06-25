@@ -4,7 +4,7 @@
   "description": "根据小说信息生成6个合适的类型标签的用户提示词",
   "category": "import",
   "skill_type": "builtin",
-  "system_prompt": "原始想法：{initial_idea}\n书名：{title}\n简介：{description}\n主题：{theme}\n请生成6个类型标签",
+  "system_prompt": "我的创作想法：{initial_idea}\n书名：{title}\n简介：{description}\n主题：{theme}\n\n请根据以上信息判断这部小说的类型坐标——区分核心类型归属和次要特色标签，生成6个精准的类型标签（每个2-4字）。",
   "parameters": {
     "type": "object",
     "properties": {}

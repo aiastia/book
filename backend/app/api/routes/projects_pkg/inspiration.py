@@ -85,7 +85,7 @@ async def inspiration_quick_complete(project_id: int, req: InspirationStepReques
     if req.description: existing += f" 简介:{req.description}"
     if req.theme: existing += f" 主题:{req.theme}"
     result = await engine.execute_skill("inspiration_quick_complete", ai_client, {
-        "existing": existing, "user_prompt": "请补全缺失的字段",
+        "existing": existing, "user_prompt": "请先审视以上创作片段——逻辑是否自洽？核心机制是否清晰？角色动机是否合理？然后基于你的批判性分析，生成有深度的书名、简介、主题和类型标签。",
     })
     check_skill_error(result)
     return result.get("json") or {}
@@ -110,7 +110,7 @@ async def global_inspiration_quick_complete(req: InspirationStepRequest, db: Asy
     if req.description: existing += f" 简介:{req.description}"
     if req.theme: existing += f" 主题:{req.theme}"
     result = await engine.execute_skill("inspiration_quick_complete", ai_client, {
-        "existing": existing, "user_prompt": "请补全缺失的字段",
+        "existing": existing, "user_prompt": "请先审视以上创作片段——逻辑是否自洽？核心机制是否清晰？角色动机是否合理？然后基于你的批判性分析，生成有深度的书名、简介、主题和类型标签。",
     })
     check_skill_error(result)
     return result.get("json") or {}

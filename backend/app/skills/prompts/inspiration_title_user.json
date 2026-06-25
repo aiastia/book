@@ -4,7 +4,7 @@
   "description": "根据用户的原始想法生成6个书名建议的用户提示词",
   "category": "import",
   "skill_type": "builtin",
-  "system_prompt": "用户的想法：{initial_idea}\n请生成6个书名建议",
+  "system_prompt": "我的创作想法：{initial_idea}\n\n请先判断这个想法的叙事基调（轻松/正剧/悬疑/沙雕等）和目标读者群，然后生成6个不同风格倾向的书名建议（网感型、古风型、直白型、悬念型各至少一个）。",
   "parameters": {
     "type": "object",
     "properties": {}

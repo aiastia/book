@@ -111,6 +111,8 @@ class AIClient:
         temperature: float = None,
         top_p: float = None,
         max_tokens: int = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
         response_format: dict = None,
         tools: list = None,
         tool_choice: str = None,
@@ -123,6 +125,8 @@ class AIClient:
             "temperature": temperature or settings.AI_TEMPERATURE,
             "top_p": top_p or settings.AI_TOP_P,
             "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+            "frequency_penalty": frequency_penalty if frequency_penalty is not None else settings.AI_FREQUENCY_PENALTY,
+            "presence_penalty": presence_penalty if presence_penalty is not None else settings.AI_PRESENCE_PENALTY,
         }
         if response_format:
             kwargs["response_format"] = response_format
@@ -157,6 +161,8 @@ class AIClient:
         temperature: float = None,
         top_p: float = None,
         max_tokens: int = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
         response_format: dict = None,
         tools: list = None,
         tool_choice: str = None,
@@ -173,6 +179,8 @@ class AIClient:
             "temperature": temperature or settings.AI_TEMPERATURE,
             "top_p": top_p or settings.AI_TOP_P,
             "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+            "frequency_penalty": frequency_penalty if frequency_penalty is not None else settings.AI_FREQUENCY_PENALTY,
+            "presence_penalty": presence_penalty if presence_penalty is not None else settings.AI_PRESENCE_PENALTY,
             "stream": True,
         }
         if response_format:
@@ -260,6 +268,8 @@ class AIClient:
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
+        frequency_penalty: float = None,
+        presence_penalty: float = None,
     ) -> dict:
         """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
         import logging
@@ -269,6 +279,8 @@ class AIClient:
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
         )
         if result.get("error"):
             return result
@@ -286,6 +298,8 @@ class AIClient:
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
             )
             if result.get("error"):
                 return result
