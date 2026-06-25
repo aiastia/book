@@ -333,8 +333,6 @@ loadAllRelations()
           <div v-if="(c.sub_careers || []).length" class="desc-row"><span class="desc-label">副修</span><span class="desc-value"><a-tag v-for="(sc, i) in (c.sub_careers || [])" :key="i" color="cyan" size="small" style="margin-right:4px">{{ sc.name || careerNameById(sc.career_id) }}<span v-if="sc.stage_desc"> · {{ sc.stage_desc }}</span></a-tag></span></div>
           <!-- 组织 -->
           <div v-if="c.organization_id" class="desc-row"><span class="desc-label">组织</span><span class="desc-value"><a-tag color="blue" size="small">{{ orgNameById(c.organization_id) }}</a-tag></span></div>
-          <!-- 背景（截断） -->
-          <div v-if="c.background" class="desc-row"><span class="desc-label">背景</span><span class="desc-value">{{ expandedChars.has(c.id) ? c.background : (c.background || '').slice(0, 80) + ((c.background || '').length > 80 ? '…' : '') }}</span></div>
 
           <!-- 展开内容 -->
           <template v-if="expandedChars.has(c.id)">

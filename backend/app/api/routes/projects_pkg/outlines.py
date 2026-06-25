@@ -217,17 +217,7 @@ def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_c
 
 
 async def _project_context(db: AsyncSession, project_id: int, project: Project, use_tools: bool = False) -> dict:
-    """收集项目的世界观/角色/组织上下文信息（生成大纲时复用）。
-
-    分层策略：近的全量、远的精简。
-    - 主角/反派 → 完整信息
-    - 最近章节涉及的配角 → 中等信息
-    - 其他角色 → 仅名字+定位
-
-    如果 use_tools=True（AI 有工具调用能力），则精简上下文：
-    只发核心世界观 + 角色名单，不传详细设定。AI 首次调用时通过
-    list_available_entities + query_* 工具按需获取信息，大幅节省首轮 token。
-    """
+    """收集项目的世界观/角色/组织上下文信息。use_tools=True 时精简上下文，AI 用工具按需获取。"""
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
     orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
@@ -241,8 +231,6 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
     core = "\n".join(core_parts)
 
     if use_tools:
-        # 工具模式：角色信息照样发（系统直接提供），世界设定条目不传，引导 AI 用工具查
-        detail_items = ""  # 不传详细设定，AI 通过工具按需查询
         tool_hint = (
             "\n\n💡 世界设定条目（地理/历史/文化等）、组织详情、地点信息等辅助资料可通过工具查询。"
             "角色信息已提供，无需查询。建议先调用 list_available_entities 了解可查内容。"
@@ -252,7 +240,7 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
         detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
         world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
 
-    # 角色：工具模式下仅发名字+角色+身份（一行），详细信息 AI 可用 query_character 按需获取
+    # 角色：工具模式下仅发名字+角色+身份（一行），详细用工具查；非工具模式分层注入
     char_parts = []
     if use_tools:
         for c in chars:
@@ -260,9 +248,7 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
             if c.identity: info += f"，{c.identity[:60]}"
             info += "）"
             char_parts.append(info)
-        chars_info = "\n".join(char_parts)
     else:
-        # 查最近大纲中涉及的角色名（用于判断"最近活跃"）
         recent_char_names = set()
         try:
             recent_outlines = (await db.execute(
@@ -270,44 +256,43 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
                 .order_by(Outline.chapter_number.desc()).limit(5)
             )).scalars().all()
             for o in recent_outlines:
-            if o.characters and isinstance(o.characters, list):
-                for c in o.characters:
-                    recent_char_names.add(str(c).strip() if isinstance(c, str) else c.get("name", ""))
-    except Exception:
-        pass
+                if o.characters and isinstance(o.characters, list):
+                    for c in o.characters:
+                        recent_char_names.add(str(c).strip() if isinstance(c, str) else c.get("name", ""))
+        except Exception:
+            pass
 
-    for c in chars:
-        is_core = c.role in ("主角", "反派")
-        is_recent = c.name in recent_char_names or not recent_char_names
-
-        if is_core:
-            lines = [f"- {c.name}（{c.role}，{c.gender or ''}，{c.age or '?'}岁）"]
-            if c.identity: lines.append(f"  身份：{c.identity}")
-            if c.personality: lines.append(f"  性格：{c.personality}")
-            if c.background: lines.append(f"  背景：{c.background}")
-            if c.story_goal: lines.append(f"  目标：{c.story_goal}")
-            if c.motivation: lines.append(f"  动机：{c.motivation}")
-            if c.weakness: lines.append(f"  弱点：{c.weakness}")
-            if c.occupation: lines.append(f"  职业：{c.occupation}")
-            if c.ability: lines.append(f"  能力：{c.ability}")
-            char_parts.append("\n".join(lines))
-        elif is_recent:
-            lines = [f"- {c.name}（{c.role}，{c.gender or ''}）"]
-            if c.personality: lines.append(f"  性格：{c.personality[:120]}")
-            if c.occupation: lines.append(f"  职业：{c.occupation}")
-            if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
-            char_parts.append("\n".join(lines))
-        else:
-            char_parts.append(f"- {c.name}（{c.role}）")
-
+        for c in chars:
+            is_core = c.role in ("主角", "反派")
+            is_recent = c.name in recent_char_names or not recent_char_names
+            if is_core:
+                lines = [f"- {c.name}（{c.role}，{c.gender or ''}，{c.age or '?'}岁）"]
+                if c.identity: lines.append(f"  身份：{c.identity}")
+                if c.personality: lines.append(f"  性格：{c.personality}")
+                if c.background: lines.append(f"  背景：{c.background}")
+                if c.story_goal: lines.append(f"  目标：{c.story_goal}")
+                if c.motivation: lines.append(f"  动机：{c.motivation}")
+                if c.weakness: lines.append(f"  弱点：{c.weakness}")
+                if c.occupation: lines.append(f"  职业：{c.occupation}")
+                if c.ability: lines.append(f"  能力：{c.ability}")
+                char_parts.append("\n".join(lines))
+            elif is_recent:
+                lines = [f"- {c.name}（{c.role}，{c.gender or ''}）"]
+                if c.personality: lines.append(f"  性格：{c.personality[:120]}")
+                if c.occupation: lines.append(f"  职业：{c.occupation}")
+                if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
+                char_parts.append("\n".join(lines))
+            else:
+                char_parts.append(f"- {c.name}（{c.role}）")
     chars_info = "\n\n".join(char_parts) if char_parts else "暂无"
 
-    # 组织：全部显示但限制长度（工具模式跳过）
-    orgs_info = ""
+    # 组织：全部显示（工具模式下仅发送简要列表）
     if not use_tools:
         orgs_info = "\n".join(
             [f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}" for o in orgs]
         ) or "暂无"
+    else:
+        orgs_info = "\n".join([f"- {o.name}" for o in orgs]) or "暂无"
 
     char_names = {c.name for c in chars}
     org_names = {o.name for o in orgs}
@@ -323,61 +308,6 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
         "rules": project.world_rules or "",
     }
 
-
-@router.post("/{project_id}/outlines/generate")
-async def generate_outlines(project_id: int, req: OutlineGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    project = await get_user_project(db, project_id, user)
-    ctx = await _project_context(db, project_id, project, use_tools=True)
-    engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("outline_create", ai_client, {
-        **ctx,
-        "title": project.title,
-        "genre": project.genre or "网文",
-        "theme": project.genre or "网文",
-        "synopsis": project.synopsis or "暂无简介",
-        "chapter_count": str(req.chapter_count),
-        "narrative_perspective": project.narrative_pov or "第三人称",
-        "narrative_pov": project.narrative_pov or "第三人称",
-        "mcp_references": "",
-        "requirements": "",
-        "user_prompt": f"请为《{project.title}》生成{req.chapter_count}章大纲。如需确认角色、组织、伏笔等，可使用工具查询。",
-    }, tools=get_chapter_tools(), tool_executor=make_tool_executor(db, project_id, req.chapter_count + 1))
-    check_skill_error(result)
-    outlines_data = result.get("json") or []
-    if not isinstance(outlines_data, list):
-        raise HTTPException(500, "AI 返回的大纲格式不正确")
-    created = []
-    created_outline_objs = []
-    for idx, item in enumerate(outlines_data):
-        o = _build_outline(project_id, item, index=idx, char_names=ctx["char_names"], org_names=ctx["org_names"])
-        db.add(o)
-        created_outline_objs.append(o)
-        created.append(item)
-    await db.flush()  # 拿到 outline.id
-
-    # 1对1模式：自动为每条大纲创建对应章节（章号=chapter_number，outline_id=NULL）
-    # 1对多模式：只存大纲，不创建章节（用户后续手动"展开为多章"）
-    if (project.outline_mode or "one_to_one") == "one_to_one":
-        for o in created_outline_objs:
-            # 检查是否已存在同章号的章节
-            existing = (await db.execute(
-                select(Chapter).where(Chapter.project_id == project_id, Chapter.chapter_number == o.chapter_number)
-            )).scalars().first()
-            if existing:
-                continue
-            ch = Chapter(
-                project_id=project_id,
-                chapter_number=o.chapter_number,
-                title=o.title,
-                summary=o.summary[:200] if o.summary else "",
-                status="draft",
-                outline_id=None,  # 1对1不关联
-                sub_index=1,
-                generation_mode="one_to_one",
-            )
-            db.add(ch)
-        await db.commit()
-    await db.commit()
 
     # 验证大纲中涉及的角色/组织是否都已创建
     world_ctx = build_world_context(project)
