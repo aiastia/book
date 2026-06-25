@@ -252,8 +252,8 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
 
 
 async def _step_characters(db, task, pid, proj, engine, ai_client):
-    """步骤：角色批量生成（拆分为两次请求：先主角+反派，后配角，避免 Cloudflare 超时）。
-    
+    """步骤：角色批量生成（含主角/配角/反派，职业从已有体系中选择）。
+
     组织在后续步骤生成，角色暂不关联组织。
     """
     import logging
@@ -270,67 +270,41 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
         await db.commit()
         return None
 
+    task.status_message = "生成角色..."
+    await db.commit()
+
     from app.models.career import Career
     careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
     career_info = "、".join(f"{c.name}({c.career_type})" for c in careers[:8]) if careers else "暂无"
-    world_info = _build_world_info(proj)
-    all_chars = []
-    existing_names = set()
 
-    # 第一次：生成主角 + 反派（2 个核心角色）
-    task.status_message = "生成核心角色（主角/反派）..."
-    await db.commit()
     result, cerr = await _safe_skill_call(engine, ai_client, "characters_batch_generation", {
         "genre": proj.genre or "网文", "title": proj.title,
-        "synopsis": proj.synopsis or "暂无简介", "count": "2",
+        "synopsis": proj.synopsis or "暂无简介", "count": "5",
         "existing_characters": "暂无",
-        "world_info": world_info,
+        "world_info": _build_world_info(proj),
         "user_prompt": (
-            f"请生成2个核心角色：1个主角、1个反派。每个角色必须详细完整。\n"
+            f"请生成5个角色（必须包含1个主角、1个反派、其余配角）。\n"
             f"已有职业体系：{career_info}\n"
             f"组织将在后续步骤生成，角色的 organization_memberships 暂返回空数组 []。"
         ),
-    }, "核心角色")
+    }, "角色")
     if cerr:
         return cerr
 
-    core_data = result.get("json") or []
-    if not isinstance(core_data, list):
-        logger.error(f"[init] 核心角色生成返回非数组: {type(core_data)}")
-        return "核心角色生成返回格式错误"
-    all_chars.extend(core_data)
+    chars_data = result.get("json") or []
+    if not isinstance(chars_data, list):
+        logger.error(f"[init] 角色生成返回非数组格式: {type(chars_data)}")
+        return "角色生成返回格式错误"
 
-    # 先保存第一批，拿到名字列表传给第二次
-    await _save_characters(db, pid, core_data, existing_names)
+    existing_names = set()
+    await _save_characters(db, pid, chars_data, existing_names)
 
-    # 第二次：生成配角（3 个）
-    task.status_message = "生成配角..."
-    await db.commit()
-    existing_str = "、".join(sorted(existing_names)[:12]) if existing_names else "暂无"
-    result2, cerr2 = await _safe_skill_call(engine, ai_client, "characters_batch_generation", {
-        "genre": proj.genre or "网文", "title": proj.title,
-        "synopsis": proj.synopsis or "暂无简介", "count": "3",
-        "existing_characters": existing_str,
-        "world_info": world_info,
-        "user_prompt": (
-            f"请在上文已有角色的基础上，补充3个配角。不要重复已有角色名。\n"
-            f"已有职业体系：{career_info}\n"
-            f"组织将在后续步骤生成，角色的 organization_memberships 暂返回空数组 []。"
-        ),
-    }, "配角")
-    if cerr2:
-        return cerr2
-
-    sub_data = result2.get("json") or []
-    if not isinstance(sub_data, list):
-        logger.error(f"[init] 配角生成返回非数组: {type(sub_data)}")
-        return "配角生成返回格式错误"
-    all_chars.extend(sub_data)
-
-    await _save_characters(db, pid, sub_data, existing_names)
-
-    task.characters_done = 1
-    task.status_message = f"已生成 {len(existing_names)} 个角色"
+    if existing_names:
+        task.characters_done = 1
+        task.status_message = f"已生成 {len(existing_names)} 个角色"
+    else:
+        logger.error(f"[init] 角色生成失败：AI返回了{len(chars_data)}条数据但没有有效角色")
+        return "角色生成失败：没有有效角色"
     await db.commit()
     logger.info(f"[init] 角色生成完成，共{len(existing_names)}个")
     return None
