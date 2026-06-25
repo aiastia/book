@@ -43,11 +43,16 @@ function ignoreTask(taskId: number) {
 }
 
 // 恢复失败任务
-async function onResume(taskId: number | string) {
-  resuming.value = true
-  try {
-    const numericId = typeof taskId === 'string' ? parseInt(taskId.replace('legacy-', '')) : taskId
-    console.log('[InitTaskFloat] Resuming task:', numericId)
+	async function onResume(taskId: number | string) {
+	  resuming.value = true
+	  try {
+	    const numericId = typeof taskId === 'string' ? parseInt(taskId.replace('legacy-', '')) : taskId
+	    console.log('[InitTaskFloat] Resuming task:', numericId)
+	    if (!numericId || numericId <= 0) {
+	      msg.error('任务 ID 无效，请刷新页面后重试')
+	      resuming.value = false
+	      return
+	    }
     const result = await apiPost<any>(`/api/projects/init-task/${numericId}/resume`, {}, { timeout: 10000 })
     console.log('[InitTaskFloat] Resume result:', result)
     msg.success('任务已恢复执行')

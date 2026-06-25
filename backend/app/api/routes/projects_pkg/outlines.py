@@ -5,6 +5,7 @@ import logging
 from app.api.routes.projects_pkg.base import *
 from app.core.database import async_session
 from app.services.outline_validation_service import validate_outline_entities, build_world_context
+from app.services.chapter_tools import get_chapter_tools, make_tool_executor
 
 logger = logging.getLogger(__name__)
 
@@ -374,10 +375,15 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
         from app.services import background_task_service as bgs
         tracker = bgs.TaskProgressTracker(task_id)
         await tracker.update(stage="preparing", message="准备生成大纲...")
+        logger.info(f"[outline:{task_id}] preparing, entering session...")
         async with async_session() as task_db:
+            logger.info(f"[outline:{task_id}] session ok, fetching project...")
             proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
+            logger.info(f"[outline:{task_id}] project ok, building context...")
             ctx = await _project_context(task_db, payload["project_id"], proj)
+            logger.info(f"[outline:{task_id}] context ok ({len(str(ctx))} chars), creating engine...")
             engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+            logger.info(f"[outline:{task_id}] engine ok, calling AI...")
             await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
             result = await engine.execute_skill("outline_create", ai_client, {
                 **ctx,

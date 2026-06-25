@@ -150,6 +150,88 @@ class AIClient:
                 "duration_ms": int((time.time() - start) * 1000),
             }
 
+    async def chat_stream_collect(
+        self,
+        messages: list[dict],
+        model: str = None,
+        temperature: float = None,
+        top_p: float = None,
+        max_tokens: int = None,
+        response_format: dict = None,
+        tools: list = None,
+        tool_choice: str = None,
+    ) -> dict:
+        """流式调用，收集完整响应（含 tool_calls）。
+        
+        使用 stream=True 保持连接活跃，防止 Cloudflare/CDN 代理超时掐断。
+        返回格式与 chat() 完全一致。
+        """
+        start = time.time()
+        kwargs = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature or settings.AI_TEMPERATURE,
+            "top_p": top_p or settings.AI_TOP_P,
+            "max_tokens": max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+            "stream": True,
+        }
+        if response_format:
+            kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
+        try:
+            stream = await self.client.chat.completions.create(**kwargs)
+            content_parts = []
+            tool_call_buf: dict[int, dict] = {}  # index -> {id, name, arguments}
+            model_name = model or self.model
+            usage_info = None
+            async for chunk in stream:
+                if chunk.usage:
+                    usage_info = chunk.usage
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        content_parts.append(delta.content)
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            idx = tc.index
+                            if idx not in tool_call_buf:
+                                tool_call_buf[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                            if tc.id:
+                                tool_call_buf[idx]["id"] = tc.id
+                            if tc.function:
+                                if tc.function.name:
+                                    tool_call_buf[idx]["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    tool_call_buf[idx]["arguments"] += tc.function.arguments
+
+            content = "".join(content_parts)
+            tool_calls = []
+            for idx in sorted(tool_call_buf.keys()):
+                tc = tool_call_buf[idx]
+                if tc["name"]:  # 有 name 才算有效 tool_call
+                    tool_calls.append({
+                        "index": idx,
+                        "id": tc["id"],
+                        "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                    })
+
+            return {
+                "content": content,
+                "model": model_name,
+                "input_tokens": usage_info.prompt_tokens if usage_info else 0,
+                "output_tokens": usage_info.completion_tokens if usage_info else 0,
+                "duration_ms": int((time.time() - start) * 1000),
+                "tool_calls": tool_calls,
+            }
+        except Exception as e:
+            return {
+                "content": "",
+                "error": str(e),
+                "duration_ms": int((time.time() - start) * 1000),
+            }
+
     async def chat_stream(
         self,
         messages: list[dict],
@@ -158,7 +240,7 @@ class AIClient:
         top_p: float = None,
         max_tokens: int = None,
     ) -> AsyncGenerator[str, None]:
-        """流式调用，yield 每个 token"""
+        """流式调用，yield 每个 token（用于章节生成等前端流式场景）"""
         kwargs = {
             "model": model or self.model,
             "messages": messages,
@@ -343,7 +425,7 @@ class AIClient:
             tool_choice = "none" if is_last_round else "auto"
             actual_tools = None if is_last_round else tools
 
-            result = await self.chat(
+            result = await self.chat_stream_collect(
                 messages=current_messages,
                 model=model,
                 temperature=temperature,
@@ -397,7 +479,7 @@ class AIClient:
 
             # 最后一轮：模型无视 tool_choice=none 仍调了工具，再给它一次机会强制输出
             if is_last_round:
-                final = await self.chat(
+                final = await self.chat_stream_collect(
                     messages=current_messages,
                     model=model,
                     temperature=temperature,

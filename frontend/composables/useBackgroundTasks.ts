@@ -357,9 +357,10 @@ export function useBackgroundTasks() {
       _isLegacy: false,
       _steps: t.progress_details?.steps || null,
     }))
-    if (legacyTaskId.value || (legacyTaskStatus.value && legacyTaskStatus.value.status !== 'completed' && legacyTaskStatus.value.status !== 'failed') || legacyTaskStatus.value) {
-      list.push({
-        id: `legacy-${legacyTaskId.value || 0}`,
+	    if (legacyTaskId.value || legacyTaskStatus.value) {
+	      const lid = legacyTaskId.value || legacyTaskStatus.value?.id || 0
+	      list.push({
+	        id: `legacy-${lid}`,
         task_type: 'init',
         title: '项目初始化',
         status: legacyTaskStatus.value?.status || 'pending',
@@ -378,8 +379,8 @@ export function useBackgroundTasks() {
           { label: '大纲', done: legacyTaskStatus.value?.outline_done },
           { label: '验证补全', done: legacyTaskStatus.value?.validate_done },
         ],
-        _failedStep: legacyTaskStatus.value?.failed_step || '',
-        _taskId: legacyTaskId.value,
+	        _failedStep: legacyTaskStatus.value?.failed_step || '',
+	        _taskId: lid,
       })
     }
     return list
