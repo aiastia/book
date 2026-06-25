@@ -132,7 +132,7 @@ async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tok
         tool_executor=tool_executor,
         model=model,
         temperature=temperature,
-        max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+        max_tokens=max_tokens,
         max_rounds=5,  # 4轮查询 + 1轮输出，支持多跳查询
     )
     if raw.get("error"):
@@ -301,9 +301,9 @@ class SkillEngine:
         if top_p is not None:
             top_p = top_p / 100 if top_p > 1 else top_p
         max_tokens = merged_config.get("max_tokens")
-        if max_tokens is None:
-            max_tokens = settings.AI_DEFAULT_MAX_TOKENS
-        max_tokens = min(max_tokens, settings.AI_MAX_TOKENS)
+        if max_tokens is not None:
+            max_tokens = min(max_tokens, settings.AI_MAX_TOKENS)
+        # skill 没配 max_tokens → 留 None，让 ai_client 走模型配置默认值
         frequency_penalty = merged_config.get("frequency_penalty")
         presence_penalty = merged_config.get("presence_penalty")
 
@@ -342,13 +342,13 @@ class SkillEngine:
                         tool_executor=tool_executor,
                         model=model,
                         temperature=temperature,
-                        max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+                        max_tokens=max_tokens,
                     )
                 else:
                     result = await ai_client.chat_stream_collect(
                         messages=messages, model=model,
                         temperature=temperature, top_p=top_p,
-                        max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+                        max_tokens=max_tokens,
                         frequency_penalty=frequency_penalty,
                         presence_penalty=presence_penalty,
                     )
@@ -370,7 +370,7 @@ class SkillEngine:
                 result = await ai_client.chat_json_retry(
                     messages=messages, model=model,
                     temperature=temperature,
-                    max_tokens=max_tokens or settings.AI_DEFAULT_MAX_TOKENS,
+                    max_tokens=max_tokens,
                     frequency_penalty=frequency_penalty,
                     presence_penalty=presence_penalty,
                 )
