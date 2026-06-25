@@ -47,8 +47,9 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/backend:main
             ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/backend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 缓存存到 GHCR（buildcache 类型），不占 Actions cache 10GB 配额
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/backend:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/backend:buildcache,mode=max
 
   build-frontend:
     runs-on: ubuntu-latest
@@ -78,5 +79,6 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/frontend:latest
           build-args: |
             NUXT_PUBLIC_API_BASE=http://localhost:8000
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 缓存存到 GHCR（buildcache 类型），不占 Actions cache 10GB 配额
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/frontend:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}/frontend:buildcache,mode=max
