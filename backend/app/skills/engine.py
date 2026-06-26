@@ -511,8 +511,13 @@ class SkillEngine:
         # 高温度 + penalty 累积 → 2000字后模型在低概率区域采样 → 退化成英文/乱码
         is_chapter_writing = skill_name.startswith("chapter_generation") or skill_name.startswith("chapter_generate")
         if is_chapter_writing:
-            # 温度：上限 0.8（>0.8 长文本容易跑飞）
-            if temperature is not None and temperature > 0.8:
+            _model_lower = (model or "").lower()
+            _is_kimi = "kimi" in _model_lower or "k2" in _model_lower
+            # Kimi K2.6 只接受 temperature=1
+            if _is_kimi:
+                temperature = 1.0
+            # 其他模型：温度上限 0.8（长文本容易跑飞）
+            elif temperature is not None and temperature > 0.8:
                 logger.info(f"[skill] 章节生成温度钳制：{temperature} → 0.8")
                 temperature = 0.8
             # top_p：下限 0.9（<0.9 会截断太多创意词；=1.0 配合高温度会跑飞）
