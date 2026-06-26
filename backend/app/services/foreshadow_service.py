@@ -186,6 +186,20 @@ class ForeshadowService:
             fs_subtype = fs_data.get("foreshadow_type", "")
             importance = fs_data.get("importance") or fs_data.get("priority") or 5
             target_resolve = fs_data.get("target_resolve_chapter_number")
+            # 解析关联角色（AI 新增字段）
+            related_chars = fs_data.get("related_characters") or []
+            if isinstance(related_chars, str):
+                related_chars = [c.strip() for c in related_chars.replace("、", ",").split(",") if c.strip()]
+
+            def _merge_related(fs_obj):
+                """把 related_chars 合并进 fs_obj.structure.related_characters"""
+                if not related_chars:
+                    return
+                struct = dict(fs_obj.structure or {})
+                existing = struct.get("related_characters") or []
+                merged = list(set(existing) | set(related_chars))
+                struct["related_characters"] = merged
+                fs_obj.structure = struct
 
             if fs_type == "planted":
                 if ref_id:
@@ -194,6 +208,7 @@ class ForeshadowService:
                     if fs and fs.status == "pending":
                         fs.status = "planted"
                         fs.actual_plant_chapter = chapter_number
+                        _merge_related(fs)
                 else:
                     # 查找是否有标题匹配的 pending 伏笔
                     all_pending = await self.list_all(status="pending")
@@ -212,6 +227,7 @@ class ForeshadowService:
                             matched.foreshadow_type = fs_subtype
                         if target_resolve and not matched.target_resolve_chapter_number:
                             matched.target_resolve_chapter_number = target_resolve
+                        _merge_related(matched)
                     else:
                         # 创建新的分析发现伏笔（补全所有字段，避免空内容）
                         quote = fs_data.get("quote", "")
@@ -226,7 +242,7 @@ class ForeshadowService:
                             "structure": {
                                 "hint_text": quote or detail[:200],
                                 "notes": "",
-                                "related_characters": [],
+                                "related_characters": related_chars or [],
                             },
                         }
                         if fs_subtype:
@@ -238,9 +254,10 @@ class ForeshadowService:
             elif fs_type == "resolved":
                 if ref_id:
                     fs = await self.get(ref_id)
-                    if fs and fs.status == "planted":
+                    if fs and fs.status in ("planted", "pending"):
                         fs.status = "resolved"
                         fs.actual_resolve_chapter = chapter_number
+                        _merge_related(fs)
                 else:
                     # 尝试匹配
                     all_planted = await self.list_all(status="planted")
@@ -248,6 +265,7 @@ class ForeshadowService:
                         if p.title == title or (title and title in p.title):
                             p.status = "resolved"
                             p.actual_resolve_chapter = chapter_number
+                            _merge_related(p)
                             break
 
         await self.db.commit()

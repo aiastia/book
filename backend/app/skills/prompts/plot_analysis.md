@@ -12,12 +12,23 @@
     - foreshadow_type: 伏笔类型（主线/支线/彩蛋/反转/悬念/情感/线索）
     - importance: 重要性 1-10（影响剧情走向的程度）
     - target_resolve_chapter_number: 计划在第几章回收（埋下时根据剧情推断，回收时留空）
-    - reference_foreshadow_id: 回收旧伏笔时填对应的已有伏笔ID（从下方「已有伏笔」列表中查找匹配项），埋下新伏笔时为 null
+    - reference_foreshadow_id: 回收旧伏笔时填对应的已有伏笔ID，埋下新伏笔时为 null
+    - related_characters: 关联角色名列表（数组，如 ["顾芷蘅", "陆铮遥"]）
 
 4. 冲突分析（类型/各方/强度/进度）+ 冲突类型汇总（conflict_types：人vs人/人vs社会/内心/环境）
 5. 情感曲线（emotion_curve 多点 + emotional_curve 三段式 start/middle/end）
 6. 角色状态追踪（mental_change/relation_change/survival_status:存活死亡失踪/ability_change/career_changes/arc_progress:本章节该角色的弧线进展/arc_type_change:若角色弧线类型发生转变则填新类型如顿悟，无转变则空字符串）
 7. 组织状态变化（organization_states：势力兴衰/成员变动/覆灭）
+7.5. 物品状态变化（item_states：本章出现的物品及其状态/归属/获得章节变化）：
+    - item_name: 物品名称
+    - owner_name: 当前持有者角色名（如无主则填"无主"）
+    - obtained_chapter: 获得/转移发生在第几章
+    - status: 物品状态（stored=持有中/used=已使用/transferred=已转移/lost=遗失/destroyed=损毁）
+    - change_description: 本章发生了什么变化
+7.6. 地点状态变化（location_states：本章场景中地点发生的变化，如破坏/封印/开启）：
+    - location_name: 地点名称
+    - status: 当前状态（intact=完好/changed=已改变/destroyed=被破坏/sealed=被封印/opened=被开启）
+    - change_description: 变化描述
 8. 关键情节点（key_plot_points，对象数组，每个含 event 概述 + quote 正文原文片段10-30字用于定位）
 9. 场景与节奏（pacing：fast/medium/slow）+ 对话占比/描写占比（dialogue_ratio/description_ratio 0-1）
 10. 质量评分（11维度 + 评分理由，各1-10分，可有一位小数）。
@@ -68,6 +79,8 @@
   "emotional_curve": {"start": "开头情绪", "middle": "中段情绪", "end": "结尾情绪", "arc_summary": "情感弧线概述"},
   "character_states": [{"character_name": "角色名", "mental_change": "心理变化", "relation_change": "关系变化", "survival_status": "存活/死亡/失踪/退隐", "ability_change": "能力变化", "career_changes": {"main_career_stage_change": 0, "new_careers": []}, "arc_progress": "本章节该角色的弧线进展描述（成长/转变的关键事件，无则空字符串）", "arc_type_change": "若角色弧线类型发生转变则填新类型（成长/堕落/救赎/顿悟/平淡），无转变则空字符串"}],
   "organization_states": [{"organization": "组织名", "change": "变化描述", "power_change": 0}],
+  "item_states": [{"item_name": "物品名", "owner_name": "持有者角色名", "obtained_chapter": 1, "status": "stored/used/transferred/lost/destroyed", "change_description": "变化描述"}],
+  "location_states": [{"location_name": "地点名", "status": "intact/changed/destroyed/sealed/opened", "change_description": "变化描述"}],
   "key_plot_points": [{"event": "情节概述", "quote": "正文原文片段10-30字（用于定位）"}],
   "scenes": [{"scene": "场景描述", "pacing": "fast/medium/slow", "tension": 5}],
   "pacing": "medium",

@@ -224,7 +224,8 @@ const columns = [
   { title: '来源', dataIndex: 'source_type', key: 'source', width: 90 },
   { title: '关联角色', dataIndex: 'related_characters', key: 'chars', width: 130 },
   { title: '埋设章', dataIndex: 'plant_chapter_number', key: 'plant', width: 80, sorter: (a: any, b: any) => (a.plant_chapter_number || 9999) - (b.plant_chapter_number || 9999) },
-  { title: '回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 80, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
+  { title: '计划回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 90, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
+  { title: '实际回收章', dataIndex: 'actual_resolve_chapter', key: 'actual_resolve', width: 90 },
   { title: '重要性', dataIndex: 'priority', key: 'priority', width: 120, sorter: (a: any, b: any) => a.priority - b.priority },
   { title: '操作', key: 'actions', width: 220, fixed: 'right' as const },
 ]

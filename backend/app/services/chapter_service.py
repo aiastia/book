@@ -1125,6 +1125,88 @@ class ChapterService:
             chapter.summary = data.get("summary", "")
             await self.db.commit()
 
+    async def _update_items_from_analysis(self, analysis_data: dict, chapter_number: int):
+        """根据剧情分析的 item_states 更新物品的持有者/状态/获得章节。"""
+        from app.models.item import Item
+        from app.models.character import Character
+        item_states = analysis_data.get("item_states") or []
+        if not isinstance(item_states, list):
+            return
+        # 缓存角色名→id 映射
+        chars = {c.name: c.id for c in (await self.db.execute(
+            select(Character).where(Character.project_id == self.project_id)
+        )).scalars().all()}
+        for ist in item_states:
+            if not isinstance(ist, dict):
+                continue
+            item_name = ist.get("item_name", "").strip()
+            if not item_name:
+                continue
+            # 模糊匹配物品
+            items = (await self.db.execute(
+                select(Item).where(Item.project_id == self.project_id)
+            )).scalars().all()
+            matched = None
+            for it in items:
+                if item_name in it.name or it.name in item_name:
+                    matched = it
+                    break
+            if not matched:
+                continue
+            # 更新持有者
+            owner_name = ist.get("owner_name", "").strip()
+            if owner_name and owner_name != "无主":
+                matched.owner_name = owner_name
+                if owner_name in chars:
+                    matched.owner_character_id = chars[owner_name]
+            elif owner_name == "无主":
+                matched.owner_name = ""
+                matched.owner_character_id = None
+            # 更新获得章节
+            obtained = ist.get("obtained_chapter")
+            if isinstance(obtained, int) and (not matched.obtained_chapter or obtained < matched.obtained_chapter):
+                matched.obtained_chapter = obtained
+            elif obtained == chapter_number and not matched.obtained_chapter:
+                matched.obtained_chapter = chapter_number
+            # 更新状态
+            status_map = {"stored": "in_use", "used": "consumed", "transferred": "transferred",
+                          "lost": "lost", "destroyed": "destroyed"}
+            new_status = status_map.get(ist.get("status", ""))
+            if new_status:
+                matched.status = new_status
+            self.db.add(matched)
+        await self.db.commit()
+
+    async def _update_locations_from_analysis(self, analysis_data: dict, chapter_number: int):
+        """根据剧情分析的 location_states 更新地点状态。"""
+        from app.models.location import Location
+        location_states = analysis_data.get("location_states") or []
+        if not isinstance(location_states, list):
+            return
+        for lst in location_states:
+            if not isinstance(lst, dict):
+                continue
+            loc_name = lst.get("location_name", "").strip()
+            if not loc_name:
+                continue
+            locs = (await self.db.execute(
+                select(Location).where(Location.project_id == self.project_id)
+            )).scalars().all()
+            matched = None
+            for loc in locs:
+                if loc_name in loc.name or loc.name in loc_name:
+                    matched = loc
+                    break
+            if not matched:
+                continue
+            status_map = {"intact": "safe", "changed": "altered", "destroyed": "destroyed",
+                          "sealed": "sealed", "opened": "accessible"}
+            new_status = status_map.get(lst.get("status", ""))
+            if new_status:
+                matched.danger_level = new_status
+            self.db.add(matched)
+        await self.db.commit()
+
     async def _auto_analyze(self, chapter: Chapter, on_progress=None):
         """自动剧情分析。"""
         import logging
@@ -1342,6 +1424,18 @@ class ChapterService:
                 )
             except Exception:
                 pass
+            await _report(96, "正在更新物品与地点状态...")
+
+            # 更新物品持有者/状态/获得章节
+            try:
+                await self._update_items_from_analysis(analysis_data, chapter.chapter_number)
+            except Exception as e:
+                print(f"[chapter_service] 更新物品状态失败（忽略）: {e}", flush=True)
+            # 更新地点状态
+            try:
+                await self._update_locations_from_analysis(analysis_data, chapter.chapter_number)
+            except Exception as e:
+                print(f"[chapter_service] 更新地点状态失败（忽略）: {e}", flush=True)
             await _report(99, "分析完成")
 
         else:
