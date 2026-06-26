@@ -576,6 +576,9 @@ class ChapterService:
             # 注意：所有值必须是字符串，SkillEngine 只替换 str 类型的变量
             context = {"chapter_number": str(chapter.chapter_number),
                        "chapter_title": chapter.title or ""}
+            # 注入项目思考模式设置（供 SkillEngine 覆盖推理参数）
+            if project and isinstance(project.settings, dict):
+                context["_thinking_modes"] = project.settings.get("thinking_modes", {})
             if project:
                 context["project_title"] = project.title or ""
                 context["target_word_count"] = str(project.target_word_count or 4000)

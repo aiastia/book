@@ -47,6 +47,7 @@ class AIModelCreate(BaseModel):
     inspiration_custom: bool = False  # 灵感模式自定义开关：关=全局参数，开=递减温度表+自定义参数
     is_default: bool = False
     reasoning_model: bool = False  # 推理模型：强制 temperature=1，不发 top_p/penalty
+    reasoning_effort: str = "low"  # low/medium/high，仅 reasoning_model=True 时生效
     backend_type: str = "openai"
     provider: str = "openai"
     embedding_model: str = ""
@@ -70,6 +71,7 @@ class AIModelUpdate(BaseModel):
     inspiration_custom: Optional[bool] = None
     is_default: Optional[bool] = None
     reasoning_model: Optional[bool] = None
+    reasoning_effort: Optional[str] = None  # low/medium/high
     backend_type: Optional[str] = None
     provider: Optional[str] = None
     embedding_model: Optional[str] = None
@@ -87,6 +89,7 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
         "temperature": m.temperature, "top_p": m.top_p, "max_tokens": m.max_tokens,
         "frequency_penalty": m.frequency_penalty, "presence_penalty": m.presence_penalty,
         "is_default": m.is_default, "reasoning_model": m.reasoning_model or False,
+        "reasoning_effort": m.reasoning_effort or "low",
         "inspiration_temperature": m.inspiration_temperature,
         "inspiration_top_p": m.inspiration_top_p,
         "inspiration_custom": m.inspiration_custom or False,
@@ -186,6 +189,7 @@ async def test_ai_model(model_id: int, db: AsyncSession = Depends(get_db), user=
     client = AIClient(
         base_url=m.base_url, api_key=m.api_key, model=m.model,
         reasoning_model=m.reasoning_model or False,
+        reasoning_effort=m.reasoning_effort or "low",
         **AIClient._defaults_from_cfg(m),
     )
     resp = await client.chat(

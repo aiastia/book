@@ -290,3 +290,36 @@ async def import_project(req: dict, db: AsyncSession = Depends(get_db), user=Dep
     add_all(PlotAnalysis, req.get("analyses", []))
     await db.commit()
     return {"id": new_proj.id, "title": new_proj.title}
+
+
+# ========== 思考模式设置 ==========
+
+THINKING_MODES_DEFAULTS = {
+    "world":     {"enabled": False, "reasoning_effort": "high", "temperature": None},
+    "character": {"enabled": False, "reasoning_effort": "high", "temperature": None},
+    "outline":   {"enabled": False, "reasoning_effort": "high", "temperature": None},
+    "expand":    {"enabled": False, "reasoning_effort": "low",  "temperature": None},
+    "chapter":   {"enabled": False, "reasoning_effort": "none", "temperature": None},
+    "polish":    {"enabled": False, "reasoning_effort": "none", "temperature": None},
+    "analysis":  {"enabled": False, "reasoning_effort": "high", "temperature": None},
+}
+
+@router.get("/{project_id}/thinking-modes")
+async def get_thinking_modes(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    proj = await get_user_project(db, project_id, user)
+    settings = dict(proj.settings or {})
+    modes = settings.get("thinking_modes", THINKING_MODES_DEFAULTS)
+    # 补全新模式默认值
+    for k, v in THINKING_MODES_DEFAULTS.items():
+        if k not in modes:
+            modes[k] = v
+    return {"modes": modes}
+
+@router.put("/{project_id}/thinking-modes")
+async def update_thinking_modes(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    proj = await get_user_project(db, project_id, user)
+    settings = dict(proj.settings or {})
+    settings["thinking_modes"] = req.get("modes", THINKING_MODES_DEFAULTS)
+    proj.settings = settings
+    await db.commit()
+    return {"ok": True}

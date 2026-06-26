@@ -210,6 +210,55 @@ async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tok
     return {"json": None, "error": "工具调用后无法解析JSON（AI未返回有效JSON结构）", "content": content}
 
 
+_SKILL_TO_THINKING_MODE = {
+    # 世界观生成
+    "world_core_generate": "world", "world_detail_generate": "world", "world_generate": "world",
+    # 角色生成
+    "character_generate": "character", "characters_batch_generation": "character",
+    # 大纲
+    "outline_create": "outline", "outline_continue": "outline",
+    # 剧情展开
+    "outline_expand_single": "expand",
+    # 章节正文（1-1 / 1-N 首章和续章）
+    "chapter_generation_": "chapter",  # 前缀匹配
+    # 润色/去AI味
+    "ai_denoising": "polish",
+    # 剧情分析
+    "plot_analysis": "analysis",
+}
+
+def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict):
+    """根据项目思考模式设置临时覆盖 ai_client 的 reasoning_effort 和 temperature。
+    context 中的 _thinking_modes 由调用方在上下文构建时注入（Project.settings.thinking_modes）。
+    """
+    modes = context.get("_thinking_modes")
+    if not modes or not isinstance(modes, dict):
+        return
+    # 查找匹配的模式 key
+    mode_key = _SKILL_TO_THINKING_MODE.get(skill_name)
+    if not mode_key:
+        # 前缀匹配（如 chapter_generation_*）
+        for prefix, key in _SKILL_TO_THINKING_MODE.items():
+            if prefix.endswith("_") and skill_name.startswith(prefix):
+                mode_key = key
+                break
+    if not mode_key or mode_key not in modes:
+        return
+    cfg = modes[mode_key]
+    if isinstance(cfg, dict) and cfg.get("enabled"):
+        # 覆盖推理深度
+        effort = cfg.get("reasoning_effort")
+        if effort and effort != "none":
+            ai_client.reasoning_effort = effort
+            ai_client.reasoning_model = True
+        elif effort == "none":
+            ai_client.reasoning_model = False
+        # 覆盖温度
+        t = cfg.get("temperature")
+        if t is not None:
+            ai_client.default_temperature = t / 100 if t > 2 else t
+
+
 class SkillEngine:
     """Skill 插件执行引擎"""
 
@@ -444,6 +493,8 @@ class SkillEngine:
                 presence_penalty = user_defaults.get("presence_penalty")
 
         if stream:
+            # 思考模式覆盖（在调用前临时设置 ai_client 的推理参数）
+            _apply_thinking_mode_override(ai_client, skill_name, context)
             return {
                 "stream": ai_client.chat_stream(
                     messages=messages,
@@ -456,6 +507,7 @@ class SkillEngine:
             }
 
         is_text_output = skill_name.startswith("chapter_generation") or skill_name == "ai_denoising"
+        _apply_thinking_mode_override(ai_client, skill_name, context)
         if is_text_output:
             result = None
             for attempt in range(3):

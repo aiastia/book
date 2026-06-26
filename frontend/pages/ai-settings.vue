@@ -11,6 +11,7 @@ const form = reactive({
   id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
   temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
   reasoning_model: false,
+  reasoning_effort: 'low',
   frequency_penalty: null as number | null, presence_penalty: null as number | null,
   // 灵感模式独立参数（null=跟随全局/不发送）
   inspiration_temperature: null as number | null,
@@ -83,6 +84,7 @@ function openEdit(m: any) {
     provider: m.provider || m.backend_type || 'openai',
     embedding_model: m.embedding_model || '',
     reasoning_model: m.reasoning_model ?? false,
+    reasoning_effort: m.reasoning_effort || 'low',
     inspiration_temperature: m.inspiration_temperature ?? null,
     inspiration_top_p: m.inspiration_top_p ?? null,
     inspiration_frequency_penalty: m.inspiration_frequency_penalty ?? null,
@@ -616,6 +618,14 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
         <div style="font-size:12px;color:#999;margin-top:4px;">
           勾选后：温度强制为 1，不发送 Top P / 惩罚参数。适用于 Kimi K2、DeepSeek-R1、o1/o3 等推理模型
         </div>
+        <div v-if="form.reasoning_model" style="margin-top:8px;">
+          <span style="font-size:12px;color:#595959;">推理深度：</span>
+          <a-select v-model:value="form.reasoning_effort" size="small" style="width:120px;margin-left:8px">
+            <a-select-option value="low">低（快，正文优先）</a-select-option>
+            <a-select-option value="medium">中（平衡）</a-select-option>
+            <a-select-option value="high">高（深度思考）</a-select-option>
+          </a-select>
+        </div>
       </a-form-item>
 
       <a-form-item>
@@ -629,6 +639,8 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
       <a-button type="primary" :loading="saving" @click="onSave">保存</a-button>
     </template>
   </a-modal>
+
+  <ThinkingModesCard />
 </template>
 
 <style scoped>

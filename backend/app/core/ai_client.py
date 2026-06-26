@@ -57,7 +57,7 @@ class AIClient:
 
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
                  provider: str = "openai", embedding_model: str = None,
-                 reasoning_model: bool = False,
+                 reasoning_model: bool = False, reasoning_effort: str = "low",
                  default_temperature: float = None, default_top_p: float = None,
                  default_frequency_penalty: float = None, default_presence_penalty: float = None, default_max_tokens: int = None):
         self.base_url = base_url or settings.AI_BASE_URL
@@ -65,11 +65,8 @@ class AIClient:
         self.model = model or settings.AI_MODEL
         self.provider = (provider or "openai").lower()
         self.embedding_model = embedding_model or ""
-        # 推理模型（Kimi K2 / DeepSeek-R1 / o1-o3）：强制 temperature=1，不发 top_p/penalty
         self.reasoning_model = bool(reasoning_model)
-        # 模型配置层的默认参数（来自 AIModelConfig）。优先级：
-        #   调用方显式传参 > self.default_*（用户设置） > settings.AI_*（环境变量兜底）
-        # None 表示未从模型配置读取，回退到 settings 全局默认。
+        self.reasoning_effort = reasoning_effort or "low"
         self.default_temperature = default_temperature
         self.default_top_p = default_top_p
         self.default_frequency_penalty = default_frequency_penalty
@@ -78,15 +75,14 @@ class AIClient:
         self._client = None
 
     def _apply_reasoning(self, kwargs: dict) -> dict:
-        """推理模型参数调整：在 kwargs 组装完成后统一拦截。
-        推理模型强制 temperature=1，且不接受 top_p / frequency_penalty / presence_penalty，
-        否则报 400 invalid temperature / top_p。
-        """
         if self.reasoning_model:
             kwargs["temperature"] = 1
             kwargs.pop("top_p", None)
             kwargs.pop("frequency_penalty", None)
             kwargs.pop("presence_penalty", None)
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = {}
+            kwargs["extra_body"].setdefault("reasoning_effort", self.reasoning_effort)
         return kwargs
 
     def _resolve_temperature(self, temperature: float) -> float:
@@ -152,6 +148,7 @@ class AIClient:
                     provider=cfg.provider or cfg.backend_type or "openai",
                     embedding_model=cfg.embedding_model or "",
                     reasoning_model=cfg.reasoning_model or False,
+                    reasoning_effort=cfg.reasoning_effort or "low",
                     **cls._defaults_from_cfg(cfg),
                 )
         except Exception:

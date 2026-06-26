@@ -30,6 +30,8 @@ class AIModelConfig(Base):
     is_default = Column(Boolean, default=False)
     # 推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3 等）：勾选后强制 temperature=1，不发送 top_p/penalty
     reasoning_model = Column(Boolean, default=False)
+    # 推理深度：low/medium/high。low=思考少速度快，high=深度推理但慢。仅 reasoning_model=True 时生效
+    reasoning_effort = Column(String(10), default="low")
     backend_type = Column(String(20), default="openai")  # openai, claude_code（兼容字段）
     # AI 厂商：openai(openai兼容，含 deepseek/moonshot/自定义)、anthropic、gemini
     provider = Column(String(20), default="openai")

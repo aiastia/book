@@ -223,6 +223,13 @@ export function useProjectApi() {
     return get<any[]>('/analyses', 'analyses')
   }
 
+  function getThinkingModes() {
+    return useApi<{ modes: Record<string, any> }>(pid() ? `/api/projects/${pid()}/thinking-modes` : '/api/_skip', { key: `thinking-modes-${pid() || 'skip'}` })
+  }
+  function saveThinkingModes(modes: Record<string, any>) {
+    return apiPut(`/api/projects/${pid()}/thinking-modes`, { modes })
+  }
+
   function getAnalysis(chapterNumber: number) {
     return useApi<any>(pid() ? `/api/projects/${pid()}/analyses/${chapterNumber}` : '/api/_skip', { key: `analysis-${pid() || 'skip'}-${chapterNumber}` })
   }
@@ -872,6 +879,8 @@ export function useProjectApi() {
     getAnalyses,
     getAnalysis,
     triggerAnalysis,
+    getThinkingModes,
+    saveThinkingModes,
     triggerAnalysisAsync,
     getAnalysisTaskStatus,
     analyzeAllUnanalyzed,
