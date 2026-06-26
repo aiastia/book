@@ -482,9 +482,10 @@ async def reset_skill(skill_id: int, db: AsyncSession = Depends(get_db), user=De
 
 @router.post("/skills/reset-all")
 async def reset_all_skills(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """一键重置所有提示词为系统默认（清除所有用户自定义）。"""
-    from app.skills.builtin import force_reset_all_skills
+    """一键重置所有提示词为系统默认（清除所有用户自定义，重新从文件加载）。"""
+    from app.skills.builtin import force_reset_all_skills, init_builtin_skills
     await force_reset_all_skills(db)
+    await init_builtin_skills(db, force=True)
     return {"ok": True, "message": "所有提示词已重置为系统默认版本"}
 
 
