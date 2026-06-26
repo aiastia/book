@@ -652,6 +652,76 @@ class ChapterService:
                 tool_exec = tool_exec_with_custom
 
             context["chapter_data"] = chapter_data
+            # ===== 注入模板所需的独立变量（md 模板中 {variable} 占位符）=====
+            context["project_title"] = project.title or ""
+            context["genre"] = project.genre or "网文"
+            context["chapter_number"] = str(chapter.chapter_number)
+            context["chapter_title"] = chapter.title or ""
+            context["target_word_count"] = str(getattr(project, "target_word_count", 4000) or 4000)
+            context["narrative_perspective"] = project.narrative_pov or "第三人称"
+            # 从 expansion_plan 提取（1→N 模式的核心数据源）
+            plan = (chapter.expansion_plan or {}) if isinstance(chapter.expansion_plan, dict) else {}
+            if plan:
+                # 构建 chapter_outline 文本（大纲+剧情摘要）
+                outline_parts = []
+                if plan.get("plot_summary"):
+                    outline_parts.append(f"剧情摘要：{plan['plot_summary']}")
+                if plan.get("key_events"):
+                    outline_parts.append("关键事件：\n" + "\n".join(f"- {e}" for e in plan["key_events"]))
+                context["chapter_outline"] = "\n".join(outline_parts) or (chapter.summary or "")
+            else:
+                context["chapter_outline"] = chapter.summary or ""
+            # characters_info / chapter_careers / scene_anchor / character_intents
+            # 由 _preload_chapter_data 已写入 chapter_data，这里补独立变量：
+            chars = await self._list_chapter_characters(chapter)
+            if chars:
+                context["characters_info"] = "\n".join(
+                    f"- {c.name}（{c.role}）：{c.personality or ''}{'，职业：' + c.occupation if c.occupation else ''}"[:300]
+                    for c in chars
+                )
+            else:
+                context["characters_info"] = ""
+            # career 信息从角色职业字段提取
+            career_lines = []
+            for c in (chars or []):
+                if c.occupation:
+                    career_lines.append(f"- {c.name}：{c.occupation}")
+                if c.sub_occupations:
+                    career_lines.append(f"  副职业：{c.sub_occupations}")
+            context["chapter_careers"] = "\n".join(career_lines) if career_lines else ""
+            # 场景锚点 + 角色微意图（从 expansion_plan 直取）
+            context["scene_anchor"] = plan.get("scene_anchor", "") if plan else ""
+            ci = plan.get("character_intents") if plan else None
+            if isinstance(ci, list) and ci:
+                ci_lines = []
+                for it in ci:
+                    if isinstance(it, dict):
+                        ci_lines.append(f"- {it.get('character','?')}：本章目标「{it.get('this_chapter_goal','')}」，此刻想要「{it.get('immediate_want','')}」")
+                context["character_intents"] = "\n".join(ci_lines)
+            else:
+                context["character_intents"] = ""
+            # 伏笔提醒 + 相关记忆（从 service 获取）
+            try:
+                fs_service = ForeshadowService(self.db, self.project_id)
+                reminders = await fs_service.get_foreshadow_reminders(chapter.chapter_number)
+                context["foreshadow_reminders"] = reminders or ""
+                context["pending_foreshadows"] = reminders or ""
+            except Exception:
+                context["foreshadow_reminders"] = ""
+                context["pending_foreshadows"] = ""
+            # 相关记忆从最近章节摘要聚合
+            try:
+                recent_summaries = []
+                start_n = max(1, chapter.chapter_number - 5)
+                for n in range(start_n, chapter.chapter_number):
+                    s = await self._query_chapter_summary(n)
+                    if s:
+                        recent_summaries.append(f"第{n}章：{s}")
+                context["relevant_memories"] = "\n".join(recent_summaries) if recent_summaries else ""
+                context["recalled_memories"] = context["relevant_memories"]
+            except Exception:
+                context["relevant_memories"] = ""
+                context["recalled_memories"] = ""
             context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt

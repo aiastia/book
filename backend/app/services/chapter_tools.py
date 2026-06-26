@@ -324,7 +324,7 @@ async def _query_character(db: AsyncSession, project_id: int, name: str) -> str:
                 OrganizationMember.status == "active"
             )
         )).scalars().all()
-        orgs_detail = [{"org": (await db.scalar(select(Organization.name).where(Organization.id == om.organization_id))) or "", "role": om.role or "成员"} for om in org_members[:5]]
+        orgs_detail = [{"org": (await db.scalar(select(Organization.name).where(Organization.id == om.organization_id))) or "", "position": om.position or "成员"} for om in org_members[:5]]
 
         results.append({
             "name": c.name, "role": c.role or "", "gender": c.gender or "",

@@ -115,7 +115,7 @@ async function loadProjectDefault() {
 async function checkActiveTask() {
   try {
     const t = await api.getActiveBatchTask()
-    if (t) {
+    if (t && ['pending', 'running'].includes(t.status)) {
       currentTask.value = t
       startPolling(t.id)
     }
@@ -159,13 +159,15 @@ function startPolling(taskId: number) {
     try {
       const t = await api.getBatchStatus(taskId)
       currentTask.value = t
-      if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
-        stopPolling()
-        if (t.status === 'completed') {
-          msg.success(`批量生成完成：${t.completed_chapters}/${t.total_chapters} 章`)
-          emit('done')
+        if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
+          stopPolling()
+          if (t.status === 'completed') {
+            msg.success(`批量生成完成：${t.completed_chapters}/${t.total_chapters} 章`)
+            emit('done')
+          }
+          // 延时清理，让用户看到最终状态后再重置
+          setTimeout(() => { if (currentTask.value?.id === taskId) currentTask.value = null }, 5000)
         }
-      }
     } catch (e) {
       console.warn('轮询失败', e)
     }
