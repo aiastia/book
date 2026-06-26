@@ -54,7 +54,7 @@ async def _sync_org_membership(db: AsyncSession, project_id: int, character_id: 
 
 def _normalize_sub_occupations(data: dict) -> str:
     """从 AI 返回中提取副职业，归一为分号分隔字符串。"""
-    raw = data.get("sub_occupations") or data.get("secondary_occupations") or []
+    raw = data.get("sub_careers") or data.get("secondary_occupations") or []
     if isinstance(raw, str):
         parts = [p.strip() for p in raw.replace("，", ";").replace(",", ";").split(";") if p.strip()]
         return ";".join(parts)[:500]
@@ -64,7 +64,7 @@ def _normalize_sub_occupations(data: dict) -> str:
             if isinstance(o, str) and o.strip():
                 out.append(o.strip())
             elif isinstance(o, dict):
-                n = o.get("name") or o.get("occupation")
+                n = o.get("name") or o.get("main_career")
                 if n:
                     out.append(str(n).strip())
         return ";".join(out)[:500]
@@ -107,7 +107,7 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
     world_info = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds]) or "暂无"
     existing_chars = ", ".join([f"{c.name}({c.role})" for c in chars]) or "暂无"
 
-    # 补充职业体系和组织上下文（让 AI 能精准匹配 occupation / organization_memberships）
+    # 补充职业体系和组织上下文（让 AI 匹配职业体系中的 main_career / organization_memberships）
     from app.models.career import Career
     from app.models.organization import Organization
     all_careers = (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
@@ -122,7 +122,7 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
         "existing_chars": existing_chars,
         "user_prompt": (
             f"请生成一个{req.get('role_type', '配角')}角色。{req.get('extra', '')}\n"
-            f"【重要】职业（occupation）务必从已有职业体系中选择：{career_info}\n"
+            f"【重要】职业（main_career）务必从已有职业体系中选择：{career_info}\n"
             f"【重要】所属组织（organization_memberships）务必从已有组织中选择：{org_info}。无组织则返回空数组 []"
         ),
     })
@@ -154,6 +154,21 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
     db.add(char)
     await db.commit()
     await db.refresh(char)
+    # 映射职业体系（单角色生成也需处理）
+    occ_raw = str(data.get("main_career") or data.get("occupation", ""))
+    if occ_raw:
+        from app.models.career import Career
+        all_careers = (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
+        for c_obj in all_careers:
+            if occ_raw in c_obj.name or c_obj.name in occ_raw:
+                char.main_career_id = c_obj.id
+                if not char.main_career_stage_desc:
+                    stages = (c_obj.stages or []) if isinstance(c_obj.stages, list) else []
+                    if stages:
+                        char.main_career_stage_desc = stages[0].get("name", "")
+                db.add(char)
+                await db.commit()
+                break
 
     # 单个角色生成后：若项目已有≥2个角色，自动建立关系（让关系图谱能看到新角色）
     try:
@@ -325,7 +340,7 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
             if not char_obj:
                 continue
             # 主职业匹配：只从 main 类型职业中选
-            occ_raw = str(item.get("occupation", ""))
+            occ_raw = str(item.get("main_career") or item.get("main_career", ""))
             occ_parts = [p.strip() for p in occ_raw.replace("/", ",").replace("、", ",").split(",") if p.strip()]
             for occ in occ_parts:
                 if not char_obj.main_career_id:
@@ -346,7 +361,7 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
                             char_obj.main_career_stage_desc = _default_stage(c_obj)
             # 副职业匹配
             sub_names = set()
-            subs_raw = item.get("sub_occupations") or []
+            subs_raw = item.get("sub_careers") or item.get("sub_careers") or []
             if isinstance(subs_raw, str):
                 subs_raw = [s.strip() for s in subs_raw.replace("，", ",").replace("/", ",").split(",") if s.strip()]
             for sn in subs_raw:

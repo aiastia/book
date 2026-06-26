@@ -75,7 +75,7 @@ const batchLoading = ref(false)
 
 const editing = ref<any>(null)
 const editForm = reactive({
-  name:'', role:'配角', gender:'', age:'', identity:'', occupation:'', sub_occupations:'',
+  name:'', role:'配角', gender:'', age:'', identity:'',
   appearance:'', personality:'', background:'', growth_experience:'', ability:'',
   story_goal:'', motivation:'', weakness:'', arc_type:'', character_change:'', speech_style:'',
   status:'alive', mental_state:'', organization_id: null as number | null,

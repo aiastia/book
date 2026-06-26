@@ -112,7 +112,7 @@ def _map_role(raw_role: str, default="配角") -> str:
 
 def _join_sub_occupations(item: dict) -> str:
     """从 AI 返回中提取副职业列表，拼成分号分隔字符串。"""
-    raw = item.get("sub_occupations") or item.get("secondary_occupations") or item.get("sub_careers") or []
+    raw = item.get("sub_careers") or item.get("secondary_occupations") or []
     if isinstance(raw, str):
         # 已是字符串，按分号/逗号归一
         parts = [p.strip() for p in raw.replace("，", ";").replace(",", ";").split(";") if p.strip()]
@@ -390,7 +390,7 @@ async def _save_characters(db, pid, chars_data, existing_names: set):
 
         # 副职业匹配
         sub_names = set()
-        subs_raw = item.get("sub_occupations") or []
+        subs_raw = item.get("sub_careers") or item.get("sub_careers") or []
         if isinstance(subs_raw, str):
             subs_raw = [s.strip() for s in subs_raw.replace("，", ",").replace("/", ",").split(",") if s.strip()]
         for sn in subs_raw:
