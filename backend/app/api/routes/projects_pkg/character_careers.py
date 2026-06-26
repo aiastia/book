@@ -179,7 +179,7 @@ async def auto_assign_careers(
     )).scalars().all()
     if not chars:
         return {"count": 0, "message": "所有角色已分配主职业"}
-    char_list = "\n".join(f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.occupation or '无职业'}，性格：{(c.personality or '未知')[:50]}）" for c in chars)
+    char_list = "\n".join(f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.main_career_stage_desc or '无职业'}，性格：{(c.personality or '未知')[:50]}）" for c in chars)
 
     engine, ai_client = await make_engine_and_client(db, user.id)
     result = await engine.execute_skill("career_assign", ai_client, {

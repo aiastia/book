@@ -583,29 +583,8 @@ class ChapterContextService:
         word_count_requirement = f"目标{settings.CHAPTER_DEFAULT_WORDS}字，不少于{settings.CHAPTER_MIN_WORDS}字，不超过{settings.CHAPTER_MAX_WORDS}字"
         target_word_count = word_count_requirement  # JSON 模板用这个变量名
 
-        # 组织/职业信息
+        # 组织信息（组织列表已在 world_context 中提供，此处省略）
         chapter_careers = ""
-        try:
-            from app.models.organization import Organization
-            result = await self.db.execute(
-                select(Organization).where(Organization.project_id == self.project_id)
-            )
-            orgs = list(result.scalars().all())
-            # 动态优先：本章大纲涉及的组织 > 势力值高的
-            # 从大纲关键词匹配组织名
-            _kw = set()
-            for text in [chapter.title or "", chapter.summary or ""]:
-                _kw.update(text.replace("，"," ").replace("。"," ").split())
-            involved_orgs = [o for o in orgs if any(k in o.name for k in _kw) if _kw]
-            other_orgs = sorted([o for o in orgs if o not in involved_orgs], key=lambda x: x.power_value or 50, reverse=True)
-            selected_orgs = involved_orgs[:4] + other_orgs[:4]
-            if selected_orgs:
-                chapter_careers = "\n".join([
-                    f"【{o.name}】{o.org_type or ''}: {(o.description or '')[:150]}" for o in selected_orgs[:8]
-                ])
-        except Exception:
-            pass
-
         # ===== 场景锚点 + 角色微意图 =====
         scene_anchor = ""
         character_intents = ""
@@ -797,8 +776,6 @@ class ChapterContextService:
             _pe = s.get('personality', c.personality)
             _bg = s.get('background', c.background)
             _ab = s.get('ability', c.ability)
-            _oc = s.get('occupation', c.occupation)
-            _od = s.get('occupation_detail', c.occupation_detail)
             _oi = s.get('organization_id', c.organization_id)
             _id = s.get('identity', c.identity)
             _wk = s.get('weakness', c.weakness)
@@ -807,7 +784,6 @@ class ChapterContextService:
             _ge = s.get('growth_experience', c.growth_experience)
             _at = s.get('arc_type', c.arc_type)
             _cc = s.get('character_change', c.character_change)
-            _so = s.get('sub_occupations', c.sub_occupations)
             _cs = s.get('main_career_stage_desc', c.main_career_stage_desc)
             parts = [f"【{c.name}】{c.role}，{c.gender}，{c.age}岁"]
             if _id:
@@ -836,14 +812,8 @@ class ChapterContextService:
                 parts.append(f"  人物弧线：{_at}")
             if _cc:
                 parts.append(f"  变化轨迹：{str(_cc)[:120]}")
-            if _oc:
-                parts.append(f"  职业：{str(_oc)[:80]}")
-            if _so:
-                parts.append(f"  副职业：{str(_so)[:100]}")
             if _cs:
                 parts.append(f"  境界：{str(_cs)[:60]}")
-            if _od:
-                parts.append(f"  职业阶段：{str(_od)[:200]}")
             # 组织归属
             org_id = _oi or c.organization_id
             if org_id and org_id in org_map:

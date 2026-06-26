@@ -75,8 +75,6 @@ async def list_characters(project_id: int, db: AsyncSession = Depends(get_db), u
     result = await db.execute(select(Character).where(Character.project_id == project_id))
     return [{
         "id": c.id, "name": c.name, "role": c.role, "gender": c.gender, "age": c.age,
-        "identity": c.identity, "occupation": c.occupation,
-        "sub_occupations": c.sub_occupations or "",
         "appearance": c.appearance, "personality": c.personality,
         "background": c.background, "growth_experience": c.growth_experience,
         "ability": c.ability, "story_goal": c.story_goal, "motivation": c.motivation,
@@ -139,8 +137,6 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
         gender=str(data.get("gender", ""))[:10],
         age=str(data.get("age", ""))[:20],
         identity=str(data.get("identity", ""))[:200],
-        occupation=str(data.get("occupation", ""))[:100],
-        sub_occupations=_normalize_sub_occupations(data),
         appearance=str(data.get("appearance", "")),
         personality=str(data.get("personality", "")),
         background=str(data.get("background", "")),
@@ -169,8 +165,6 @@ async def generate_character(project_id: int, req: dict, db: AsyncSession = Depe
 
     return {
         "id": char.id, "name": char.name, "role": char.role, "gender": char.gender,
-        "age": char.age, "identity": char.identity, "occupation": char.occupation,
-        "sub_occupations": char.sub_occupations or "",
         "appearance": char.appearance, "personality": char.personality,
         "background": char.background, "growth_experience": char.growth_experience,
         "ability": char.ability, "story_goal": char.story_goal,
@@ -289,8 +283,6 @@ async def batch_generate_characters(project_id: int, req: BatchCharacterRequest,
             gender=str(item.get("gender", ""))[:50],
             age=str(item.get("age", ""))[:50],
             identity=str(item.get("identity", ""))[:200],
-            occupation=str(item.get("occupation", ""))[:200],
-            sub_occupations=_normalize_sub_occupations(item),
             appearance=str(item.get("appearance", ""))[:2000],
             personality=str(item.get("personality", item.get("character_traits", "")))[:2000],
             background=str(item.get("background", ""))[:2000],
@@ -522,8 +514,6 @@ async def auto_generate_character(project_id: int, req: AutoCharacterGenerateReq
         gender=char_data.get("gender", ""), age=char_data.get("age", ""),
         appearance=char_data.get("appearance", ""), personality=char_data.get("personality", ""),
         background=char_data.get("background", ""), ability=char_data.get("ability", ""),
-        occupation=char_data.get("occupation", ""),
-        sub_occupations=_normalize_sub_occupations(char_data),
     ))
     await db.commit()
     return {"character": char_data}

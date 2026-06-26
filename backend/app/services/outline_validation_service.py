@@ -114,8 +114,6 @@ async def validate_outline_entities(
                         identity=str(item.get("identity", ""))[:200],
                         personality=str(item.get("personality", ""))[:2000],
                         background=str(item.get("background", ""))[:2000],
-                        occupation=str(item.get("occupation", ""))[:200],
-                        sub_occupations=str(item.get("sub_occupations", ""))[:500],
                         ability=str(item.get("ability", ""))[:2000],
                         story_goal=str(item.get("story_goal", ""))[:2000],
                         motivation=str(item.get("motivation", ""))[:2000],
@@ -181,7 +179,7 @@ async def validate_outline_entities(
                     for o in orgs[:10]
                 )
                 char_list = "\n".join(
-                    f"- ID:{c.id} {c.name}（{c.role or '角色'}，{(c.personality or '')[:80]}，职业:{c.occupation or '无'}）"
+                    f"- ID:{c.id} {c.name}（{c.role or '角色'}，{(c.personality or '')[:80]}，职业:{c.main_career_stage_desc or '无'}）"
                     for c in unassigned[:20]
                 )
                 r = await engine.execute_skill("org_member_assign", ai_client, {

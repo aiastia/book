@@ -278,13 +278,11 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
                 if c.story_goal: lines.append(f"  目标：{c.story_goal}")
                 if c.motivation: lines.append(f"  动机：{c.motivation}")
                 if c.weakness: lines.append(f"  弱点：{c.weakness}")
-                if c.occupation: lines.append(f"  职业：{c.occupation}")
                 if c.ability: lines.append(f"  能力：{c.ability}")
                 char_parts.append("\n".join(lines))
             elif is_recent:
                 lines = [f"- {c.name}（{c.role}，{c.gender or ''}）"]
                 if c.personality: lines.append(f"  性格：{c.personality[:120]}")
-                if c.occupation: lines.append(f"  职业：{c.occupation}")
                 if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
                 char_parts.append("\n".join(lines))
             else:

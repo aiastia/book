@@ -297,7 +297,7 @@ async def characters(db: AsyncSession = Depends(get_db), user: Optional[User] = 
     ).scalars().all()
     items = []
     for c in rows:
-        desc = c.personality or c.background or c.occupation or "暂无描述"
+        desc = c.personality or c.background or c.personality or c.background or "暂无描述"
         tags = []
         if c.gender:
             tags.append(c.gender)

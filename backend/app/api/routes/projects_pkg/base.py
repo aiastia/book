@@ -105,8 +105,6 @@ class CharacterCreate(BaseModel):
     gender: str = ""
     age: str = ""
     identity: str = ""
-    occupation: str = ""
-    sub_occupations: str = ""
     appearance: str = ""
     personality: str = ""
     background: str = ""
@@ -124,7 +122,6 @@ class CharacterCreate(BaseModel):
     main_career_stage: int = 0  # 旧，保留兼容
     main_career_stage_desc: str = ""  # 主职业境界描述
     sub_careers: list = []
-    occupation_detail: dict = {}
     organization_id: Optional[int] = None
 
 

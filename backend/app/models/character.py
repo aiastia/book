@@ -15,8 +15,6 @@ class Character(Base):
     gender = Column(String(10), default="")
     age = Column(String(20), default="")
     identity = Column(String(200), default="")  # 身份（如：武林盟主之女/失忆的天才少年）
-    occupation = Column(String(100), default="")  # 主职业
-    sub_occupations = Column(Text, default="")  # 副职业（分号分隔，如"炼丹师;阵法师"）
 
     # ---- 外貌与性格 ----
     appearance = Column(Text, default="")  # 外貌特征（详细）

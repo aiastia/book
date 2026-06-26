@@ -105,8 +105,15 @@ export function useProjectApi() {
   function generateChapter(chapterId: number) {
     return apiPost<any>(`/api/projects/${pid()}/chapters/${chapterId}/generate`, {}, { timeout: 300000 })
   }
-  function generateChapterAsync(chapterId: number, skillName?: string, styleConfig?: any) {
-    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, { skill_name: skillName, style_config: styleConfig }, { timeout: 10000 })
+  function generateChapterAsync(chapterId: number, skillName?: string, style?: any) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, {
+      skill_name: skillName,
+      style_config: style?.config,
+      style_name: style?.name,
+      style_custom_prompt: style?.custom_prompt,
+      style_traits: style?.style_traits,
+      style_reference_text: style?.reference_text,
+    }, { timeout: 10000 })
   }
 
   /** 清空章节内容 */

@@ -49,11 +49,6 @@
 {locations_info}
 </items_locations>
 
-<careers priority="P2">
-【本章职业】
-{chapter_careers}
-</careers>
-
 @include:_shared_chapter_context.md
 
 <foreshadow_reminders priority="P1">

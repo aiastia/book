@@ -367,8 +367,6 @@ async def _save_characters(db, pid, chars_data, existing_names: set):
             motivation=str(item.get("motivation", item.get("internal_motivation", item.get("driving_force", item.get("inner_drive", "")))))[:2000],
             weakness=str(item.get("weakness", item.get("pressure_point", item.get("vulnerability", ""))))[:2000],
             identity=str(item.get("identity", item.get("social_role", item.get("identity_role", ""))))[:200],
-            occupation=str(item.get("occupation", item.get("profession", item.get("main_career", ""))))[:200],
-            sub_occupations=_join_sub_occupations(item)[:500],
             speech_style=str(item.get("speech_style", item.get("dialogue_style", item.get("speech_pattern", ""))))[:200],
             arc_type=str(item.get("arc_type", item.get("character_arc", "")))[:200],
             character_change=str(item.get("character_change", item.get("transformation", "")))[:2000],
@@ -376,7 +374,6 @@ async def _save_characters(db, pid, chars_data, existing_names: set):
         db.add(char)
 
         # 主职业匹配（在 flush 前先存到 char 上，flush 后再设 id 会失败）
-        occ_raw = str(item.get("occupation", ""))
         occ_parts = [p.strip() for p in occ_raw.replace("/", ",").replace("、", ",").split(",") if p.strip()]
         for occ in occ_parts:
             if occ in main_career_map:
@@ -542,8 +539,8 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
         info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
         if c.identity:
             info.append(f"  身份：{c.identity[:100]}")
-        if c.occupation:
-            info.append(f"  当前职业标注：{c.occupation[:80]}")
+        if c.main_career_stage_desc:
+            info.append(f"  当前职业标注：{c.main_career_stage_desc[:80]}")
         if c.personality:
             info.append(f"  性格：{c.personality[:150]}")
         if c.background:
@@ -717,8 +714,8 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
             info.append(f"  动机：{c.motivation[:80]}")
         if c.weakness:
             info.append(f"  弱点：{c.weakness[:60]}")
-        if c.occupation:
-            info.append(f"  职业：{c.occupation[:60]}")
+        if c.main_career_stage_desc:
+            info.append(f"  职业：{c.main_career_stage_desc[:60]}")
         info.append("")
         char_parts.append("\n".join(info))
     char_list = "\n".join(char_parts)
@@ -855,8 +852,8 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
         info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
         if c.identity:
             info.append(f"  身份：{c.identity[:100]}")
-        if c.occupation:
-            info.append(f"  职业：{c.occupation[:80]}")
+        if c.main_career_stage_desc:
+            info.append(f"  职业：{c.main_career_stage_desc[:80]}")
         if c.personality:
             info.append(f"  性格：{c.personality[:150]}")
         if c.background:
@@ -1059,7 +1056,7 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     for c in unassigned[:20]:
         info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
         if c.identity: info.append(f"  身份：{c.identity[:100]}")
-        if c.occupation: info.append(f"  职业：{c.occupation[:80]}")
+        if c.main_career_stage_desc: info.append(f"  职业：{c.main_career_stage_desc[:80]}")
         if c.personality: info.append(f"  性格：{c.personality[:120]}")
         if c.background: info.append(f"  背景：{c.background[:120]}")
         if c.story_goal: info.append(f"  目标：{c.story_goal[:80]}")
@@ -1237,14 +1234,14 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
             if c.story_goal: lines.append(f"  目标：{c.story_goal}")
             if c.motivation: lines.append(f"  动机：{c.motivation}")
             if c.weakness: lines.append(f"  弱点：{c.weakness}")
-            if c.occupation: lines.append(f"  职业：{c.occupation}")
+            if c.main_career_stage_desc: lines.append(f"  职业：{c.main_career_stage_desc}")
             if c.ability: lines.append(f"  能力：{c.ability}")
             char_parts.append("\n".join(lines))
         else:
             # 配角：中等信息
             lines = [f"- {c.name}（{c.role or '配角'}，{c.gender or ''}）"]
             if c.personality: lines.append(f"  性格：{c.personality[:120]}")
-            if c.occupation: lines.append(f"  职业：{c.occupation}")
+            if c.main_career_stage_desc: lines.append(f"  职业：{c.main_career_stage_desc}")
             if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
             char_parts.append("\n".join(lines))
     if len(chars) > 15:

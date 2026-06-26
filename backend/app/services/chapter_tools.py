@@ -338,8 +338,6 @@ async def _query_character(db: AsyncSession, project_id: int, name: str) -> str:
             "story_goal": (c.story_goal or "")[:150],
             "motivation": (c.motivation or "")[:150],
             "weakness": (c.weakness or "")[:100],
-            "occupation": c.occupation or "",
-            "sub_occupations": c.sub_occupations or "",
             "speech_style": c.speech_style or "",
             "growth_experience": (c.growth_experience or "")[:150],
             "arc_type": c.arc_type or "",

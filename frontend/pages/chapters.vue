@@ -331,11 +331,11 @@ async function onGenerate() {
   }
   generating.value = true
   try {
-    const styleConfig = selectedStyleId.value ? writingStyles.value.find((s:any) => s.id === selectedStyleId.value) : undefined
+    const styleObj = selectedStyleId.value ? writingStyles.value.find((s:any) => s.id === selectedStyleId.value) : undefined
     const { task_id } = await api.generateChapterAsync(
       editing.value.id,
       selectedSkillKey.value || undefined,
-      styleConfig ? styleConfig.config : undefined,
+      styleObj,
     )
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })

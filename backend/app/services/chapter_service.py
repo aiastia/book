@@ -320,7 +320,110 @@ class ChapterService:
             if prev:
                 parts.append(f"上章结尾（500字）：\n{prev}")
 
+        # ===== 长期记忆召回：伏笔+关键情节+冲突（跨章节语义检索，最多 3 条）=====
+        # 让写第 50 章时能召回第 3 章的伏笔，而非只靠最近章节摘要
+        recalled = await self._recall_long_term_memories(chapter)
+        if recalled:
+            parts.append(recalled)
+
         return "\n\n".join(parts) if parts else ""
+
+    async def _recall_long_term_memories(self, chapter: Chapter) -> str:
+        """轻量长期记忆召回：跨章节语义检索伏笔/关键情节/冲突。
+
+        优先向量检索（有 embedding 配置时），无向量库时降级为 DB 查询（按 importance 排序）。
+        只取最近章节窗口之外的记忆（避免与已注入的最近章节摘要重复）。
+        最多 3 条，不截断内容。
+        """
+        if not self.user_id:
+            return ""
+        current_n = chapter.chapter_number or 1
+        # 召回窗口：排除最近 2 章（已在摘要链中覆盖），聚焦更早的长期记忆
+        lookback_before = current_n - 2
+
+        # 取本章大纲作为语义 query
+        outline_text = ""
+        if chapter.outline_id:
+            ol = (await self.db.execute(
+                select(Outline).where(Outline.id == chapter.outline_id)
+            )).scalar_one_or_none()
+            if ol:
+                outline_text = (ol.summary or ol.title or "")[:500]
+
+        # 取本章角色名作为辅助 query
+        char_query = ""
+        try:
+            chs = chapter.characters or []
+            if isinstance(chs, list):
+                char_query = " ".join(str(c) for c in chs[:5])
+        except Exception:
+            pass
+
+        query_text = (outline_text + " " + char_query).strip()
+        if not query_text:
+            return ""
+
+        try:
+            from app.services.memory_vector_service import MemoryVectorService
+            from app.core.ai_client import AIClient
+            from app.models.story_memory import StoryMemory
+
+            # 检查是否有已向量化的记忆
+            has_vec = await self.db.scalar(
+                select(func.count(StoryMemory.id)).where(
+                    StoryMemory.project_id == self.project_id,
+                    StoryMemory.vector_id != "",
+                    StoryMemory.memory_type.in_(["foreshadow", "plot", "conflict"]),
+                )
+            )
+
+            memories: list = []
+            if has_vec:
+                # 向量检索模式：语义相关 + 窗口外
+                ai_client = await AIClient.from_user_config(self.db, self.user_id)
+                vs = MemoryVectorService(ai_client)
+                # 路线1：大纲语义 query
+                results = await vs.search(
+                    self.user_id, self.project_id, query_text,
+                    memory_types=["foreshadow", "plot", "conflict"],
+                    limit=3, min_importance=0.3,
+                )
+                # 过滤掉最近 2 章的记忆（已通过摘要链注入）
+                results = [r for r in results if not (r.get("chapter_number", 0) and r["chapter_number"] >= lookback_before + 1)]
+                memories = results[:3]
+            else:
+                # 降级模式：无向量库时按 importance 从 DB 取高价值长期记忆
+                if lookback_before >= 1:
+                    db_mems = (await self.db.execute(
+                        select(StoryMemory).where(
+                            StoryMemory.project_id == self.project_id,
+                            StoryMemory.memory_type.in_(["foreshadow", "plot", "conflict"]),
+                            StoryMemory.chapter_number.isnot(None),
+                            StoryMemory.chapter_number <= lookback_before,
+                        ).order_by(StoryMemory.importance.desc()).limit(3)
+                    )).scalars().all()
+                    memories = [{"content": m.content, "title": m.title or "", "chapter_number": m.chapter_number or 0, "memory_type": m.memory_type} for m in db_mems]
+
+            if not memories:
+                return ""
+
+            # 格式化输出
+            type_label = {"foreshadow": "伏笔", "plot": "关键情节", "conflict": "冲突"}
+            lines = ["<long_term_memory>"]
+            for m in memories:
+                ch = m.get("chapter_number", 0)
+                ch_tag = f"[第{ch}章] " if ch else ""
+                t = m.get("title", "")
+                title_tag = f"《{t}》" if t else ""
+                mt = type_label.get(m.get("memory_type", ""), "记忆")
+                lines.append(f"[{mt}] {ch_tag}{title_tag}{m['content']}")
+            lines.append("</long_term_memory>")
+            return "\n".join(lines)
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[memory] 长期记忆召回失败（不影响生成）: {e}")
+            return ""
 
     async def _list_chapter_characters(self, chapter: Chapter) -> list:
         """获取本章涉及的角色列表。"""
@@ -711,14 +814,6 @@ class ChapterService:
                 )
             else:
                 context["characters_info"] = ""
-            # career 信息从角色职业字段提取
-            career_lines = []
-            for c in (chars or []):
-                if c.occupation:
-                    career_lines.append(f"- {c.name}：{c.occupation}")
-                if c.sub_occupations:
-                    career_lines.append(f"  副职业：{c.sub_occupations}")
-            context["chapter_careers"] = "\n".join(career_lines) if career_lines else ""
             # 场景锚点 + 角色微意图（从 expansion_plan 直取）
             context["scene_anchor"] = plan.get("scene_anchor", "") if plan else ""
             ci = plan.get("character_intents") if plan else None
@@ -794,9 +889,7 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
-            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色列表仅提供姓名与身份，性格、背景、能力、外貌等详细信息请通过 query_character 工具按需查询。大纲、场景锚点和角色微意图已提供，无需重复查询。确认信息充分后再动笔。" + (
-                "（注意：本项目未配置职业体系，无需查询职业相关工具。）" if not career_count else ""
-            )
+            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色列表仅提供姓名与身份，性格、背景、能力、外貌等详细信息请通过 query_character 工具按需查询。大纲、场景锚点和角色微意图已提供，无需重复查询。确认信息充分后再动笔。"
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
             skill_name_override = (overrides or {}).get("skill_name")
