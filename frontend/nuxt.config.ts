@@ -62,6 +62,17 @@ export default defineNuxtConfig({
     ssr: {
       noExternal: ['ant-design-vue', '@ant-design/icons-vue', 'dayjs'],
     },
+    build: {
+      // 手动拆包：大依赖独立成 chunk，利用浏览器缓存
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'antd': ['ant-design-vue', '@ant-design/icons-vue'],
+            'vue-flow': ['@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
+          },
+        },
+      },
+    },
   },
 
   typescript: { strict: false },
