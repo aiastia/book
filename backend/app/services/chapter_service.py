@@ -835,7 +835,8 @@ class ChapterService:
                 tool_exec = tool_exec_with_custom
 
             context["chapter_data"] = chapter_data
-            # 注入写作风格块（模板用 {writing_style_block}）
+            # 注入写作风格块：拼装为独立文本，由 engine 作为第一条 system 消息前置注入。
+            # 注意：不要在 prompt 模板里写 {writing_style_block} 占位符——那会造成与前置消息重复。
             _style_parts = []
             if context.get("style_name"):
                 _style_parts.append(f"【写作风格】{context['style_name']}")
@@ -846,7 +847,7 @@ class ChapterService:
             if context.get("style_custom_prompt"):
                 _style_parts.append(f"<style_custom>{context['style_custom_prompt']}</style_custom>")
             context["writing_style_block"] = "\n".join(_style_parts) if _style_parts else ""
-            # chapter_data 追加 items + locations（style 块已通过 writing_style_block 前置注入，不重复）
+            # chapter_data 追加 items + locations（style 块由 writing_style_block 前置注入，不在此处重复）
             _append_parts = []
             if context.get("items_info"):
                 _append_parts.append(f"<items_info>{context['items_info']}</items_info>")
@@ -1214,183 +1215,6 @@ class ChapterService:
             chapter.status = "draft"
             await self.db.commit()
             yield json.dumps({"error": str(e)}, ensure_ascii=False)
-
-    def _format_legacy_context_as_data(self, context: dict) -> str:
-        """将 build_chapter_context 的分散字段打包为 chapter_data 格式化字符串。
-
-        适配 chapter_generation_one_to_one_next 等新 prompt 的 {chapter_data} 单一变量格式。
-        当 Planner 失败回退到 legacy 流程时使用，确保模板变量被正确替换。
-        """
-        import json as _json
-        parts = []
-
-        # 核心信息
-        parts.append(f"<!-- 章节信息 -->")
-        parts.append(f"<chapter_info>")
-        parts.append(f"  章节号：{context.get('chapter_number', '')}")
-        parts.append(f"  章节标题：{context.get('chapter_title', '')}")
-        parts.append(f"  目标字数：{context.get('target_word_count', '')}")
-        parts.append(f"  叙事视角：{context.get('narrative_perspective', context.get('narrative_pov', ''))}")
-        parts.append(f"  作品名称：{context.get('project_title', '')}")
-        parts.append(f"  题材：{context.get('genre', '')}")
-        parts.append(f"</chapter_info>")
-
-        # 大纲
-        outline = context.get('chapter_outline', '')
-        if outline:
-            parts.append(f"<!-- 本章大纲 -->")
-            parts.append(f"<outline>{outline}</outline>")
-        expansion = context.get('expansion_plan', '')
-        if expansion:
-            parts.append(f"<expansion_plan>{expansion}</expansion_plan>")
-
-        # 近期大纲脉络
-        recent = context.get('recent_outlines', '')
-        if recent:
-            parts.append(f"<recent_outlines>{recent}</recent_outlines>")
-
-        # 前章衔接
-        continuation = context.get('continuation_point', '')
-        if continuation:
-            parts.append(f"<continuation_point>{continuation}</continuation_point>")
-        prev_content = context.get('previous_chapter_content', '')
-        if prev_content:
-            parts.append(f"<previous_chapter>{prev_content}</previous_chapter>")
-
-        # 角色信息
-        chars = context.get('characters_info', '')
-        if chars:
-            parts.append(f"<characters>{chars}</characters>")
-
-        # 世界设定
-        world = context.get('world_setting', '')
-        if world:
-            parts.append(f"<world>{world}</world>")
-
-        # 组织/职业
-        careers = context.get('chapter_careers', '')
-        if careers:
-            parts.append(f"<organizations>{careers}</organizations>")
-
-        # 伏笔
-        foreshadows = context.get('foreshadow_reminders', '')
-        if foreshadows:
-            parts.append(f"<foreshadows>{foreshadows}</foreshadows>")
-        pending_fs = context.get('pending_foreshadows', '')
-        if pending_fs:
-            parts.append(f"<pending_foreshadows>{pending_fs}</pending_foreshadows>")
-
-        # 记忆/前情
-        memories = context.get('relevant_memories', '')
-        if memories:
-            parts.append(f"<memories>{memories}</memories>")
-        recalled = context.get('recalled_memories', '')
-        if recalled:
-            parts.append(f"<recalled_memories>{recalled}</recalled_memories>")
-
-        # 物品/地点
-        items = context.get('key_items', '')
-        if items:
-            parts.append(f"<items>{items}</items>")
-        locs = context.get('key_locations', '')
-        if locs:
-            parts.append(f"<locations>{locs}</locations>")
-
-        # 连贯性增强
-        prev_analysis = context.get('previous_analysis', '')
-        if prev_analysis:
-            parts.append(f"<previous_analysis>{prev_analysis}</previous_analysis>")
-        char_states = context.get('character_current_states', '')
-        if char_states:
-            parts.append(f"<character_states>{char_states}</character_states>")
-        story_progress = context.get('story_progress', '')
-        if story_progress:
-            parts.append(f"<story_progress>{story_progress}</story_progress>")
-        recent_plans = context.get('recent_expansion_plans', '')
-        if recent_plans:
-            parts.append(f"<recent_expansion_plans>{recent_plans}</recent_expansion_plans>")
-
-        # 质量趋势
-        quality = context.get('quality_trends', '')
-        if quality:
-            parts.append(f"<quality_trends>{quality}</quality_trends>")
-        quality_detail = context.get('quality_trends_detail', '')
-        if quality_detail:
-            parts.append(f"<quality_trends_detail>{quality_detail}</quality_trends_detail>")
-
-        # 最近章节上下文
-        recent_ctx = context.get('recent_chapters_context', '')
-        if recent_ctx:
-            parts.append(f"<recent_chapters>{recent_ctx}</recent_chapters>")
-
-        # 卷摘要
-        vol = context.get('volume_summaries', '')
-        if vol:
-            parts.append(f"<volume_summaries>{vol}</volume_summaries>")
-
-        # 写作风格：三层各有开关控制是否注入；①②互斥（文风优先）；至少注入一层。
-        style = context.get('writing_style', '')
-        style_custom = context.get('style_custom_prompt', '')
-        style_traits = context.get('style_traits', '')
-        style_ref = context.get('style_reference_text', '')
-        en_traits = context.get('style_enable_traits', True)
-        en_custom = context.get('style_enable_custom', True)
-        en_dim = context.get('style_enable_dimensions', True)
-        has_traits = bool(style_traits) and en_traits
-        # 互斥：文风特征启用且存在时，自定义提示词不再注入（文风优先）
-        has_custom = bool(style_custom) and en_custom and not has_traits
-        # 维度配置：受开关控制
-        has_base = bool(style) and style != "默认网文风格，节奏明快" and en_dim
-        if has_traits or has_custom or has_base or style_ref:
-            # 动态生成总纲：只列出实际生效的层，避免空洞指令
-            circled = ["①", "②", "③", "④"]
-            layers = []
-            idx = 0
-            if has_traits:
-                layers.append(f"{circled[idx]}作家文风特征(<style_traits>)——仿写准则"); idx += 1
-            if has_custom:
-                layers.append(f"{circled[idx]}自定义提示词(<style_custom_prompt>)——文字指令"); idx += 1
-            if has_base:
-                layers.append(f"{circled[idx]}维度配置(<writing_style>)——基础底色")
-            note = ("\n注意：<style_reference> 是范文体感参考，仅供体会笔法，严禁照抄其内容，"
-                    "且不得与 <style_traits> 冲突。" if style_ref else "")
-            directive = (
-                "<style_directive>\n"
-                "下面给出了关于「写作风格」的指令（作家文风与自定义提示词不会同时出现）：\n"
-                + "\n".join(layers) + "\n\n"
-                "规则：当各层指令不冲突时，尽量同时满足（叠加生效）；"
-                "一旦发生冲突，以靠前的层为准，忽略其后层的冲突部分。"
-                + note
-                + "\n</style_directive>"
-            )
-            parts.append(directive)
-            if has_base:
-                parts.append(f"<writing_style>{style}</writing_style>")
-            if has_custom:
-                parts.append(f"<style_custom_prompt>{style_custom}</style_custom_prompt>")
-            if has_traits:
-                parts.append(
-                    f"<style_traits>\n这是目标文风的结构化特征档案（句式/用词/意象/节奏/语气/标志手法）"
-                    f"，作为仿写准则。\n{style_traits}\n</style_traits>"
-                )
-            if style_ref:
-                parts.append(
-                    '<style_reference>\n'
-                    '以下范文仅供体会笔法（节奏、语气、句式、意象的整体感觉），'
-                    '严禁抄袭其中的具体内容/意象/句子，只学笔法不学内容：\n'
-                    + style_ref[:800]
-                    + '\n</style_reference>'
-                )
-
-        # 场景锚点 + 角色微意图（新增字段，优先注入到 chapter_data）
-        scene_anchor = context.get('scene_anchor', '')
-        if scene_anchor and scene_anchor != '（本章未提供场景锚点）':
-            parts.append(f"<scene_anchor>{scene_anchor}</scene_anchor>")
-        character_intents = context.get('character_intents', '')
-        if character_intents and character_intents != '（本章未提供角色微意图）':
-            parts.append(f"<character_intents>{character_intents}</character_intents>")
-
-        return "\n\n".join(parts)
 
     async def _post_generation(self, chapter: Chapter):
         """生成后处理"""
