@@ -21,10 +21,9 @@
 @include:_shared_chapter_context.md
 
 <commercial_design priority="P0">
-【🔥 第一章专属：建立而非释放】
+【 第一章专属：建立而非释放】
 
 第一章的商业任务：让读者在读完后产生"这个人有点意思，我想看他接下来会怎样"的冲动。本章核心是"建立种子"（信息差/逼格/围观者），而非直接释放爽点。
-
 
 @include:_shared_commercial_core.md
 </commercial_design>

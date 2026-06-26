@@ -39,14 +39,14 @@
 
 <constraints>
 【必须遵守】
-✅ 严格基于已给正文内容，不凭空添加关键设定
-✅ 保持信息自洽，避免互相矛盾
-✅ 输出必须是可解析JSON对象
-✅ 小说的genre可以由多个类型组成
+ 严格基于已给正文内容，不凭空添加关键设定
+ 保持信息自洽，避免互相矛盾
+ 输出必须是可解析JSON对象
+ 小说的genre可以由多个类型组成
 
 【禁止事项】
-❌ 输出JSON以外的任何文字
-❌ 使用markdown标记或代码块包裹
-❌ narrative_perspective输出枚举值之外的内容
-❌ target_words输出非整数
+ 输出JSON以外的任何文字
+ 使用markdown标记或代码块包裹
+ narrative_perspective输出枚举值之外的内容
+ target_words输出非整数
 </constraints>
