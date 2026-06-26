@@ -68,7 +68,7 @@ onMounted(() => loadConfig())
 </script>
 
 <template>
-  <PageHeader title="系统设置" />
+	  <PageHeader title="系统设置" back="/books" />
 
   <div class="page-content">
     <a-spin :spinning="loading">

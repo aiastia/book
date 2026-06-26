@@ -98,7 +98,7 @@ const columns = [
 </script>
 
 <template>
-  <PageHeader title="用户管理">
+	  <PageHeader title="用户管理" back="/books">
     <template #actions>
       <a-button @click="loadUsers">刷新</a-button>
       <a-button type="primary" @click="showAdd = true">+ 创建用户</a-button>

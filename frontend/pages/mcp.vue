@@ -74,10 +74,11 @@ await refresh()
 
 <template>
   <div style="max-width:800px;margin:0 auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h2 style="margin:0">MCP 服务器管理</h2>
-      <a-button type="primary" @click="openCreate">+ 添加服务器</a-button>
-    </div>
+    <PageHeader title="MCP 服务器管理" back="/books">
+      <template #actions>
+        <a-button type="primary" @click="openCreate">+ 添加服务器</a-button>
+      </template>
+    </PageHeader>
 
     <a-alert type="info" show-icon style="margin-bottom:16px"
       message="MCP 服务器提供额外的 AI 工具（搜索、数据库查询等）。启用后，AI 写作时可自动调用这些工具获取信息。" />

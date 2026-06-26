@@ -172,7 +172,7 @@ const grouped = computed(() => {
 })
 </script>
 <template>
-  <PageHeader title="Skill 管理">
+  <PageHeader title="Skill 管理" back="/books">
     <template #actions>
       <a-button type="primary" @click="openCreate">+ 安装 Skill</a-button>
       <a-button danger @click="onResetAll">重置全部为系统默认</a-button>

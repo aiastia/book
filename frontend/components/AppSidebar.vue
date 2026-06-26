@@ -1,20 +1,35 @@
 <script setup lang="ts">
 // 侧边栏：主色 Logo 区 + 折叠 + 分组菜单 + 项目上下文 + 用户
+import { nextTick, onMounted } from 'vue'
+
 const { nav, groupedNav, currentPath, adminNav, showAdminEntry } = useNavigation()
 const { currentProjectInfo } = useProject()
 
 const collapsed = ref(false)
-if (import.meta.client) {
-  const saved = localStorage.getItem('moyu_sidebar_collapsed')
-  if (saved !== null) collapsed.value = saved === '1'
+
+function syncCollapsed() {
+  if (import.meta.client) {
+    window.dispatchEvent(new CustomEvent('moyu-sidebar-toggle', { detail: collapsed.value }))
+  }
 }
+
 function toggleCollapse() {
   collapsed.value = !collapsed.value
   if (import.meta.client) {
     localStorage.setItem('moyu_sidebar_collapsed', collapsed.value ? '1' : '0')
-    // 通知 default.vue 更新 margin
-    window.dispatchEvent(new CustomEvent('moyu-sidebar-toggle', { detail: collapsed.value }))
+    syncCollapsed()
   }
+}
+
+if (import.meta.client) {
+  onMounted(() => {
+    const saved = localStorage.getItem('moyu_sidebar_collapsed')
+    if (saved !== null) {
+      collapsed.value = saved === '1'
+      // 通知 default.vue 初始折叠状态
+      nextTick(() => syncCollapsed())
+    }
+  })
 }
 
 // 管理员入口（全局菜单底部追加，仅管理员可见且非管理页时）

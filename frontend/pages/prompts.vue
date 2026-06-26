@@ -125,7 +125,7 @@ function onVersionChange(vid: number) {
 </script>
 
 <template>
-  <PageHeader title="提示词模板">
+  <PageHeader title="提示词模板" back="/books">
     <template #actions>
       <NuxtLink to="/skill-manage">
         <a-button>前往 Skill 管理 →</a-button>

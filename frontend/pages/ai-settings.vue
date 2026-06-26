@@ -264,7 +264,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
 </script>
 
 <template>
-  <PageHeader title="AI 模型设置" />
+  <PageHeader title="AI 模型设置" back="/books" />
   <div class="page-content">
     <!-- 顶部状态卡片 -->
     <div class="stats-bar">

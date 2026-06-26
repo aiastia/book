@@ -5,16 +5,15 @@ const collapsed = ref(false)
 const route = useRoute()
 
 if (import.meta.client) {
-  const saved = localStorage.getItem('moyu_sidebar_collapsed')
-  if (saved !== null) collapsed.value = saved === '1'
-}
-// 监听 localStorage 变化（侧栏内 toggle 会写 localStorage）
-if (import.meta.client) {
   onMounted(() => {
+    const saved = localStorage.getItem('moyu_sidebar_collapsed')
+    if (saved !== null) collapsed.value = saved === '1'
+
+    // 监听 localStorage 变化（跨标签页同步）
     window.addEventListener('storage', () => {
       collapsed.value = localStorage.getItem('moyu_sidebar_collapsed') === '1'
     })
-    // 侧栏 toggle 不触发 storage 事件，需要轮询或自定义事件，这里用自定义事件
+    // 侧栏 toggle 通知
     window.addEventListener('moyu-sidebar-toggle', (e: any) => {
       collapsed.value = e.detail
     })

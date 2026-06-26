@@ -62,6 +62,7 @@ const globalNav: NavItem[] = [
 
 // 管理员菜单（仅管理员可见）
 const adminNav: NavItem[] = [
+  { label: '← 返回首页', to: '/books', icon: 'home' },
   { label: '用户管理', to: '/admin/users', icon: 'users' },
   { label: '系统设置', to: '/admin/system', icon: 'bot' },
 ]

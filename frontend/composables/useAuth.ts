@@ -59,9 +59,24 @@ export function useAuth() {
     user.value = null
   }
 
-  // 客户端初始化时自动读取
+  // 客户端初始化：先从缓存读，再调后端 API 验证（防止篡改）
   if (import.meta.client) {
     loadFromStorage()
+    if (getToken()) {
+      // 直接调后端（不走 Nuxt 代理，auth 路由不在代理范围内）
+      const config = useRuntimeConfig()
+      const base = config.public.apiBase
+      fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${getToken()}` } })
+        .then(r => r.ok ? r.json() : null)
+        .then(u => {
+          if (u?.id) {
+            localStorage.setItem(USER_KEY, JSON.stringify(u))
+            user.value = u as UserInfo
+            isLogged.value = true
+          }
+        })
+        .catch(() => {})
+    }
   }
 
   return { isLogged, user, saveLogin, logout, loadFromStorage }
