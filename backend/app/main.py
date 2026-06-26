@@ -158,6 +158,7 @@ async def _auto_migrate():
         ("writing_styles", "ADD COLUMN reference_text TEXT DEFAULT ''"),
         ("writing_styles", "ADD COLUMN style_traits TEXT DEFAULT '{}'"),  # 存 JSON 文本，默认空对象
         ("writing_styles", "ADD COLUMN traits_updated_at DATETIME"),
+        ("writing_styles", "ADD COLUMN is_default BOOLEAN DEFAULT 0"),
         # 第16批：推理模型标记（Kimi K2 / DeepSeek-R1 / o1-o3，强制 temperature=1，不发 top_p/penalty）
         ("ai_model_configs", "ADD COLUMN reasoning_model BOOLEAN DEFAULT 0"),
         # 第17批：灵感模式独立参数（NULL=跟随全局模型配置）

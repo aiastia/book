@@ -294,8 +294,13 @@ async function loadWritingStylesIfEmpty() {
   if (writingStyles.value.length > 0) return
   try {
     writingStyles.value = await fetchWritingStyles()
-    const def = writingStyles.value.find((s: any) => s.is_default)
-    if (def) selectedStyleId.value = def.id
+    // 自动选项目默认风格
+    if (writingStyles.value.length > 0) {
+      const projectStyleId = projectData.value?.writing_style?.style_id
+      const def = projectStyleId ? writingStyles.value.find((s: any) => s.id === projectStyleId) : writingStyles.value.find((s: any) => s.is_default)
+      if (def) selectedStyleId.value = def.id
+      else if (selectedStyleId.value == undefined) selectedStyleId.value = writingStyles.value[0].id
+    }
   } catch {}
 }
 

@@ -89,6 +89,23 @@ async def update_style(style_id: int, req: StyleUpdate, db: AsyncSession = Depen
     return {"ok": True}
 
 
+@router.post("/{style_id}/set-default")
+async def set_default_style(style_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """将此风格设为用户默认写作风格。"""
+    s = (await db.execute(select(WritingStyle).where(WritingStyle.id == style_id, WritingStyle.user_id == user.id))).scalar_one_or_none()
+    if not s:
+        raise HTTPException(404, "风格不存在")
+    # 清除其他默认
+    others = (await db.execute(
+        select(WritingStyle).where(WritingStyle.user_id == user.id, WritingStyle.is_default == True)
+    )).scalars().all()
+    for o in others:
+        o.is_default = False
+    s.is_default = True
+    await db.commit()
+    return {"ok": True}
+
+
 @router.delete("/{style_id}")
 async def delete_style(style_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     s = (await db.execute(select(WritingStyle).where(WritingStyle.id == style_id, WritingStyle.user_id == user.id))).scalar_one_or_none()

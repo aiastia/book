@@ -38,6 +38,7 @@ class WritingStyle(Base):
     traits_updated_at = Column(DateTime, nullable=True)
 
     is_preset = Column(Boolean, default=False)  # 系统内置预设
+    is_default = Column(Boolean, default=False)  # 用户默认风格（每用户仅一个）
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -50,5 +51,6 @@ class WritingStyle(Base):
             "style_traits": self.style_traits or {},
             "traits_updated_at": self.traits_updated_at.isoformat() if self.traits_updated_at else None,
             "is_preset": self.is_preset,
+            "is_default": bool(self.is_default),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
