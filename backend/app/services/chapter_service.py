@@ -733,7 +733,7 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
-            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
+            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具一次性查询所有需要的信息：用 list_available_entities 看全局，用 query_character 查本章涉及的角色详情，用 query_foreshadows 查伏笔状态，用 query_location 查核心场景。全部查完后再动笔，不要分批查询。"
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
             skill_name_override = (overrides or {}).get("skill_name")
@@ -1136,7 +1136,7 @@ class ChapterService:
         existing_fs = await self.foreshadow_service.list_all()
         must_resolve, upcoming, others = [], [], []
         for f in existing_fs:
-            entry = f"(id: f{f.id}) {f.title}({f.foreshadow_type or '未分类'})：{f.content[:60]}"
+            entry = f"(id: {f.id}) {f.title}({f.foreshadow_type or '未分类'})：{f.content[:60]}"
             tgt = f.target_resolve_chapter_number
             if tgt and tgt <= chapter.chapter_number and f.status in ("pending", "planted"):
                 must_resolve.append(entry + f" [应于第{tgt}章回收]")

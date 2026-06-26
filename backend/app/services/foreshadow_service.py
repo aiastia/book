@@ -178,6 +178,11 @@ class ForeshadowService:
             # 字段兼容：detail / content / description 都接受
             detail = fs_data.get("detail") or fs_data.get("content") or fs_data.get("description") or ""
             ref_id = fs_data.get("reference_foreshadow_id")
+            # 兼容 "f1" / "1" 格式 → 纯数字
+            if isinstance(ref_id, str):
+                ref_id = ref_id.lstrip("fF")
+                try: ref_id = int(ref_id)
+                except ValueError: ref_id = None
             fs_subtype = fs_data.get("foreshadow_type", "")
             importance = fs_data.get("importance") or fs_data.get("priority") or 5
             target_resolve = fs_data.get("target_resolve_chapter_number")
@@ -382,6 +387,11 @@ class ForeshadowService:
                     continue
                 fs_type = fs_data.get("type", "")
                 ref_id = fs_data.get("reference_foreshadow_id")
+                # 兼容 "f1" / "1" 格式 → 纯数字
+                if isinstance(ref_id, str):
+                    ref_id = ref_id.lstrip("fF")
+                    try: ref_id = int(ref_id)
+                    except ValueError: ref_id = None
                 title = fs_data.get("title", "")
                 if fs_type == "planted" and ref_id:
                     fs = await self.get(ref_id)
