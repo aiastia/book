@@ -1,6 +1,6 @@
 // Nuxt 3 SSR 配置
 export default defineNuxtConfig({
-  compatibilityDate: '2024-11-01',
+  compatibilityDate: '2026-06-26',
   devtools: { enabled: false },
 
   ssr: true,
@@ -40,10 +40,6 @@ export default defineNuxtConfig({
     '@vue-flow/minimap/dist/style.css',
   ],
 
-  build: {
-    transpile: ['ant-design-vue', '@ant-design/icons-vue', '@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
-  },
-
   vite: {
     optimizeDeps: {
       include: [
@@ -60,7 +56,8 @@ export default defineNuxtConfig({
       ],
     },
     ssr: {
-      noExternal: ['ant-design-vue', '@ant-design/icons-vue', 'dayjs'],
+      noExternal: ['ant-design-vue', '@ant-design/icons-vue', 'dayjs',
+                   '@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
     },
     build: {
       // 手动拆包：大依赖独立成 chunk，利用浏览器缓存
