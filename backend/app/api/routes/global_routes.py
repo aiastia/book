@@ -383,13 +383,29 @@ class SkillUpdateReq(BaseModel):
 
 @router.get("/skills/variables")
 async def get_skill_variables(user=Depends(get_current_user)):
-    """获取提示词变量参考文档（VARIABLES.md 内容）。"""
-    import os
+    """获取提示词变量参考文档（VARIABLES.md 转 HTML）。"""
+    import os, re
     path = os.path.join(os.path.dirname(__file__), "../../skills/prompts/VARIABLES.md")
     if not os.path.exists(path):
         raise HTTPException(404, "变量参考文档不存在")
     with open(path, encoding="utf-8") as f:
-        return {"content": f.read()}
+        md = f.read()
+    
+    # 简单 Markdown → HTML
+    html = md
+    # 表格
+    html = re.sub(r'\|(.+)\|', lambda m: '<tr>' + ''.join(f'<td>{c.strip()}</td>' for c in m.group(1).split('|')) + '</tr>', html)
+    html = re.sub(r'(<tr>.*?</tr>\n)+', lambda m: f'<table>{m.group(0)}</table>', html)
+    html = re.sub(r'<tr><td>-+</td></tr>', '', html)  # 去掉分隔行
+    # 标题
+    html = re.sub(r'^## (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+    html = re.sub(r'^# (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    # 代码
+    html = re.sub(r'`([^`]+)`', r'<code>\1</code>', html)
+    # 换行
+    html = re.sub(r'\n\n', '<br><br>', html)
+    
+    return {"content": html, "raw": md}
 
 
 @router.get("/skills")

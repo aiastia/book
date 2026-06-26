@@ -300,6 +300,26 @@ class ChapterService:
             if summary:
                 parts.append(f"第{n}章摘要：{summary}")
 
+        # 场景锚点 + 角色微意图（从 expansion_plan 提取，已在章节规划中生成）
+        if chapter.expansion_plan and isinstance(chapter.expansion_plan, dict):
+            plan = chapter.expansion_plan
+            if plan.get("scene_anchor"):
+                parts.append(f"场景锚点：{plan['scene_anchor']}")
+            ci = plan.get("character_intents")
+            if isinstance(ci, list) and ci:
+                ci_lines = ["角色微意图："]
+                for it in ci:
+                    if isinstance(it, dict):
+                        ci_lines.append(f"  - {it.get('character','?')}：目标「{it.get('this_chapter_goal','')}」，想要「{it.get('immediate_want','')}」")
+                if len(ci_lines) > 1:
+                    parts.append("\n".join(ci_lines))
+
+        # 上章结尾 500 字（衔接锚点，让 AI 知道从哪接）
+        if chapter.chapter_number and chapter.chapter_number > 1:
+            prev = await self._get_previous_ending(chapter)
+            if prev:
+                parts.append(f"上章结尾（500字）：\n{prev}")
+
         return "\n\n".join(parts) if parts else ""
 
     async def _list_chapter_characters(self, chapter: Chapter) -> list:
@@ -367,6 +387,22 @@ class ChapterService:
                             parts.append(f"{dim}={scores[dim]}")
                     lines.append("  " + " | ".join(parts))
             return "\n".join(lines) if len(lines) > 1 else ""
+        except Exception:
+            return ""
+
+    async def _get_previous_ending(self, chapter: Chapter) -> str:
+        """获取上一章的结尾内容（用于衔接锚点）。"""
+        try:
+            prev = (await self.db.execute(
+                select(Chapter).where(
+                    Chapter.project_id == self.project_id,
+                    Chapter.chapter_number == (chapter.chapter_number or 1) - 1,
+                    Chapter.content != "",
+                ).order_by(Chapter.id.desc())
+            )).scalars().first()
+            if prev and prev.content:
+                return prev.content[-500:]
+            return ""
         except Exception:
             return ""
 

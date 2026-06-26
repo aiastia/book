@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { useProjectApi } from '~/composables/useProjectApi'
-import { useApi } from '~/composables/useApi'
+import { apiGet } from '~/composables/useApi'
 useHead({ title: 'Skill 管理 — 墨语' })
 const msg = useMessage()
 const api = useProjectApi()
 const { data: skills, refresh } = await api.listSkills()
 
 // 加载变量参考文档
-const { apiGet } = useApi()
 async function loadVariables() {
   try { variablesContent.value = (await apiGet<any>('/api/skills/variables')).content || '' }
   catch { variablesContent.value = '' }
@@ -182,7 +181,7 @@ const grouped = computed(() => {
       <a-button type="link" size="small" @click="showVariables = !showVariables; if(showVariables && !variablesContent) loadVariables()">
         {{ showVariables ? '收起变量参考' : '变量参考' }}
       </a-button>
-      <div v-if="showVariables" style="background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;padding:12px;margin-top:8px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;">{{ variablesContent || '加载中...' }}</div>
+      <div v-if="showVariables" class="variables-panel" v-html="variablesContent || '加载中...'"></div>
     </div>
   <div class="page-content">
     <p style="color:#888;font-size:13px;margin-bottom:16px;">
@@ -366,5 +365,12 @@ description: 描述
 .skill-desc{font-size:13px;color:#888;margin-bottom:8px;line-height:1.5;}
 .include-badge{margin-bottom:6px;}
 .skill-prompt{font-size:12px;color:#aaa;background:#f9f9f9;padding:8px;border-radius:4px;margin-bottom:8px;font-family:monospace;line-height:1.4;max-height:120px;overflow:hidden;cursor:pointer;}
+.variables-panel{background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;padding:12px;margin-top:8px;max-height:400px;overflow-y:auto;font-size:13px;line-height:1.7}
+.variables-panel :deep(table){width:100%;border-collapse:collapse;margin:8px 0}
+.variables-panel :deep(td){border:1px solid #e8e8e8;padding:4px 8px;font-size:12px}
+.variables-panel :deep(td:first-child){font-family:monospace;color:#2B2B2B;white-space:nowrap}
+.variables-panel :deep(h2){font-size:16px;margin:16px 0 8px;color:#2B2B2B}
+.variables-panel :deep(h3){font-size:14px;margin:12px 0 6px;color:#4D8088}
+.variables-panel :deep(code){background:#f0f0f0;padding:1px 4px;border-radius:2px;font-size:12px}
 .skill-actions{display:flex;gap:8px;}
 </style>
