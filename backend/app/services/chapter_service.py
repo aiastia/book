@@ -36,6 +36,45 @@ _SCORE_ORDER = [
 ]
 
 
+def _check_content_degradation(content: str) -> str | None:
+    """检测 AI 生成内容是否退化成垃圾（英文词典/元评论/碎片分隔符堆砌）。
+
+    返回退化原因字符串，正常则返回 None。
+    """
+    if not content or len(content) < 50:
+        return None
+
+    # 1. 英文连续行检测：连续多行以英文开头（词典/代码泄露）
+    import re as _re
+    lines = content.split("\n")
+    eng_lines = sum(1 for l in lines if l.strip() and _re.match(r'^[a-zA-Z]', l.strip()))
+    if eng_lines > 10 and eng_lines / max(len(lines), 1) > 0.3:
+        return "检测到大量英文行（可能是词典/代码泄露）"
+
+    # 2. 连续分隔符检测：超过 15 个连续的 --- 分隔符
+    sep_count = sum(1 for l in lines if l.strip() == "---")
+    if sep_count > 15:
+        return f"检测到 {sep_count} 个分隔符堆砌"
+
+    # 3. 元评论检测：模型自言自语（如 "it seems there's an issue" / "Let me write"）
+    meta_markers = [
+        "it seems there's", "let me write", "I need to", "let me provide",
+        "I'll write", "let me draft", "my previous response",
+        "看起来有", "让我重新", "我需要", "现在开始创作",
+    ]
+    lower = content.lower()
+    for marker in meta_markers:
+        if marker.lower() in lower:
+            return f"检测到模型元评论（{marker}）"
+
+    # 4. 碎片对话检测：连续短行对话（<10字）且无旁白动作
+    short_dialogue = sum(1 for l in lines if l.strip() and len(l.strip()) < 15 and ('"' in l or '"' in l or '"' in l))
+    if short_dialogue > 15 and short_dialogue / max(len(lines), 1) > 0.5:
+        return "检测到碎片化对话堆砌（无旁白动作）"
+
+    return None
+
+
 def generate_analysis_summary(analysis_data: dict) -> str:
     """根据分析结果生成标准格式的分析报告文本（对标 MuMu generate_analysis_summary）。
 
@@ -946,6 +985,17 @@ class ChapterService:
                 chapter.status = "draft"
                 await self.db.commit()
                 return {"error": "AI 生成内容为空"}
+
+            # 内容退化检测：防止模型吐出垃圾内容（英文词典/元评论/碎片分隔符）
+            degrade_reason = _check_content_degradation(content)
+            if degrade_reason:
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"[chapter] 内容退化检测触发：{degrade_reason}，内容前500字：{content[:500]}"
+                )
+                chapter.status = "draft"
+                await self.db.commit()
+                return {"error": f"AI 生成内容异常（{degrade_reason}），请重试或切换模型"}
 
             # 保存
             chapter.content = content

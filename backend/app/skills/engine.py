@@ -507,6 +507,26 @@ class SkillEngine:
             if presence_penalty is None:
                 presence_penalty = user_defaults.get("presence_penalty")
 
+        # 章节正文生成的参数钳制：长文本场景对温度和 penalty 敏感
+        # 高温度 + penalty 累积 → 2000字后模型在低概率区域采样 → 退化成英文/乱码
+        is_chapter_writing = skill_name.startswith("chapter_generation") or skill_name.startswith("chapter_generate")
+        if is_chapter_writing:
+            # 温度：上限 0.8（>0.8 长文本容易跑飞）
+            if temperature is not None and temperature > 0.8:
+                logger.info(f"[skill] 章节生成温度钳制：{temperature} → 0.8")
+                temperature = 0.8
+            # top_p：下限 0.9（<0.9 会截断太多创意词；=1.0 配合高温度会跑飞）
+            if top_p is not None and (top_p > 0.98 or top_p < 0.9):
+                logger.info(f"[skill] 章节生成 top_p 钳制：{top_p} → 0.95")
+                top_p = 0.95
+            # penalty：长文本累积效应强，限制在合理范围
+            if frequency_penalty is not None and abs(frequency_penalty) > 0.5:
+                logger.info(f"[skill] 章节生成 frequency_penalty 钳制：{frequency_penalty} → 0.3")
+                frequency_penalty = 0.3 if frequency_penalty > 0 else -0.3
+            if presence_penalty is not None and abs(presence_penalty) > 0.5:
+                logger.info(f"[skill] 章节生成 presence_penalty 钳制：{presence_penalty} → 0.3")
+                presence_penalty = 0.3 if presence_penalty > 0 else -0.3
+
         if stream:
             _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)
             if _thinking_override.get("temperature") is not None and temperature is None:
