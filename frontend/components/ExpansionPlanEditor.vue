@@ -109,7 +109,7 @@ const extraFields = computed<FieldEntry[]>(() => {
   const entries: FieldEntry[] = []
   for (const [k, v] of Object.entries(plan)) {
     if (EDIT_KEYS.has(k)) continue
-    if (v == null || v === '' || v === [] || (typeof v === 'object' && Object.keys(v).length === 0)) continue
+    if (v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0)) continue
 
     // shuang_design：拆成子字段（可编辑）
     if (k === 'shuang_design' && typeof v === 'object' && v) {

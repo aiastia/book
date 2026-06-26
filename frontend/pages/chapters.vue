@@ -1122,7 +1122,7 @@ async function onPlanSaved() {
     />
 
     <!-- ===== 章节规划编辑器 ===== -->
-    <ExpansionPlanEditor
+    <LazyExpansionPlanEditor
       v-if="planEditingChapter"
       v-model:open="planEditorOpen"
       :chapter-id="planEditingChapter.id"
@@ -1135,7 +1135,7 @@ async function onPlanSaved() {
     />
 
     <!-- ===== 章节规划查看 ===== -->
-    <ExpansionPlanView
+    <LazyExpansionPlanView
       v-if="planEditingChapter"
       v-model:open="planViewOpen"
       :chapter-number="planEditingChapter.chapter_number"

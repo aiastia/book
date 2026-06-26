@@ -687,7 +687,7 @@ async function deleteExpansion() {
             :tab="'第' + ch.sub_index + '节 ' + ch.title + (ch.expansion_plan?.rhythm_tag ? ' 「' + ch.expansion_plan.rhythm_tag + '」' : '')"
           >
             <div v-if="ch.expansion_plan" style="padding:8px 0">
-              <ExpansionPlanView
+              <LazyExpansionPlanView
                 :no-modal="true"
                 :open="true"
                 :plan="ch.expansion_plan"
