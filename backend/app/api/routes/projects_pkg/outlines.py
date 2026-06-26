@@ -1032,20 +1032,179 @@ async def _expand_outline_core(
         )
 
     ctx = await _project_context(db, project_id, proj, use_tools=True)
+
+    # ===== 构建完整的 outline_content（卷概览）=====
+    outline_parts = []
+    if outline.summary:
+        outline_parts.append(f"【卷概要】{outline.summary}")
+    if outline.goal:
+        outline_parts.append(f"【叙事目标】{outline.goal}")
+    if outline.emotion:
+        outline_parts.append(f"【情绪基调】{outline.emotion}")
+    if outline.key_points:
+        kp_lines = "\n".join(f"  - {kp}" for kp in outline.key_points)
+        outline_parts.append(f"【关键情节点】\n{kp_lines}")
+    if outline.scenes:
+        scene_lines = []
+        for sc in outline.scenes:
+            if isinstance(sc, dict):
+                st = sc.get("scene_title", "")
+                sd = sc.get("scene_desc", "")[:100]
+                se = sc.get("emotion", "")
+                scene_lines.append(f"  - {st}（{se}）：{sd}")
+            elif isinstance(sc, str):
+                scene_lines.append(f"  - {sc}")
+        if scene_lines:
+            outline_parts.append(f"【场景设定】\n" + "\n".join(scene_lines))
+    if outline.characters:
+        chars_str = "、".join(str(c) for c in outline.characters)
+        outline_parts.append(f"【涉及角色】{chars_str}")
+    # structure 中的深度设计字段（shuang_design / character_intents 等）
+    if isinstance(outline.structure, dict) and outline.structure:
+        struct_parts = []
+        if outline.structure.get("shuang_design"):
+            sd = outline.structure["shuang_design"]
+            if isinstance(sd, dict):
+                struct_parts.append(f"  爽点设计：{sd}")
+            elif isinstance(sd, str):
+                struct_parts.append(f"  爽点设计：{sd}")
+        if outline.structure.get("character_intents"):
+            ci = outline.structure["character_intents"]
+            if isinstance(ci, list):
+                ci_lines = []
+                for item in ci:
+                    if isinstance(item, dict):
+                        ci_lines.append(f"    {item.get('character','?')}：本章目标={item.get('this_chapter_goal','?')}，当前欲求={item.get('immediate_want','?')}")
+                if ci_lines:
+                    struct_parts.append(f"  角色微意图：\n" + "\n".join(ci_lines))
+            elif isinstance(ci, str):
+                struct_parts.append(f"  角色微意图：{ci}")
+        if outline.structure.get("reader_hook"):
+            struct_parts.append(f"  读者钩子：{outline.structure['reader_hook']}")
+        if outline.structure.get("scene_anchor"):
+            struct_parts.append(f"  场景锚点：{outline.structure['scene_anchor']}")
+        if struct_parts:
+            outline_parts.append(f"【深度设计】\n" + "\n".join(struct_parts))
+    outline_content = "\n\n".join(outline_parts) if outline_parts else (outline.summary or "")
+
+    # ===== 构建 context_info（相邻大纲）=====
+    context_lines = []
+    # 前一个大纲
+    if outline.chapter_number > 1:
+        prev_outline = (await db.execute(
+            select(Outline).where(Outline.project_id == project_id, Outline.chapter_number == outline.chapter_number - 1)
+        )).scalar_one_or_none()
+        if prev_outline:
+            context_lines.append(f"← 前一卷（第{prev_outline.chapter_number}卷）《{prev_outline.title}》：{prev_outline.summary[:150] or '暂无概要'}")
+    # 后两个大纲
+    next_outlines = (await db.execute(
+        select(Outline).where(
+            Outline.project_id == project_id,
+            Outline.chapter_number > outline.chapter_number,
+        ).order_by(Outline.chapter_number).limit(2)
+    )).scalars().all()
+    for no in next_outlines:
+        context_lines.append(f"→ 后卷（第{no.chapter_number}卷）《{no.title}》：{no.summary[:150] or '暂无概要'}")
+    context_info = "\n".join(context_lines) if context_lines else "（无相邻大纲信息）"
+
     engine, ai_client = await make_engine_and_client(db, user_id)
-    strategy_instructions = {
-        "balanced": "均衡分配：将大纲内容均匀拆分到各章节，每章有独立但连贯的剧情推进",
-        "climax": "高潮重点：将关键冲突和高潮集中到中间的章节，前后作为铺垫和收尾",
-        "detail": "细节丰富：每章深度展开场景细节、人物心理和对话，节奏较慢但描写充分",
+
+    # ===== 构建模板变量（数据计算，不含指令文字——指令在 md 模板中）=====
+    key_points = outline.key_points or []
+    focus_kps = [kp for kp in key_points if "【重点】" in str(kp)]
+    general_kps = [kp for kp in key_points if "【一般】" in str(kp)]
+    weak_kps = [kp for kp in key_points if "【弱】" in str(kp)]
+    kp_count = len(focus_kps)
+
+    # 重点情节点文本
+    if focus_kps:
+        focus_kps_text = "\n".join(f"  · {kp}" for kp in focus_kps)
+    else:
+        focus_kps_text = "（本卷未标注【重点】情节点）"
+
+    # 分配规则
+    if focus_kps:
+        if target_chapter_count >= kp_count:
+            kp_allocation_rule = f"共{kp_count}个【重点】，{target_chapter_count}个子章节。前{kp_count}个子章节各承担1个【重点】的推进，第{target_chapter_count}个子章节收束所有线索并引爆本卷小高潮。"
+        else:
+            kp_allocation_rule = f"共{kp_count}个【重点】（多于子章节数{target_chapter_count}），部分子章节需承载多个【重点】。第1章必须让主角接触到核心信息源并开始推进第一个【重点】。"
+    else:
+        kp_allocation_rule = f"将卷概览中的核心剧情按自然节奏分配到{target_chapter_count}个子章节中。"
+
+    # 无重点时的兜底
+    no_focus_fallback = ""
+    if not focus_kps:
+        no_focus_fallback = "第1章必须让主角进入核心场景并开始实质性行动，不允许全章仅做环境铺陈或角色出场。"
+
+    # 【一般】/【弱】规则
+    general_kps_rule = f"【一般】情节点（{len(general_kps)}个）作为子章节的辅助内容，不可喧宾夺主取代【重点】。" if general_kps else ""
+    weak_kps_rule = f"【弱】情节点（{len(weak_kps)}个）字数不够时可省略。" if weak_kps else ""
+
+    # 上下文提示（供模板 <task> 使用）
+    context_note = ""
+    if context_lines:
+        context_note = "同时参考「上下文参考」中相邻卷的内容——前一卷的结尾和后续卷的起点，确保子章节能自然衔接前后卷。"
+
+    # 模式叠加（climax/detail）
+    mode_extra = ""
+    mode_extras = {
+        "climax": "【高潮模式叠加】将最激烈的对抗集中到最后两个子章节，前几章蓄势。",
+        "detail": "【细节模式叠加】每个情节点允许更多心理描写和对话展开，但不得延缓【重点】的推进节奏。",
     }
+    if strategy in mode_extras:
+        mode_extra = mode_extras[strategy]
+
+    # 角色意图继承指引
+    structure = outline.structure if isinstance(outline.structure, dict) else {}
+    if structure.get("character_intents"):
+        char_intent_guidance = (
+            "每个子章节的 character_intents 必须继承卷概览中该角色的整体意图方向，但做阶段性细化："
+            "卷概览的角色意图是「本章想达成的目标」，子章节应将其拆解为「本节此刻想推动的具体一步」。"
+            "禁止子章节的意图与卷概览方向矛盾或完全无关。"
+        )
+    else:
+        char_intent_guidance = (
+            "每个子章节的 character_intents 需标注：角色在本节的具体目标和最想要的信号/结果。"
+            "不同子章节之间同一角色的意图应有递进关系（前一节的行动结果改变后一节的目标）。"
+        )
+
+    # 爽点派生指引
+    if structure.get("shuang_design"):
+        shuang_guidance = (
+            "每个子章节的 shuang_design 从卷概览的爽点设计中派生："
+            "卷概览给出了整卷的信息差和震惊层级，子章节需将大型爽点拆解为阶段性锚点。"
+            "例如第1节预埋信息差（某角色知道而另一角色不知道），第2节推进（被蒙蔽者察觉异样），第3节引爆。"
+        )
+    else:
+        shuang_guidance = (
+            "每个子章节的 shuang_design 必须与子章节的具体情节绑定："
+            "info_asymmetry 指明本节哪组角色之间存在信息差，"
+            "spectator_layers 的围观者必须是本节实际出场或受本节事件影响的角色/组织。"
+            "禁止使用「某路人」「围观群众」等抽象占位——必须用具体角色名或组织名。"
+        )
+
     result = await engine.execute_skill("outline_expand_single", ai_client, {
         "outline_order_index": str(outline.chapter_number), "outline_title": outline.title or "无标题",
-        "outline_summary": outline.summary or "", "target_chapter_count": str(target_chapter_count),
+        "outline_content": outline_content, "outline_summary": outline.summary or "",
+        "target_chapter_count": str(target_chapter_count),
         "project_title": proj.title, "project_genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
         "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
         "organizations_info": ctx["organizations_info"],
-        "strategy_instruction": strategy_instructions.get(strategy, strategy_instructions["balanced"]),
-        "user_prompt": f"请将第{outline.chapter_number}卷大纲「{outline.title}」展开为{target_chapter_count}个子章节。每个子章节需含：sub_index(序号)、title(标题)、plot_summary(200-300字剧情摘要)、key_events(关键事件列表)、character_focus(聚焦角色)、emotional_arc(情绪变化弧线)、narrative_goal(叙事目标)、conflict_type(冲突类型)、hook(结尾钩子)、shuang_design(结构化爽点设计)、rhythm_tag(节奏标签)、scene_anchor(场景锚点)、character_intents(角色微意图)。返回JSON数组。{existing_context}",
+        "context_info": context_info,
+        "context_note": context_note,
+        # 节奏变量（由 md 模板中的 <rhythm_rules> 使用）
+        "focus_kps_text": focus_kps_text,
+        "kp_allocation_rule": kp_allocation_rule,
+        "no_focus_fallback": no_focus_fallback,
+        "general_kps_rule": general_kps_rule,
+        "weak_kps_rule": weak_kps_rule,
+        "mode_extra": mode_extra,
+        # 继承/派生指引（由 md 模板中的 <character_intent_rules> 和 <commercial_design_guide> 使用）
+        "char_intent_guidance": char_intent_guidance,
+        "shuang_guidance": shuang_guidance,
+        "user_prompt": (
+            f"请将第{outline.chapter_number}卷《{outline.title}》展开为{target_chapter_count}个子章节，返回JSON数组。{existing_context}"
+        ),
     })
     check_skill_error(result)
     expanded_data = result.get("json") or []
