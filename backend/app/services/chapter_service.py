@@ -224,11 +224,63 @@ class ChapterService:
     async def _preload_chapter_data(
         self, chapter: Chapter, project: Project,
     ) -> str:
-        """轻量预加载：大纲 + 角色概要 + 前2章摘要。不调 AI，详细数据由 Writer 按需 tool-calling。"""
+        """轻量预加载：章节规划(expansion_plan) + 卷大纲 + 角色概要 + 前2章摘要。
+        不调 AI，详细数据由 Writer 按需 tool-calling。"""
         parts = []
 
-        # 大纲（核心，告诉 AI 这章要写什么）
-        ol = await self._get_outline_for_chapter(chapter.chapter_number)
+        # ===== 章节规划（expansion_plan 富字段）—— 1→N 模式的核心，优先注入 =====
+        if chapter.expansion_plan and isinstance(chapter.expansion_plan, dict):
+            plan = chapter.expansion_plan
+            plan_parts = []
+            if plan.get("plot_summary"):
+                plan_parts.append(f"本章剧情：{plan['plot_summary']}")
+            if plan.get("key_events"):
+                plan_parts.append("关键事件：\n" + "\n".join(f"- {e}" for e in plan["key_events"]))
+            if plan.get("character_focus"):
+                plan_parts.append(f"角色焦点：{', '.join(plan['character_focus'])}")
+            tone = plan.get("emotional_tone") or plan.get("emotional_arc", "")
+            if tone:
+                plan_parts.append(f"情感基调：{tone}")
+            if plan.get("narrative_goal"):
+                plan_parts.append(f"叙事目标：{plan['narrative_goal']}")
+            if plan.get("conflict_type"):
+                plan_parts.append(f"冲突类型：{plan['conflict_type']}")
+            # 富字段：节奏/钩子/场景锚点/情绪弧
+            if plan.get("rhythm_tag"):
+                plan_parts.append(f"节奏标记：{plan['rhythm_tag']}")
+            if plan.get("hook"):
+                plan_parts.append(f"结尾钩子（写到此处停住）：{plan['hook']}")
+            if plan.get("scene_anchor"):
+                plan_parts.append(f"场景锚点：{plan['scene_anchor']}")
+            if plan.get("emotional_arc") and plan.get("emotional_arc") != tone:
+                plan_parts.append(f"情绪弧线：{plan['emotional_arc']}")
+            # 爽点设计
+            sd = plan.get("shuang_design")
+            if isinstance(sd, dict):
+                sd_lines = []
+                if sd.get("info_asymmetry"): sd_lines.append(f"  信息差：{sd['info_asymmetry']}")
+                if sd.get("shock_level"): sd_lines.append(f"  震惊层级：{sd['shock_level']}")
+                if sd.get("spectator_layers"):
+                    sl = sd['spectator_layers']
+                    sd_lines.append("  围观反应：" + ("；".join(sl) if isinstance(sl, list) else str(sl)))
+                if sd.get("emotional_rhythm"): sd_lines.append(f"  情绪拉扯：{sd['emotional_rhythm']}")
+                if sd.get("protagonist_style"): sd_lines.append(f"  主角逼格：{sd['protagonist_style']}")
+                if sd_lines:
+                    plan_parts.append("爽点设计：\n" + "\n".join(sd_lines))
+            # 角色微意图
+            ci = plan.get("character_intents")
+            if isinstance(ci, list):
+                ci_lines = []
+                for it in ci:
+                    if isinstance(it, dict):
+                        ci_lines.append(f"  - {it.get('character','?')}：本章目标「{it.get('this_chapter_goal','')}」，此刻想要「{it.get('immediate_want','')}」")
+                if ci_lines:
+                    plan_parts.append("角色微意图：\n" + "\n".join(ci_lines))
+            if plan_parts:
+                parts.append("<chapter_plan>\n" + "\n".join(plan_parts) + "\n</chapter_plan>")
+
+        # ===== 所属卷大纲（1→N 模式：让 AI 有全局视野）=====
+        ol = await self._get_outline_for_chapter(chapter.chapter_number, outline_id=chapter.outline_id)
         if ol:
             parts.append(f"<outline>\n{ol}\n</outline>")
 
@@ -291,13 +343,21 @@ class ChapterService:
         from app.services.chapter_tools import _query_chapter_summary
         return await _query_chapter_summary(self.db, self.project_id, chapter_num)
 
-    async def _get_outline_for_chapter(self, chapter_num: int) -> str:
-        ol = (await self.db.execute(
-            select(Outline).where(
-                Outline.project_id == self.project_id,
-                Outline.chapter_number == chapter_num,
-            )
-        )).scalars().first()
+    async def _get_outline_for_chapter(self, chapter_num: int, outline_id: int | None = None) -> str:
+        # 1→N 模式：优先用 outline_id 查所属卷（Chapter.chapter_number ≠ Outline.chapter_number）
+        ol = None
+        if outline_id:
+            ol = (await self.db.execute(
+                select(Outline).where(Outline.id == outline_id)
+            )).scalars().first()
+        # 1→1 模式或回退：按 chapter_number 查
+        if not ol:
+            ol = (await self.db.execute(
+                select(Outline).where(
+                    Outline.project_id == self.project_id,
+                    Outline.chapter_number == chapter_num,
+                )
+            )).scalars().first()
         if not ol:
             return ""
         parts = [f"标题: {ol.title}"]

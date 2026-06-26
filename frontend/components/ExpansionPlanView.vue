@@ -60,14 +60,12 @@ const characterFocus = computed<string[]>(() =>
 // 基础信息表格（情感基调/冲突/字数/节奏标签）
 const basicInfo = computed(() => {
   const rows: Array<{ label: string; value: string }> = []
-  const tone = planData.value.emotional_tone || ''
+  const tone = planData.value.emotional_tone || planData.value.emotional_arc || ''
   const conflict = planData.value.conflict_type || ''
-  const words = planData.value.estimated_words
   const rhythm = planData.value.rhythm_tag || ''
   if (tone) rows.push({ label: '情感基调', value: tone })
   if (conflict) rows.push({ label: '冲突类型', value: conflict })
   if (rhythm) rows.push({ label: '节奏标签', value: rhythm })
-  if (words) rows.push({ label: '预估字数', value: words + ' 字' })
   return rows
 })
 

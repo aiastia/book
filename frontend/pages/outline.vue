@@ -92,11 +92,7 @@ const isOneToMany = computed(() => (project.value?.outline_mode || 'one_to_one')
 const modeLabel = computed(() => isOneToMany.value ? '细化模式 (1→N)' : '传统模式 (1→1)')
 const unitLabel = computed(() => isOneToMany.value ? '卷' : '章')
 
-// 展开折叠（用 reactive 对象，Set 在模板 has() 可能不响应式）
-const expandedItems = reactive<Record<number, boolean>>({})
-function toggleExpand(id: number) {
-  expandedItems[id] = !expandedItems[id]
-}
+// （卡片展开/收起详情状态已迁移到 OutlineCard 子组件）
 
 // 展开为多章
 const expanding = ref(false)
@@ -219,12 +215,6 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
     result.push({ key: k, label: fieldLabel(k), value: text })
   }
   return result
-}
-function getSummaryPreview(o: any): string {
-  const summary = o.summary || ''
-  const isExpanded = expandedItems[o.id]
-  if (isExpanded || summary.length <= 120) return summary
-  return summary.substring(0, 120) + '…'
 }
 
 async function onGenerate() {
@@ -493,101 +483,15 @@ async function deleteExpansion() {
     </div>
 
     <div v-if="outlines && outlines.length" class="outline-list">
-      <div v-for="o in outlines" :key="o.id" class="outline-item">
-        <!-- 标题区（仅保留展开/收起等只读操作，编辑删除下移以防误点）-->
-        <div class="item-head">
-          <span class="item-no">第{{ o.chapter_number }}{{ unitLabel }}</span>
-          <span class="item-title">{{ o.title || '无标题' }}</span>
-          <template v-if="isOneToMany">
-            <a-tag v-if="o.has_chapters" color="success" size="small">✓ 展开{{ o.chapter_count }}章</a-tag>
-            <a-tag v-else color="default" size="small">未展开</a-tag>
-          </template>
-          <div class="item-actions">
-            <a-button v-if="isOneToMany" type="link" size="small" @click="openExpand(o)">展开</a-button>
-            <a-button type="link" size="small" @click="toggleExpand(o.id)">{{ expandedItems[o.id] ? '收起详情' : '展开详情' }}</a-button>
-          </div>
-        </div>
-
-        <!-- 大纲内容（分区） -->
-        <div class="item-body">
-          <!-- 梗概 -->
-          <div class="content-section">
-            <div class="section-label">📝 大纲梗概</div>
-            <div class="section-text">{{ getSummaryPreview(o) }}</div>
-          </div>
-
-          <!-- 涉及角色（从 structure 解析） -->
-          <div v-if="getCharacters(o).length" class="content-section chars">
-            <div class="section-label">👥 涉及角色（{{ getCharacters(o).length }}）</div>
-            <div class="char-tags">
-              <a-tag v-for="(c, i) in getCharacters(o)" :key="i" color="purple" size="small">{{ c }}</a-tag>
-            </div>
-          </div>
-
-          <!-- 涉及组织（从 structure 解析） -->
-          <div v-if="getOrganizations(o).length" class="content-section orgs">
-            <div class="section-label">🏛️ 涉及组织（{{ getOrganizations(o).length }}）</div>
-            <div class="char-tags">
-              <a-tag v-for="(g, i) in getOrganizations(o)" :key="i" color="geekblue" size="small">{{ g }}</a-tag>
-            </div>
-          </div>
-
-          <!-- 情节要点 -->
-          <div v-if="o.key_points && o.key_points.length" class="content-section">
-            <div class="section-label">💡 情节要点（{{ o.key_points.length }}）</div>
-            <div class="key-points">
-              <div v-for="(p, i) in o.key_points" :key="i" class="kp-item">
-                <span class="kp-dot">{{ Number(i) + 1 }}</span>
-                <span>{{ typeof p === 'string' ? p : p.content || p.point || p.event || JSON.stringify(p) }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 情感基调 -->
-          <div v-if="o.emotion" class="content-section">
-            <div class="section-label">💫 情感基调</div>
-            <div class="emotion-tag">
-              <a-tag size="small" color="orange">{{ o.emotion }}</a-tag>
-            </div>
-          </div>
-
-          <!-- 场景设定（从 structure 解析，展开时显示） -->
-          <div v-if="expandedItems[o.id] && getScenes(o).length" class="content-section">
-            <div class="section-label">🎬 场景设定（{{ getScenes(o).length }}）</div>
-            <div class="scene-list">
-              <div v-for="(sc, i) in getScenes(o)" :key="i" class="scene-item">
-                <span class="scene-title">{{ sc.scene_title || sc.title || `场景${i+1}` }}</span>
-                <span v-if="sc.scene_desc || sc.desc" class="scene-desc">{{ sc.scene_desc || sc.desc }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 叙事目标 -->
-          <div v-if="o.goal" class="content-section goal-sec">
-            <div class="section-label">🎯 叙事目标</div>
-            <div class="section-text">{{ o.goal }}</div>
-          </div>
-
-          <!-- AI 额外字段（爽点设计/读者钩子/伏笔等，仅展开时显示） -->
-          <div v-if="expandedItems[o.id] && getExtraFields(o).length" class="content-section extra-sec">
-            <div class="section-label">✨ AI 额外字段（{{ getExtraFields(o).length }}）</div>
-            <div class="extra-list">
-              <div v-for="f in getExtraFields(o)" :key="f.key" class="extra-item">
-                <div class="extra-key">{{ f.label }}</div>
-                <div class="extra-val">{{ f.value }}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 底部操作行：编辑在左，删除独立放最右（物理隔离防误点）-->
-        <div class="item-footer">
-          <div class="footer-left">
-            <a-button type="text" size="small" @click="openEdit(o)">✏️ 编辑</a-button>
-          </div>
-          <a-button type="text" danger size="small" @click="onDelete(o.id)">🗑 删除</a-button>
-        </div>
-      </div>
+      <OutlineCard
+        v-for="o in outlines"
+        :key="o.id"
+        :outline="o"
+        :mode="isOneToMany ? 'one_to_many' : 'one_to_one'"
+        @expand="openExpand"
+        @edit="openEdit"
+        @delete="onDelete"
+      />
     </div>
     <a-empty v-else description="暂无大纲，点击 AI 生成" />
 

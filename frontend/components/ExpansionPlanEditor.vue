@@ -28,7 +28,6 @@ const summary = ref('')
 const emotionalTone = ref('')
 const conflictType = ref('')
 const narrativeGoal = ref('')
-const estimatedWords = ref(4000)
 
 // 关键事件
 const keyEvents = ref<string[]>([])
@@ -55,8 +54,8 @@ async function onRegenerate() {
   } catch { /* 取不到就用默认3 */ }
 
   if (!await msg.confirm(
-    `AI 将重新规划该卷的全部 ${existingCount} 节子章节规划。\n旧规划数据将被覆盖，新规划从原章号开始。`,
-    '重新规划整卷',
+    `AI 将重新展开该卷的全部 ${existingCount} 节子章节。\n旧规划数据将被覆盖，新规划从原章号开始。`,
+    '重新展开整卷',
   )) return
   regenerating.value = true
   try {
@@ -65,7 +64,7 @@ async function onRegenerate() {
       mode: 'replace',
     })
     const { trackTask } = useBackgroundTasks()
-    trackTask({ id: task_id, task_type: 'outline_expand', title: `重规划第${props.chapterNumber}章所属卷(${existingCount}节)` })
+    trackTask({ id: task_id, task_type: 'outline_expand', title: `重新展开第${props.chapterNumber}章所属卷(${existingCount}节)` })
     msg.success('重新规划任务已提交，完成后刷新查看')
     emit('saved', {})
     close()
@@ -145,7 +144,6 @@ watch(
     emotionalTone.value = plan.emotional_tone || ''
     conflictType.value = plan.conflict_type || ''
     narrativeGoal.value = plan.narrative_goal || ''
-    estimatedWords.value = plan.estimated_words || 4000
     keyEventInput.value = ''
   },
   { immediate: true }
@@ -194,7 +192,6 @@ async function onSave() {
       emotional_tone: emotionalTone.value,
       conflict_type: conflictType.value,
       narrative_goal: narrativeGoal.value,
-      estimated_words: estimatedWords.value,
     }
     await api.updateChapter(props.chapterId, { expansion_plan: merged })
     msg.success('规划保存成功')
@@ -270,12 +267,6 @@ async function onSave() {
         <a-textarea v-model:value="narrativeGoal" :rows="2" placeholder="例如：引出最终 BOSS、回收身世伏笔、完成主角成长弧线" />
       </a-form-item>
 
-      <!-- 预估字数 -->
-      <a-form-item label="预估字数">
-        <a-input-number v-model:value="estimatedWords" :min="500" :max="10000" :step="100" style="width: 160px" />
-        <span class="word-hint">字</span>
-      </a-form-item>
-
       <!-- AI 生成的其他富字段（只读参考，保存时不丢失） -->
       <div v-if="extraFields.length" class="extra-ref">
         <div class="extra-ref-title">📌 AI 生成的其他设定（保存时自动保留）</div>
@@ -289,7 +280,7 @@ async function onSave() {
     </a-form>
     <template #footer>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <a-button v-if="canRegenerate" :loading="regenerating" @click="onRegenerate">🤖 AI 重规划整卷</a-button>
+        <a-button v-if="canRegenerate" :loading="regenerating" @click="onRegenerate">🤖 重新展开整卷</a-button>
         <span v-else></span>
         <div>
           <a-button @click="close" :disabled="saving || regenerating">取消</a-button>

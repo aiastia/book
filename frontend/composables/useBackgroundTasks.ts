@@ -201,6 +201,23 @@ export function useBackgroundTasks() {
         }
       }
 
+      // 兜底：本地仍显示 pending/running 但已不在 active 列表的任务
+      // （说明服务端已 completed/failed，但 WebSocket 断连没推送 → 逐个查状态）
+      const staleLocalTasks = tasks.value.filter(
+        t => (t.status === 'pending' || t.status === 'running') && !serverIds.has(t.id) && typeof t.id === 'number'
+      )
+      for (const t of staleLocalTasks) {
+        try {
+          const fresh = await apiGet<any>(`/api/tasks/${t.id}`, { timeout: 5000 })
+          const wasActive = t.status === 'pending' || t.status === 'running'
+          Object.assign(t, fresh)
+          if (wasActive && (fresh.status === 'completed' || fresh.status === 'failed')) {
+            t._doneAt = Date.now()
+            _fireCallbacks(fresh)
+          }
+        } catch { /* 单个查询失败不影响整体 */ }
+      }
+
       // 手动清理：已完成超过 24 小时的任务自动移除
       const now = Date.now()
       const dayAgo = now - 24 * 60 * 60 * 1000

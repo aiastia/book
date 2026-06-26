@@ -275,11 +275,53 @@ class ChapterContextService:
                 parts.append(f"冲突类型：{plan['conflict_type']}")
             if plan.get("scenes"):
                 parts.append("场景：\n" + "\n".join(f"- {s}" for s in plan["scenes"]))
+            # 富字段注入（爽点/钩子/情绪弧/场景锚点/微意图——让正文写作有明确发力点）
+            if plan.get("rhythm_tag"):
+                parts.append(f"节奏标记：{plan['rhythm_tag']}")
+            if plan.get("hook"):
+                parts.append(f"结尾钩子（写到此处停住）：{plan['hook']}")
+            if plan.get("scene_anchor"):
+                parts.append(f"场景锚点：{plan['scene_anchor']}")
+            if plan.get("emotional_arc") and plan.get("emotional_arc") != plan.get("emotional_tone"):
+                parts.append(f"情绪弧线：{plan['emotional_arc']}")
+            if plan.get("shuang_design"):
+                sd = plan["shuang_design"]
+                if isinstance(sd, dict):
+                    sd_parts = []
+                    if sd.get("info_asymmetry"): sd_parts.append(f"信息差：{sd['info_asymmetry']}")
+                    if sd.get("shock_level"): sd_parts.append(f"震惊层级：{sd['shock_level']}")
+                    if sd.get("spectator_layers"): sd_parts.append("围观反应：" + "；".join(sd['spectator_layers']) if isinstance(sd['spectator_layers'], list) else str(sd['spectator_layers']))
+                    if sd.get("emotional_rhythm"): sd_parts.append(f"情绪拉扯：{sd['emotional_rhythm']}")
+                    if sd.get("protagonist_style"): sd_parts.append(f"主角逼格：{sd['protagonist_style']}")
+                    if sd_parts:
+                        parts.append("爽点设计：\n" + "\n".join(f"  - {p}" for p in sd_parts))
+            if plan.get("character_intents"):
+                ci = plan["character_intents"]
+                if isinstance(ci, list):
+                    intent_lines = []
+                    for it in ci:
+                        if isinstance(it, dict):
+                            line = f"  - {it.get('character','?')}：本章目标「{it.get('this_chapter_goal','')}」，此刻想要「{it.get('immediate_want','')}」"
+                            intent_lines.append(line)
+                    if intent_lines:
+                        parts.append("角色微意图：\n" + "\n".join(intent_lines))
             chapter_outline = "\n".join(parts) if parts else ""
             expansion_plan = chapter_outline
         elif chapter.expansion_plan:
             chapter_outline = str(chapter.expansion_plan)
             expansion_plan = chapter_outline
+        # 1对多模式：注入所属卷（大纲）的内容，让正文写作有全局视野
+        volume_outline = ""
+        if chapter.outline_id:
+            vol = (await self.db.execute(
+                select(Outline).where(Outline.id == chapter.outline_id)
+            )).scalar_one_or_none()
+            if vol:
+                vol_parts = [f"第{vol.chapter_number}卷《{vol.title or ''}》"]
+                if vol.summary: vol_parts.append(f"本卷概览：{vol.summary}")
+                if vol.goal: vol_parts.append(f"本卷目标：{vol.goal}")
+                if vol.emotion: vol_parts.append(f"本卷基调：{vol.emotion}")
+                volume_outline = "\n".join(vol_parts)
         # 1对1模式：从大纲表取（按 outline_id 或 chapter_number）
         if not chapter_outline:
             outline = None
@@ -649,6 +691,8 @@ class ChapterContextService:
             "pending_foreshadows": pending_foreshadows,
             "recent_expansion_plans": recent_expansion_plans,
             "quality_trends_detail": quality_trends_detail,
+            # ===== 卷级上下文（1对多模式：所属卷的大纲，让正文写作有全局视野）=====
+            "volume_outline": volume_outline or "",
             # ===== 场景锚点 + 角色微意图 =====
             "scene_anchor": scene_anchor or "（本章未提供场景锚点）",
             "character_intents": character_intents or "（本章未提供角色微意图）",

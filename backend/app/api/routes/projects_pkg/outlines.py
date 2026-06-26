@@ -814,7 +814,7 @@ async def _expand_outline_core(
             replaced_count = len(old_chapters)
             # 回收项目字数
             if deleted_words > 0:
-                proj.current_words = max(0, (proj.current_words or 0) - deleted_words)
+                proj.current_word_count = max(0, (proj.current_word_count or 0) - deleted_words)
             logger.info(f"[expand] 覆盖模式：删除大纲 {outline_id} 的旧 {replaced_count} 章（{deleted_words}字），新章节将从第{old_start_chapter}章开始")
     elif append_existing:
         # 追加模式：读取已有章节，记下最大 sub_index 供新章节续接，并拼成上下文喂给 AI
@@ -893,23 +893,19 @@ async def _expand_outline_core(
     for idx, plan in enumerate(expanded_data[:target_chapter_count]):
         if not isinstance(plan, dict):
             continue
-        plan_data = {
-            "plot_summary": plan.get("plot_summary", plan.get("summary", "")),
-            "key_events": plan.get("key_events", []),
-            "character_focus": plan.get("character_focus", []),
-            "emotional_tone": plan.get("emotional_arc") or plan.get("emotional_tone", ""),
-            "narrative_goal": plan.get("narrative_goal", ""),
-            "conflict_type": plan.get("conflict_type", ""),
-            "estimated_words": plan.get("estimated_words", 3000),
-            "scenes": plan.get("scenes", []),
-        }
+        # 保留 AI 产出的全部字段（emotional_arc/hook/shuang_design/reader_hook/
+        # rhythm_tag/scene_anchor/character_intents 等），不丢弃富信息
+        plan_data = {**plan}
+        # 标准字段兼容映射：emotional_arc → emotional_tone（供 chapter_context 读取）
+        if plan.get("emotional_arc") and not plan.get("emotional_tone"):
+            plan_data["emotional_tone"] = plan["emotional_arc"]
         ch = Chapter(
             project_id=project_id,
             outline_id=outline_id,
             chapter_number=start_chapter + idx,
             sub_index=(append_base_sub_index + idx + 1) if append_existing else (idx + 1),
             title=plan.get("title", f"第{start_chapter + idx}章"),
-            summary=plan_data["plot_summary"][:300] if plan_data["plot_summary"] else "",
+            summary=(plan_data.get("plot_summary") or "")[:300],
             status="draft",
             generation_mode="one_to_many",
             expansion_plan=plan_data,
@@ -917,10 +913,10 @@ async def _expand_outline_core(
         db.add(ch)
         created.append({
             "chapter_number": start_chapter + idx,
-            "sub_index": idx + 1,
+            "sub_index": (append_base_sub_index + idx + 1) if append_existing else (idx + 1),
             "title": ch.title,
-            "plot_summary": plan_data["plot_summary"],
-            "key_events": plan_data["key_events"],
+            "plot_summary": plan_data.get("plot_summary", ""),
+            "key_events": plan_data.get("key_events", []),
         })
     await db.commit()
     return {"expanded": created, "count": len(created), "start_chapter": start_chapter, "replaced": replaced_count, "appended": append_existing}
