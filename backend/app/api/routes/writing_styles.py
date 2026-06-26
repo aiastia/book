@@ -120,7 +120,7 @@ async def delete_style(style_id: int, db: AsyncSession = Depends(get_db), user=D
 
 @router.post("/{style_id}/apply/{project_id}")
 async def apply_to_project(style_id: int, project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """将风格设为项目的默认写作风格（写入 project.writing_style）"""
+    """将风格设为项目的默认写作风格，同时设为用户全局默认（is_default=True）"""
     style = (await db.execute(select(WritingStyle).where(WritingStyle.id == style_id, WritingStyle.user_id == user.id))).scalar_one_or_none()
     if not style:
         raise HTTPException(404, "风格不存在")
@@ -128,7 +128,7 @@ async def apply_to_project(style_id: int, project_id: int, db: AsyncSession = De
     if not proj:
         raise HTTPException(404, "项目不存在")
     proj.writing_style = {
-        "style_id": style.id,  # 记录来源风格，生成时据此读取最新的文风特征/范文
+        "style_id": style.id,
         "name": style.name, "description": style.description,
         "author_name": style.author_name or "",
         "custom_prompt": style.custom_prompt or "",
@@ -136,6 +136,13 @@ async def apply_to_project(style_id: int, project_id: int, db: AsyncSession = De
         "style_traits": style.style_traits or {},
         **(style.config or {}),
     }
+    # 同时设为用户全局默认（清除其他默认）
+    others = (await db.execute(
+        select(WritingStyle).where(WritingStyle.user_id == user.id, WritingStyle.is_default == True)
+    )).scalars().all()
+    for o in others:
+        o.is_default = False
+    style.is_default = True
     await db.commit()
     return {"ok": True, "project_id": project_id, "style_name": style.name}
 

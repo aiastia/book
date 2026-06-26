@@ -291,17 +291,31 @@ async function openEditor(c: any) {
 }
 
 async function loadWritingStylesIfEmpty() {
-  if (writingStyles.value.length > 0) return
+  if (writingStyles.value.length > 0) {
+    autoSelectDefaultStyle()
+    return
+  }
   try {
     writingStyles.value = await fetchWritingStyles()
-    // 自动选项目默认风格
-    if (writingStyles.value.length > 0) {
-      const projectStyleId = projectData.value?.writing_style?.style_id
-      const def = projectStyleId ? writingStyles.value.find((s: any) => s.id === projectStyleId) : writingStyles.value.find((s: any) => s.is_default)
-      if (def) selectedStyleId.value = def.id
-      else if (selectedStyleId.value == undefined) selectedStyleId.value = writingStyles.value[0].id
-    }
+    autoSelectDefaultStyle()
   } catch {}
+}
+
+function autoSelectDefaultStyle() {
+  if (writingStyles.value.length === 0) return
+  // 1. 项目绑定的风格
+  const projectStyleId = projectData.value?.writing_style?.style_id
+  if (projectStyleId) {
+    const match = writingStyles.value.find((s: any) => s.id === projectStyleId)
+    if (match) { selectedStyleId.value = match.id; return }
+  }
+  // 2. 用户全局默认
+  const def = writingStyles.value.find((s: any) => s.is_default)
+  if (def) { selectedStyleId.value = def.id; return }
+  // 3. 第一个风格兜底
+  if (selectedStyleId.value == undefined) {
+    selectedStyleId.value = writingStyles.value[0].id
+  }
 }
 
 async function loadSkillsIfEmpty() {

@@ -747,16 +747,33 @@ class ChapterService:
             chapter_data = await self._preload_chapter_data(chapter, project)
             context["quality_trends"] = await self._get_quality_trends(chapter) or ""
 
-            # 写作风格自动加载：overrides 里没传时，查用户默认风格（is_default=True）
+            # 写作风格自动加载：优先项目绑定 → 用户默认 → 第一个风格
             if not context.get("writing_style") and not context.get("style_traits"):
                 try:
                     from app.models.writing_style import WritingStyle
-                    default_ws = (await self.db.execute(
-                        select(WritingStyle).where(
-                            WritingStyle.user_id == self.user_id,
-                            WritingStyle.is_default == True,
-                        )
-                    )).scalar_one_or_none()
+                    default_ws = None
+                    # 1. 项目绑定的风格（用户在 UI 点了"设为项目默认"）
+                    if project.writing_style and isinstance(project.writing_style, dict):
+                        sid = project.writing_style.get("style_id")
+                        if sid:
+                            default_ws = (await self.db.execute(
+                                select(WritingStyle).where(WritingStyle.id == sid)
+                            )).scalar_one_or_none()
+                    # 2. 用户全局默认风格（is_default=True）
+                    if not default_ws:
+                        default_ws = (await self.db.execute(
+                            select(WritingStyle).where(
+                                WritingStyle.user_id == self.user_id,
+                                WritingStyle.is_default == True,
+                            )
+                        )).scalar_one_or_none()
+                    # 3. 兜底取第一个风格
+                    if not default_ws:
+                        default_ws = (await self.db.execute(
+                            select(WritingStyle).where(
+                                WritingStyle.user_id == self.user_id,
+                            ).order_by(WritingStyle.id.asc()).limit(1)
+                        )).scalar_one_or_none()
                     if default_ws:
                         import json as _json2
                         if default_ws.config:
