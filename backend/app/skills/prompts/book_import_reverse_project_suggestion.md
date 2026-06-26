@@ -21,13 +21,13 @@
 【输出格式】
 仅输出一个纯JSON对象（不要markdown、不要代码块、不要解释）：
 
-{{
+{
   "description": "小说简介",
   "theme": "核心主题",
   "genre": "小说类型",
   "narrative_perspective": "第一人称/第三人称/全知视角",
   "target_words": 100000
-}}
+}
 
 【字段要求】
 1) description：120-260字，聚焦主角、核心冲突、主线目标与故事张力。

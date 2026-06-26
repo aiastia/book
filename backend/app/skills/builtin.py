@@ -39,6 +39,10 @@ def load_builtin_skills() -> List[Dict]:
                 md_path = os.path.join(PROMPTS_DIR, sp_file)
                 with open(md_path, "r", encoding="utf-8") as mf:
                     data["system_prompt"] = mf.read().strip()
+            # 规范化：模板中的 {{ }} 是 JSON 示例的转义写法，实际应发送 { }
+            # 否则 AI 看到 {{ }} 可能照抄双花括号，导致 JSON 解析失败
+            if data.get("system_prompt"):
+                data["system_prompt"] = _normalize_braces(data["system_prompt"])
             if data.get("name") and data.get("system_prompt"):
                 skills.append(data)
             else:
@@ -47,6 +51,23 @@ def load_builtin_skills() -> List[Dict]:
             logger.error(f"[builtin] 加载模板失败: {filename} - {e}")
 
     return skills
+
+
+def _normalize_braces(text: str) -> str:
+    """将模板中的双花括号 {{ }} 规范化为单花括号 { }。
+
+    模板文件用 {{ }} 表示 JSON 示例（如 {{"key": "value"}}），
+    但实际发送给 AI 时应为单花括号。双花括号会让 AI 模仿返回
+    无效的 {{...}} JSON，导致解析失败。
+    
+    只在 JSON 格式示例场景下替换：连续的 {{ 或 }}。
+    """
+    if not text:
+        return text
+    # 只替换连续的两个花括号（{{ → { ， }} → }）
+    # 不替换单个花括号（那是变量占位符 {var}）
+    text = text.replace("{{", "{").replace("}}", "}")
+    return text
 
 
 # 启动时加载一次（模块级缓存）

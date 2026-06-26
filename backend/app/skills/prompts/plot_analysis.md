@@ -56,27 +56,27 @@
 12. 改进建议
 
 请以纯 JSON 格式返回（不要 markdown 代码块）：
-{{
+{
   "summary": "200字以内的章节摘要（必填）",
   "key_events": ["事件1", "事件2", "事件3"],
   "plot_stage": "发展阶段",
-  "hooks": {{"suspense": "描述", "emotional": "描述", "conflict": "描述", "cognitive": "描述"}},
-  "foreshadows": [{{"type": "planted", "title": "伏笔标题（必填）", "detail": "详细内容描述（必填，至少20字）", "quote": "正文原文片段10-30字（用于定位，从章节内容里摘抄关键句）", "foreshadow_type": "主线/支线/彩蛋/反转", "importance": 7, "target_resolve_chapter_number": 15, "reference_foreshadow_id": null}}],
-  "conflicts": [{{"type": "冲突类型", "parties": ["各方"], "intensity": 5, "progress": "描述"}}],
+  "hooks": {"suspense": "描述", "emotional": "描述", "conflict": "描述", "cognitive": "描述"},
+  "foreshadows": [{"type": "planted", "title": "伏笔标题（必填）", "detail": "详细内容描述（必填，至少20字）", "quote": "正文原文片段10-30字（用于定位，从章节内容里摘抄关键句）", "foreshadow_type": "主线/支线/彩蛋/反转", "importance": 7, "target_resolve_chapter_number": 15, "reference_foreshadow_id": null}],
+  "conflicts": [{"type": "冲突类型", "parties": ["各方"], "intensity": 5, "progress": "描述"}],
   "conflict_types": ["人vs人", "内心"],
-  "emotion_curve": [{{"point": "段落位置", "emotion": "情绪", "intensity": 5}}],
-  "emotional_curve": {{"start": "开头情绪", "middle": "中段情绪", "end": "结尾情绪", "arc_summary": "情感弧线概述"}},
-  "character_states": [{{"character_name": "角色名", "mental_change": "心理变化", "relation_change": "关系变化", "survival_status": "存活/死亡/失踪/退隐", "ability_change": "能力变化", "career_changes": {{"main_career_stage_change": 0, "new_careers": []}}, "arc_progress": "本章节该角色的弧线进展描述（成长/转变的关键事件，无则空字符串）", "arc_type_change": "若角色弧线类型发生转变则填新类型（成长/堕落/救赎/顿悟/平淡），无转变则空字符串"}}],
-  "organization_states": [{{"organization": "组织名", "change": "变化描述", "power_change": 0}}],
-  "key_plot_points": [{{"event": "情节概述", "quote": "正文原文片段10-30字（用于定位）"}}],
-  "scenes": [{{"scene": "场景描述", "pacing": "fast/medium/slow", "tension": 5}}],
+  "emotion_curve": [{"point": "段落位置", "emotion": "情绪", "intensity": 5}],
+  "emotional_curve": {"start": "开头情绪", "middle": "中段情绪", "end": "结尾情绪", "arc_summary": "情感弧线概述"},
+  "character_states": [{"character_name": "角色名", "mental_change": "心理变化", "relation_change": "关系变化", "survival_status": "存活/死亡/失踪/退隐", "ability_change": "能力变化", "career_changes": {"main_career_stage_change": 0, "new_careers": []}, "arc_progress": "本章节该角色的弧线进展描述（成长/转变的关键事件，无则空字符串）", "arc_type_change": "若角色弧线类型发生转变则填新类型（成长/堕落/救赎/顿悟/平淡），无转变则空字符串"}],
+  "organization_states": [{"organization": "组织名", "change": "变化描述", "power_change": 0}],
+  "key_plot_points": [{"event": "情节概述", "quote": "正文原文片段10-30字（用于定位）"}],
+  "scenes": [{"scene": "场景描述", "pacing": "fast/medium/slow", "tension": 5}],
   "pacing": "medium",
   "dialogue_ratio": 0.35,
   "description_ratio": 0.4,
-  "quality_scores": {{"overall": 8.0, "pacing": 7.8, "engagement": 8.2, "coherence": 8.0, "writing_quality": 7.8, "character_depth": 8.0, "dialogue_quality": 7.6, "world_consistency": 8.3, "plot_logic": 8.0, "attraction": 8.5, "retention": 8.8, "bookmark_ratio": 8.2, "score_justification": "整体质量（8.0）：氛围营造、悬念设置、人物状态均达标，节奏张弛有度。\n节奏把控（7.8）：开头环境与规则引入是有效停顿，建立氛围；规则浮现与异常层层递进，呼吸感自然。\n吸引力（8.2）：身体感知个人化程度高（指甲抠入肋间、靴底感受地板震动），存在认知与身体的错位。\n连贯性（8.0）：角色行为、规则触发、情节推进逻辑清晰，细节前后呼应。\n文笔质量（7.8）：感官描写精准，画面感强，偶有句式略显通用。\n角色塑造（8.0）：主角的冷静与隐忍有具体行为支撑，配角反应分层。\n对话质量（7.6）：对话推进信息，但部分功能性对白稍多。\n世界观一致性（8.3）：规则体系自洽，设定与前文无矛盾。\n剧情逻辑（8.0）：因果链完整，转折有铺垫。\n番茄吸量力（8.5）：开头即有质感，"虎口烫得惊人"具备感官钩子，设定反差感强。\n番茄留存力（8.8）：章末叠加72小时倒计时、手势来历追问三重钩子，追读动力极强。\n番茄追更比潜力（8.2）：莫里哀惨死和"概念层面被看见"的高概念设定具备高记忆点，有可传播潜力。"}},
+  "quality_scores": {"overall": 8.0, "pacing": 7.8, "engagement": 8.2, "coherence": 8.0, "writing_quality": 7.8, "character_depth": 8.0, "dialogue_quality": 7.6, "world_consistency": 8.3, "plot_logic": 8.0, "attraction": 8.5, "retention": 8.8, "bookmark_ratio": 8.2, "score_justification": "整体质量（8.0）：氛围营造、悬念设置、人物状态均达标，节奏张弛有度。\n节奏把控（7.8）：开头环境与规则引入是有效停顿，建立氛围；规则浮现与异常层层递进，呼吸感自然。\n吸引力（8.2）：身体感知个人化程度高（指甲抠入肋间、靴底感受地板震动），存在认知与身体的错位。\n连贯性（8.0）：角色行为、规则触发、情节推进逻辑清晰，细节前后呼应。\n文笔质量（7.8）：感官描写精准，画面感强，偶有句式略显通用。\n角色塑造（8.0）：主角的冷静与隐忍有具体行为支撑，配角反应分层。\n对话质量（7.6）：对话推进信息，但部分功能性对白稍多。\n世界观一致性（8.3）：规则体系自洽，设定与前文无矛盾。\n剧情逻辑（8.0）：因果链完整，转折有铺垫。\n番茄吸量力（8.5）：开头即有质感，"虎口烫得惊人"具备感官钩子，设定反差感强。\n番茄留存力（8.8）：章末叠加72小时倒计时、手势来历追问三重钩子，追读动力极强。\n番茄追更比潜力（8.2）：莫里哀惨死和"概念层面被看见"的高概念设定具备高记忆点，有可传播潜力。"},
   "consistency_issues": ["如有矛盾列出具体问题，无则为空数组"],
   "suggestions": ["建议"]
-}}
+}
 
 章节信息：
 章节号：{chapter_number}

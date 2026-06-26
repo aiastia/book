@@ -18,6 +18,7 @@ def _resolve_includes(text: str, base_dir: str = None, seen: set = None, user_ov
 
     支持嵌套 include（最多 5 层），自动检测循环引用。
     user_overrides: {filename: content} 用户自定义的共享模块内容（优先于文件）
+    自动将模板中的双花括号 {{ }} 规范化为单花括号，防止 AI 模仿返回无效 JSON。
     """
     if base_dir is None:
         base_dir = _PROMPTS_DIR
@@ -35,7 +36,7 @@ def _resolve_includes(text: str, base_dir: str = None, seen: set = None, user_ov
             # 递归解析嵌套 include
             if len(seen) < 5 and "@include:" in content:
                 content = _resolve_includes(content, base_dir, seen, user_overrides)
-            return content
+            return _normalize_braces(content)
         inc_path = os.path.join(base_dir, fname)
         if not os.path.isfile(inc_path):
             return f"[@include 文件不存在: {fname}]"
@@ -48,9 +49,17 @@ def _resolve_includes(text: str, base_dir: str = None, seen: set = None, user_ov
         # 递归解析嵌套 include，但限制深度
         if len(seen) < 5 and "@include:" in content:
             content = _resolve_includes(content, base_dir, seen, user_overrides)
-        return content
+        return _normalize_braces(content)
 
-    return re.sub(r"@include:(\S+\.md)", _replace, text)
+    result = re.sub(r"@include:(\S+\.md)", _replace, text)
+    return _normalize_braces(result)
+
+
+def _normalize_braces(text: str) -> str:
+    """将模板中的双花括号 {{ }} 规范化为单花括号 { }。"""
+    if not text:
+        return text
+    return text.replace("{{", "{").replace("}}", "}")
 
 
 # ===== 上下文自动注入 =====
@@ -358,6 +367,9 @@ class SkillEngine:
         for key, value in _aliases.items():
             if isinstance(value, str) and f"{{{key}}}" in system_prompt:
                 system_prompt = system_prompt.replace(f"{{{key}}}", value)
+
+        # 兜底规范化：防止 DB 中残留旧版双花括号（{{ }} → { }）
+        system_prompt = _normalize_braces(system_prompt)
 
         messages = [
             {"role": "system", "content": system_prompt},

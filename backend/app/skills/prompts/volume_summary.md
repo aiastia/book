@@ -13,4 +13,4 @@
 {key_plot_points}
 
 请以纯 JSON 返回：
-{{"volume_summary": "200-400字卷级摘要", "main_arc": "本卷主线一句话概括", "turning_points": ["转折1", "转折2"], "current_state": "当前故事状态一句话"}}
+{"volume_summary": "200-400字卷级摘要", "main_arc": "本卷主线一句话概括", "turning_points": ["转折1", "转折2"], "current_state": "当前故事状态一句话"}

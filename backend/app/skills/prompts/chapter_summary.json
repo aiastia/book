@@ -4,7 +4,7 @@
   "description": "为已写章节生成摘要",
   "category": "chapter",
   "skill_type": "builtin",
-  "system_prompt": "请为以下章节生成简洁的摘要（200字以内），包含主要事件、人物行动和关键转折。\n\n以 JSON 格式返回：{{\"summary\": \"摘要内容\", \"key_events\": [\"事件1\", \"事件2\"]}}\n\n章节号：{chapter_number}\n标题：{chapter_title}\n\n章节内容：\n{chapter_content}",
+  "system_prompt": "请为以下章节生成简洁的摘要（200字以内），包含主要事件、人物行动和关键转折。\n\n以 JSON 格式返回：{\"summary\": \"摘要内容\", \"key_events\": [\"事件1\", \"事件2\"]}\n\n章节号：{chapter_number}\n标题：{chapter_title}\n\n章节内容：\n{chapter_content}",
   "parameters": {
     "type": "object"
   }

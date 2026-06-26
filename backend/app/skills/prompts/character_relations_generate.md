@@ -12,7 +12,7 @@
 4. 每条关系给出 intimacy（-100到100），正面是亲近/信任，负面是敌意/疏远
 
 只返回纯JSON数组：
-[{{"from":"角色A名","to":"角色B名","relation_type":"关系类型（如师徒/宿敌/暗恋/利益同盟/血脉羁绊/亦敌亦友）","category":"family/romantic/hostile/professional/social","intimacy":50,"description":"30-80字关系描述（要有具体细节和张力）"}}]
+[{"from":"角色A名","to":"角色B名","relation_type":"关系类型（如师徒/宿敌/暗恋/利益同盟/血脉羁绊/亦敌亦友）","category":"family/romantic/hostile/professional/social","intimacy":50,"description":"30-80字关系描述（要有具体细节和张力）"}]
 
 生成 5-10 条主要关系，覆盖不同类型的互动。
 

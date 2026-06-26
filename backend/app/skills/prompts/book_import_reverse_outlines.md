@@ -33,19 +33,19 @@
 
 每个对象字段必须严格为：
 [
-  {{
+  {
     "chapter_number": 1,
     "title": "章节标题",
     "summary": "章节概要（200-600字）：主要情节、角色互动、关键事件、冲突与转折",
     "scenes": ["场景1描述", "场景2描述"],
     "characters": [
-      {{"name": "角色名1", "type": "character"}},
-      {{"name": "组织/势力名1", "type": "organization"}}
+      {"name": "角色名1", "type": "character"},
+      {"name": "组织/势力名1", "type": "organization"}
     ],
     "key_points": ["情节要点1", "情节要点2"],
     "emotion": "本章情感基调",
     "goal": "本章叙事目标"
-  }}
+  }
 ]
 
 【字段约束】
