@@ -41,6 +41,14 @@
 {characters_info}
 </characters>
 
+<items_locations priority="P2">
+【 可用道具】
+{items_info}
+
+【 可用地点】
+{locations_info}
+</items_locations>
+
 <careers priority="P2">
 【本章职业】
 {chapter_careers}

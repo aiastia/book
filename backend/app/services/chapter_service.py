@@ -652,6 +652,25 @@ class ChapterService:
                 tool_exec = tool_exec_with_custom
 
             context["chapter_data"] = chapter_data
+            # 注入写作风格块（模板用 {writing_style_block}）
+            _style_parts = []
+            if context.get("style_name"):
+                _style_parts.append(f"【写作风格】{context['style_name']}")
+            if context.get("writing_style"):
+                _style_parts.append(f"<writing_style>{context['writing_style']}</writing_style>")
+            if context.get("style_traits"):
+                _style_parts.append(f"<style_traits>{context['style_traits']}</style_traits>")
+            if context.get("style_custom_prompt"):
+                _style_parts.append(f"<style_custom>{context['style_custom_prompt']}</style_custom>")
+            context["writing_style_block"] = "\n".join(_style_parts) if _style_parts else ""
+            # 1-1 模板用 {chapter_data}，追加 style + items + locations
+            _append_parts = list(_style_parts)
+            if context.get("items_info"):
+                _append_parts.append(f"<items_info>{context['items_info']}</items_info>")
+            if context.get("locations_info"):
+                _append_parts.append(f"<locations_info>{context['locations_info']}</locations_info>")
+            if _append_parts:
+                context["chapter_data"] = (chapter_data or "") + "\n\n" + "\n".join(_append_parts)
             # ===== 注入模板所需的独立变量（md 模板中 {variable} 占位符）=====
             # 注意：只在变量尚未设定时才注入，避免覆盖 batch API / overrides 传入的值
             if "project_title" not in context:
@@ -708,6 +727,28 @@ class ChapterService:
                 context["character_intents"] = "\n".join(ci_lines)
             else:
                 context["character_intents"] = ""
+            # 注入物品和地点列表（供章节生成参考，AI 不会凭空编造）
+            try:
+                from app.models.item import Item
+                from app.models.location import Location
+                items = (await self.db.execute(select(Item).where(Item.project_id == self.project_id))).scalars().all()
+                locations = (await self.db.execute(select(Location).where(Location.project_id == self.project_id))).scalars().all()
+                context["items_info"] = "\n".join(
+                    [f"- {it.name}（{it.category or '道具'}{'，⭐关键道具' if it.is_key_item else ''}）：{it.description[:120] if it.description else ''}"
+                     for it in items]) if items else ""
+                context["locations_info"] = "\n".join(
+                    [f"- {loc.name}（{loc.location_type or '地点'}）：{loc.description[:120] if loc.description else ''}"
+                     for loc in locations]) if locations else ""
+            except Exception:
+                context["items_info"] = ""
+                context["locations_info"] = ""
+            # 职业体系数量（无职业时提示 AI 不要查）
+            career_count = 0
+            try:
+                from app.models.career import Career
+                career_count = await self.db.scalar(select(func.count(Career.id)).where(Career.project_id == self.project_id)) or 0
+            except Exception:
+                pass
             # 伏笔提醒 + 相关记忆（从 service 获取）
             try:
                 fs_service = ForeshadowService(self.db, self.project_id)
@@ -750,7 +791,9 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
-            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色列表仅提供姓名与身份，性格、背景、能力、外貌等详细信息请通过 query_character 工具按需查询。大纲、场景锚点和角色微意图已提供，无需重复查询。确认信息充分后再动笔。"
+            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色列表仅提供姓名与身份，性格、背景、能力、外貌等详细信息请通过 query_character 工具按需查询。大纲、场景锚点和角色微意图已提供，无需重复查询。确认信息充分后再动笔。" + (
+                "（注意：本项目未配置职业体系，无需查询职业相关工具。）" if not career_count else ""
+            )
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
             skill_name_override = (overrides or {}).get("skill_name")
