@@ -550,6 +550,7 @@ class AIClient:
         }
         current_messages = [budget_hint] + list(messages)
         post_tool_inserted = False
+        tool_call_history: list[dict] = []  # 记录所有工具调用（名称+参数），供上层校验
 
         for round_num in range(max_rounds):
             is_last_round = (round_num == max_rounds - 1)
@@ -566,6 +567,7 @@ class AIClient:
             )
 
             if result.get("error"):
+                result["tool_call_history"] = tool_call_history
                 return result
 
             tool_calls = result.get("tool_calls") or []
@@ -580,6 +582,7 @@ class AIClient:
 
             # 没有工具调用 → 返回正文
             if not tool_calls:
+                result["tool_call_history"] = tool_call_history
                 return result
 
             # 有工具调用 → 执行并追加消息
@@ -602,6 +605,7 @@ class AIClient:
                     args = {}
 
                 tool_result = await tool_executor(tool_name, args)
+                tool_call_history.append({"name": tool_name, "arguments": args})
                 current_messages.append({
                     "role": "tool",
                     "tool_call_id": tc.get("id", ""),
@@ -622,10 +626,11 @@ class AIClient:
                     max_tokens=max_tokens,
                     tool_choice="none",  # 防止模型再次调用工具
                 )
+                final["tool_call_history"] = tool_call_history
                 return final
 
         # 兜底
-        return {"content": "", "error": "工具调用超过最大轮数"}
+        return {"content": "", "error": "工具调用超过最大轮数", "tool_call_history": tool_call_history}
 
     async def embed(self, texts, model: str = None) -> dict:
         """调用 embedding API 生成向量（用于记忆向量检索）。

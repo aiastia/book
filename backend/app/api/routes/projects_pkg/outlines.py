@@ -216,13 +216,16 @@ def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_c
     return "\n\n".join(parts) if parts else "暂无伏笔"
 
 
-async def _project_context(db: AsyncSession, project_id: int, project: Project, use_tools: bool = False) -> dict:
-    """收集项目的世界观/角色/组织上下文信息。use_tools=True 时精简上下文，AI 用工具按需获取。"""
+async def _project_context(db: AsyncSession, project_id: int, project: Project, use_tools: bool = False, collect_only: bool = False) -> dict:
+    """收集项目的世界观/角色/组织上下文信息。
+
+    use_tools=True:  精简上下文（角色仅骨架），AI 用工具查询世界观/组织，但角色信息已提供无需查询。
+    collect_only=True: 仅骨架（角色仅姓名+身份），AI 需用工具查询一切（包括角色详情）。用于两阶段收集。"""
     worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
     chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
     orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
 
-    # 世界设定：核心四维度始终发送；详细设定仅非工具模式发送
+    # 世界设定：核心四维度始终发送；详细设定仅非工具/非收集模式发送
     core_parts = []
     if project.world_time_period: core_parts.append(f"时间背景：{project.world_time_period}")
     if project.world_location: core_parts.append(f"地理位置：{project.world_location}")
@@ -230,7 +233,9 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
     if project.world_rules: core_parts.append(f"世界规则：{project.world_rules}")
     core = "\n".join(core_parts)
 
-    if use_tools:
+    if collect_only:
+        world_info = ("【核心世界观】\n" + (core or "暂无"))
+    elif use_tools:
         tool_hint = (
             "\n\n💡 世界设定条目（地理/历史/文化等）、组织详情、地点信息等辅助资料可通过工具查询。"
             "角色信息已提供，无需查询。建议先调用 list_available_entities 了解可查内容。"
@@ -240,9 +245,9 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
         detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
         world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
 
-    # 角色：工具模式下仅发名字+角色+身份（一行），详细用工具查；非工具模式分层注入
+    # 角色：collect_only/工具模式下仅发名字+角色+身份（一行），详细用工具查；非工具模式分层注入
     char_parts = []
-    if use_tools:
+    if collect_only or use_tools:
         for c in chars:
             info = f"- {c.name}（{c.role}"
             if c.identity: info += f"，{c.identity[:60]}"
@@ -286,8 +291,8 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
                 char_parts.append(f"- {c.name}（{c.role}）")
     chars_info = "\n\n".join(char_parts) if char_parts else "暂无"
 
-    # 组织：全部显示（工具模式下仅发送简要列表）
-    if not use_tools:
+    # 组织：非工具模式全量；工具/收集模式仅发送简要列表
+    if not use_tools and not collect_only:
         orgs_info = "\n".join(
             [f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}" for o in orgs]
         ) or "暂无"
@@ -296,12 +301,14 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
 
     char_names = {c.name for c in chars}
     org_names = {o.name for o in orgs}
+    char_roles = {c.name: c.role for c in chars}
     return {
         "world_info": world_info,
         "characters_info": chars_info,
         "organizations_info": orgs_info,
         "char_names": char_names,
         "org_names": org_names,
+        "char_roles": char_roles,
         "time_period": project.world_time_period or "",
         "location": project.world_location or "",
         "atmosphere": project.world_atmosphere or "",
@@ -309,11 +316,93 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
     }
 
 
-    # 验证大纲中涉及的角色/组织是否都已创建
-    world_ctx = build_world_context(project)
-    asyncio.create_task(validate_outline_entities(db, project_id, project.title, project.genre or "网文", world_ctx, engine, ai_client))
+def _validate_collection(tool_call_history: list[dict], ctx: dict) -> dict:
+    """校验 Phase 1 信息收集是否覆盖关键维度。
+    
+    检查项：世界观详情、主角档案、反派档案（如有）、至少一个地点。
+    返回 {"complete": bool, "missing": [str], "called_tools": [str], "queried_characters": [str]}
+    """
+    called_tools: set[str] = set()
+    queried_characters: set[str] = set()
 
-    return {"outlines": created, "count": len(created)}
+    for call in tool_call_history:
+        name = call.get("name", "")
+        called_tools.add(name)
+        args = call.get("arguments", {})
+        if name == "query_character":
+            char_name = args.get("name", "")
+            if char_name:
+                queried_characters.add(char_name)
+
+    missing: list[str] = []
+
+    if "query_world_setting" not in called_tools:
+        missing.append("世界观详细信息")
+
+    char_roles: dict[str, str] = ctx.get("char_roles", {})
+    protagonists = [name for name, role in char_roles.items() if role == "主角"]
+    antagonists = [name for name, role in char_roles.items() if role == "反派"]
+
+    for p in protagonists:
+        if p not in queried_characters:
+            missing.append(f"主角「{p}」的完整档案")
+    for a in antagonists:
+        if a not in queried_characters:
+            missing.append(f"反派「{a}」的完整档案")
+
+    if "query_location" not in called_tools:
+        missing.append("关键地点设定")
+
+    return {
+        "complete": len(missing) == 0,
+        "missing": missing,
+        "called_tools": list(called_tools),
+        "queried_characters": list(queried_characters),
+    }
+
+
+def _build_collected_data_summary(tool_call_history: list[dict], final_content: str) -> str:
+    """从 Phase 1 的工具调用历史构建信息摘要，供 Phase 2 注入。"""
+    if not tool_call_history:
+        return "（未查询到额外信息）"
+
+    categories: dict[str, list[dict]] = {}
+    for call in tool_call_history:
+        name = call.get("name", "")
+        if name not in categories:
+            categories[name] = []
+        categories[name].append(call.get("arguments", {}))
+
+    lines: list[str] = []
+    label_map = {
+        "query_character": "角色",
+        "query_character_relations": "角色关系",
+        "query_world_setting": "世界观",
+        "query_location": "地点",
+        "query_organization": "组织",
+        "query_foreshadows": "伏笔",
+        "query_item": "物品",
+        "query_plot_timeline": "剧情时间线",
+        "query_career": "职业体系",
+        "list_available_entities": "实体总览",
+    }
+
+    for tool_name, calls in categories.items():
+        label = label_map.get(tool_name, tool_name)
+        if tool_name == "query_character":
+            chars = [c.get("name", "?") for c in calls]
+            lines.append(f"- {label}：{', '.join(chars)}（共{len(chars)}人）")
+        elif tool_name == "query_world_setting":
+            keywords = [c.get("keyword", "?") for c in calls]
+            lines.append(f"- {label}：{', '.join(keywords)}")
+        elif tool_name == "query_location":
+            locs = [c.get("name", "?") for c in calls]
+            lines.append(f"- {label}：{', '.join(locs)}")
+        else:
+            lines.append(f"- {label}：已查询（{len(calls)}次）")
+
+    return "\n".join(lines) if lines else "（已查询信息）"
+
 
 @router.post("/{project_id}/outlines/generate-async")
 async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
@@ -330,14 +419,93 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
         async with async_session() as task_db:
             logger.info(f"[outline:{task_id}] session ok, fetching project...")
             proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
-            logger.info(f"[outline:{task_id}] project ok, building context...")
-            ctx = await _project_context(task_db, payload["project_id"], proj)
-            logger.info(f"[outline:{task_id}] context ok ({len(str(ctx))} chars), creating engine...")
+
+            # ======== Phase 1: Information Collection ========
+            logger.info(f"[outline:{task_id}] Phase 1: building skeleton context...")
+            ctx_skeleton = await _project_context(task_db, payload["project_id"], proj, collect_only=True)
+            logger.info(f"[outline:{task_id}] skeleton ok ({len(str(ctx_skeleton))} chars), creating engine...")
             engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
-            logger.info(f"[outline:{task_id}] engine ok, calling AI...")
+
+            # Load Phase 1 collection prompt
+            import os as _os
+            _prompt_dir = _os.path.join(_os.path.dirname(__file__), "../../../skills/prompts")
+            with open(_os.path.join(_prompt_dir, "outline_collect.md"), "r") as _f:
+                collection_system_prompt = _f.read()
+
+            # Build Phase 1 messages: minimal context + strict collection instruction
+            phase1_messages = [
+                {"role": "system", "content": collection_system_prompt},
+            ]
+            # Inject only skeleton info (no full profiles, no detailed world settings)
+            _novel_info = f"【小说信息】\n书名：{proj.title}\n题材：{proj.genre or '网文'}\n简介：{proj.synopsis or '暂无简介'}\n叙事视角：{proj.narrative_pov or '第三人称'}\n章节数：{payload['chapter_count']}"
+            phase1_messages.append({"role": "system", "content": _novel_info})
+            if ctx_skeleton.get("world_info"):
+                phase1_messages.append({"role": "system", "content": "【世界观概要】\n" + ctx_skeleton["world_info"]})
+            if ctx_skeleton.get("characters_info"):
+                phase1_messages.append({"role": "system", "content": "【角色骨架】\n" + ctx_skeleton["characters_info"] + "\n\n💡 以上仅角色骨架（姓名+身份）。性格、背景、能力、动机、弱点等详细信息需通过 query_character 工具查询。"})
+            if ctx_skeleton.get("organizations_info"):
+                phase1_messages.append({"role": "system", "content": "【组织列表】\n" + ctx_skeleton["organizations_info"]})
+            phase1_messages.append({"role": "user", "content": f"请为《{proj.title}》收集生成{payload['chapter_count']}章大纲所需的信息。"})
+
+            tools = get_chapter_tools()
+            tool_executor = make_tool_executor(task_db, payload["project_id"], payload["chapter_count"] + 1)
+
+            await tracker.update(stage="collecting", message="AI 正在查询角色和世界观信息...")
+            logger.info(f"[outline:{task_id}] Phase 1: calling AI for collection...")
+
+            MAX_COLLECTION_RETRIES = 2
+            collection_result = None
+            for attempt in range(MAX_COLLECTION_RETRIES + 1):
+                collection_result = await ai_client.chat_with_tools(
+                    messages=phase1_messages,
+                    tools=tools,
+                    tool_executor=tool_executor,
+                    max_rounds=5,
+                )
+                if collection_result.get("error"):
+                    await tracker.fail(collection_result["error"])
+                    return
+
+                content = collection_result.get("content", "")
+                tool_history = collection_result.get("tool_call_history", [])
+
+                # Check trigger phrase
+                if "信息收集完毕" not in content:
+                    logger.warning(f"[outline:{task_id}] Phase 1 attempt {attempt+1}: no trigger phrase, forcing retry")
+                    phase1_messages.append({"role": "assistant", "content": content[:500]})
+                    phase1_messages.append({"role": "user", "content": "请确认信息是否收集完毕。如已完毕，输出「信息收集完毕，请求进入生成阶段。」"})
+                    continue
+
+                # Validate completeness
+                validation = _validate_collection(tool_history, ctx_skeleton)
+                logger.info(f"[outline:{task_id}] Phase 1 validation: complete={validation['complete']}, missing={validation['missing']}, tools={validation['called_tools']}")
+                if validation["complete"]:
+                    break
+
+                if attempt < MAX_COLLECTION_RETRIES:
+                    missing_str = "、".join(validation["missing"])
+                    logger.info(f"[outline:{task_id}] Phase 1: missing {missing_str}, retrying ({attempt+1}/{MAX_COLLECTION_RETRIES})")
+                    phase1_messages.append({"role": "assistant", "content": content[:500]})
+                    phase1_messages.append({"role": "user", "content": f"以下信息尚未收集：{missing_str}。请继续补充查询这些内容。"})
+                else:
+                    logger.warning(f"[outline:{task_id}] Phase 1: still missing {validation['missing']} after {MAX_COLLECTION_RETRIES} retries, proceeding anyway")
+                    break
+
+            # ======== Phase 2: Outline Generation ========
+            logger.info(f"[outline:{task_id}] Phase 2: building full context...")
+            ctx_full = await _project_context(task_db, payload["project_id"], proj)  # Full context
+            logger.info(f"[outline:{task_id}] full context ok ({len(str(ctx_full))} chars)")
+
+            collected_summary = _build_collected_data_summary(
+                collection_result.get("tool_call_history", []),
+                collection_result.get("content", ""),
+            )
+            logger.info(f"[outline:{task_id}] collected summary: {collected_summary[:200]}...")
+
             await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
+            logger.info(f"[outline:{task_id}] Phase 2: calling AI for generation (no tools)...")
             result = await engine.execute_skill("outline_create", ai_client, {
-                **ctx,
+                **ctx_full,
                 "title": proj.title,
                 "genre": proj.genre or "网文",
                 "theme": proj.genre or "网文",
@@ -347,17 +515,20 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
                 "narrative_pov": proj.narrative_pov or "第三人称",
                 "mcp_references": "",
                 "requirements": "",
-                "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。如需查询角色、组织、伏笔等，可使用工具。",
-            }, tools=get_chapter_tools(), tool_executor=make_tool_executor(task_db, payload["project_id"], payload["chapter_count"] + 1))
+                "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。\n\n【你已查询到的信息概要】\n{collected_summary}\n\n请基于以上信息生成大纲。",
+                "_collected_data": collected_summary,
+            }, tools=None, tool_executor=None)  # Phase 2: no tools
+
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return
+
             await tracker.update(stage="saving", message="保存大纲...")
             outlines_data = result.get("json") or []
             if isinstance(outlines_data, list):
                 created_objs = []
                 for idx, item in enumerate(outlines_data):
-                    o = _build_outline(payload["project_id"], item, index=idx, char_names=ctx["char_names"], org_names=ctx["org_names"])
+                    o = _build_outline(payload["project_id"], item, index=idx, char_names=ctx_full["char_names"], org_names=ctx_full["org_names"])
                     task_db.add(o)
                     created_objs.append(o)
                 await task_db.flush()
