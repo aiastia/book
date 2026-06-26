@@ -6,7 +6,7 @@
 <task>
 写第{chapter_number}章《{chapter_title}》的正文。
 
-目标字数：{target_word_count}字，多写几百少写几百都行，别凑字数也别砍剧情。
+目标字数：{target_word_count}字。写完检查字数，不足70%就扩充场景的动作和对话，别让章节太骨感。
 叙事视角：{narrative_perspective}
 
 这是第一章。你只需要做两件事：

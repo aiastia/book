@@ -678,12 +678,13 @@ class ChapterService:
                 context["chapter_outline"] = "\n".join(outline_parts) or (chapter.summary or "")
             else:
                 context["chapter_outline"] = chapter.summary or ""
-            # characters_info / chapter_careers / scene_anchor / character_intents
-            # 由 _preload_chapter_data 已写入 chapter_data，这里补独立变量：
+            # characters_info：骨架+性格+说话风格（保证角色声音一致），
+            # 详细的背景/能力/动机/弱点需用 query_character 按需查询
             chars = await self._list_chapter_characters(chapter)
             if chars:
                 context["characters_info"] = "\n".join(
-                    f"- {c.name}（{c.role}）：{c.personality or ''}{'，职业：' + c.occupation if c.occupation else ''}"[:300]
+                    f"- {c.name}（{c.role}）：{c.identity[:100] if c.identity else ''}。"
+                    f"性格：{c.personality or '暂无'}。说话风格：{c.speech_style or '暂无'}"
                     for c in chars
                 )
             else:
@@ -733,7 +734,7 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
-            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具一次性查询所有需要的信息：用 list_available_entities 看全局，用 query_character 查本章涉及的角色详情，用 query_foreshadows 查伏笔状态，用 query_location 查核心场景。全部查完后再动笔，不要分批查询。"
+            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色列表仅提供姓名与身份，性格、背景、能力、外貌等详细信息请通过 query_character 工具按需查询。大纲、场景锚点和角色微意图已提供，无需重复查询。确认信息充分后再动笔。"
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
             skill_name_override = (overrides or {}).get("skill_name")
