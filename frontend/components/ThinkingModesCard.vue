@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useProjectApi } from '~/composables/useProjectApi'
+import { useProject } from '~/composables/useProject'
+import { apiGet } from '~/composables/useApi'
 
 const api = useProjectApi()
+const { currentProjectId } = useProject()
 const msg = useMessage()
 
 const modes = ref<Record<string, any>>({})
@@ -10,13 +13,13 @@ const loading = ref(false)
 const saving = ref(false)
 
 const modeGroups = [
-  { key: 'world',     label: '🌍 生成世界观',        desc: '世界设定生成 (world_generate)' },
+  { key: 'world',     label: '🌍 生成世界观',        desc: '世界设定生成' },
   { key: 'character', label: '👤 生成人物设定',      desc: '角色创建与批量生成' },
-  { key: 'outline',   label: '📋 生成剧情大纲',      desc: '大纲/续写大纲' },
-  { key: 'expand',    label: '📑 每章剧情规划',      desc: '大纲展开为子章节 (expand)' },
+  { key: 'outline',   label: '📋 生成剧情大纲',      desc: '大纲/续写' },
+  { key: 'expand',    label: '📑 每章剧情规划',      desc: '大纲展开为子章节' },
   { key: 'chapter',   label: '✍️ 正文写作',          desc: '章节生成 (1-1/1-N)' },
-  { key: 'polish',    label: '✨ 章节润色',          desc: '去AI味/文笔优化' },
-  { key: 'analysis',  label: '🔍 一致性检查/分析',   desc: '剧情分析/查设定冲突' },
+  { key: 'polish',    label: '✨ 章节润色',          desc: '去AI味' },
+  { key: 'analysis',  label: '🔍 一致性检查/分析',   desc: '剧情分析' },
 ]
 
 const effortOptions = [
@@ -27,14 +30,16 @@ const effortOptions = [
 ]
 
 async function load() {
+  if (!currentProjectId.value) return
   loading.value = true
   try {
-    const res = await api.getThinkingModes()
-    modes.value = res?.modes || {}
+    const data = await apiGet<any>(`/api/projects/${currentProjectId.value}/thinking-modes`)
+    modes.value = data?.modes || {}
   } catch { /* 暂无数据 */ }
   finally { loading.value = false }
 }
 async function save() {
+  if (!currentProjectId.value) return
   saving.value = true
   try {
     await api.saveThinkingModes(modes.value)
