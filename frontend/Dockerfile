@@ -1,5 +1,5 @@
-# 前端 Dockerfile（Nuxt 3 SSR）
-FROM node:20-slim AS builder
+# 前端 Dockerfile（Nuxt  SSL）
+FROM node:24-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -10,7 +10,7 @@ ENV NUXT_PUBLIC_API_BASE=http://localhost:8000
 RUN npm run build
 
 # 运行阶段
-FROM node:20-slim AS runner
+FROM node:24-slim AS runner
 WORKDIR /app
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/package.json ./
