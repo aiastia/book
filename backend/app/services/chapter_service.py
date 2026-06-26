@@ -1136,7 +1136,7 @@ class ChapterService:
         existing_fs = await self.foreshadow_service.list_all()
         must_resolve, upcoming, others = [], [], []
         for f in existing_fs:
-            entry = f"- {f.title}({f.foreshadow_type or '未分类'})：{f.content[:60]}"
+            entry = f"(id: f{f.id}) {f.title}({f.foreshadow_type or '未分类'})：{f.content[:60]}"
             tgt = f.target_resolve_chapter_number
             if tgt and tgt <= chapter.chapter_number and f.status in ("pending", "planted"):
                 must_resolve.append(entry + f" [应于第{tgt}章回收]")
@@ -1147,7 +1147,7 @@ class ChapterService:
         fs_layered = "【本章必须回收】\n" + ("\n".join(must_resolve) if must_resolve else "无") +                      "\n【即将到期】\n" + ("\n".join(upcoming) if upcoming else "无") +                      "\n【其他伏笔】\n" + ("\n".join(others[:10]) if others else "无")
 
         # 章节正文通过 system_prompt 的 {chapter_content} / {content} 注入，不重复放入 user_prompt
-        chapter_text = (chapter.content or "")[:5000]
+        chapter_text = (chapter.content or "")[:12000]
         user_prompt = "请分析这个章节，特别注意是否自然回收了「本章必须回收」的伏笔。"
 
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
