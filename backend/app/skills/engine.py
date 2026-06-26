@@ -65,6 +65,39 @@ def _normalize_braces(text: str) -> str:
     return text.replace("{{", "{").replace("}}", "}")
 
 
+# 条件块语法：<!--skip-if:cond-->...<!--/skip-if:cond-->
+# 当 context 满足 cond 时【跳过】该块（整段删除，含标记与内容）；否则保留块内文本。
+# 用于在注入时按上下文状态裁剪重复指令——而非用注释让模型自行判断。
+_COND_RE = re.compile(
+    r"<!--skip-if:(\w+)-->(.*?)<!--/skip-if:\1-->",
+    re.DOTALL,
+)
+
+# 条件名 → 判定函数（返回 True = 满足条件 = 跳过/删除块）
+_COND_FN = {
+    # style_traits 非空且 traits 开关开启时，认为该维度已由 style_traits 承担，
+    # 模板里与之重叠的条目删除，避免重复注入。
+    "has_style_traits": lambda ctx: bool(ctx.get("style_traits"))
+    and ctx.get("style_enable_traits", True),
+}
+
+
+def _apply_conditional_blocks(text: str, context: dict) -> str:
+    """按 context 状态展开/删除 <!--skip-if:cond--> 条件块。
+
+    满足条件 → 整段删除（标记 + 内容）。
+    不满足   → 只保留块内文本（去掉标记）。
+    """
+    def _replace(m: re.Match) -> str:
+        cond = m.group(1)
+        inner = m.group(2)
+        fn = _COND_FN.get(cond)
+        skip = bool(fn(context)) if fn else False
+        return "" if skip else inner
+
+    return _COND_RE.sub(_replace, text)
+
+
 # ===== 上下文自动注入 =====
 
 def _fmt_project(ctx: dict) -> str:
@@ -72,8 +105,7 @@ def _fmt_project(ctx: dict) -> str:
     if ctx.get("title"): parts.append(f"书名：{ctx['title']}")
     if ctx.get("genre"): parts.append(f"题材：{ctx['genre']}")
     if ctx.get("synopsis"): parts.append(f"简介：{ctx['synopsis']}")
-    pov = ctx.get("narrative_perspective") or ctx.get("narrative_pov", "")
-    if pov: parts.append(f"叙事视角：{pov}")
+    # 叙事视角不在此处输出——已由 <writing_style> 的 pov 字段唯一承载，避免重复
     cnt = ctx.get("chapter_count", "")
     if cnt: parts.append(f"章节数：{cnt}")
     return "\n".join(parts)
@@ -411,9 +443,19 @@ class SkillEngine:
             user_include_overrides = await self._get_user_include_overrides()
             system_prompt = _resolve_includes(system_prompt, user_overrides=user_include_overrides)
 
+        # 条件块裁剪：按 context 状态删除 <!--skip-if:cond--> 块（如 style_traits 已配置时，
+        # 删除 tone_rules 中与其重叠的条目），在注入阶段减少重复指令。
+        if "<!--skip-if:" in system_prompt:
+            system_prompt = _apply_conditional_blocks(system_prompt, context)
+
         # 替换提示词中的变量（兼容用户模板中直接写的 {变量}）
+        # 注意：writing_style_block 已由下方前置注入作为独立 system 消息处理，
+        # 绝不能再作为占位符替换进 prompt 主体，否则与前置消息形成 100% 重复。
+        _EXCLUDE_FROM_REPLACE = {"writing_style_block"}
         had_user_prompt_var = "{user_prompt}" in system_prompt
         for key, value in context.items():
+            if key in _EXCLUDE_FROM_REPLACE:
+                continue
             if isinstance(value, str):
                 system_prompt = system_prompt.replace(f"{{{key}}}", value)
         _aliases = {
