@@ -124,9 +124,22 @@ const FIELD_LABELS: Record<string, string> = {
   foreshadow_advance: '伏笔推进',
   plot_summary: '剧情摘要',
   emotional_tone: '情感基调',
+  emotional_arc: '情绪弧线',
   narrative_goal: '叙事目标',
   conflict_type: '冲突类型',
+  rhythm_tag: '节奏标签',
+  scene_anchor: '场景锚点',
+  character_intents: '角色微意图',
+  estimated_words: '预估字数',
   new_characters_needed: '需新增角色',
+  character: '角色',
+  this_chapter_goal: '本章目标',
+  immediate_want: '当前欲求',
+  info_asymmetry: '信息差',
+  shock_level: '震惊层级',
+  spectator_layers: '围观分层',
+  emotional_rhythm: '情绪节奏',
+  protagonist_style: '主角逼格',
 }
 // 已知基础字段，计算额外字段时排除这些
 const BASE_FIELD_KEYS = new Set([
@@ -146,32 +159,28 @@ function fieldToText(v: any): string {
     return v.map((x: any) => typeof x === 'object' ? JSON.stringify(x) : String(x)).join('；')
   }
   if (typeof v === 'object') {
-    // 尝试展开为「键：值」
-    const parts = Object.entries(v).map(([k, val]) => `${k}：${fieldToText(val)}`)
+    // character_intents 特殊处理
+    if (v.character && (v.this_chapter_goal || v.immediate_want)) {
+      let line = `【${v.character || '?'}】`
+      if (v.this_chapter_goal) line += `目标：${v.this_chapter_goal}`
+      if (v.immediate_want) line += `；当前欲求：${v.immediate_want}`
+      return line
+    }
+    // shuang_design 格式化
+    const sdParts: string[] = []
+    if (v.info_asymmetry) sdParts.push(`信息差：${v.info_asymmetry}`)
+    if (v.shock_level) sdParts.push(`震惊层级：${v.shock_level}`)
+    if (v.emotional_rhythm) sdParts.push(`情绪节奏：${v.emotional_rhythm}`)
+    if (v.protagonist_style) sdParts.push(`主角逼格：${v.protagonist_style}`)
+    if (Array.isArray(v.spectator_layers) && v.spectator_layers.length) {
+      sdParts.push(`围观分层：${v.spectator_layers.join(' → ')}`)
+    }
+    if (sdParts.length) return sdParts.join('\n')
+    // 通用：中文标签
+    const parts = Object.entries(v).map(([k, val]) => `${fieldLabel(k)}：${fieldToText(val)}`)
     return parts.join('\n')
   }
   return String(v)
-}
-// 展开预览：从 expansion_plan 提取富字段（爽点/钩子/情绪弧/场景锚点等），排除已单独展示的字段
-const PREVIEW_SKIP_KEYS = new Set(['plot_summary', 'summary', 'scenes', 'key_events', 'character_focus'])
-function getPlanExtraFields(plan: any | null): Array<{ key: string; label: string; value: string }> {
-  if (!plan || typeof plan !== 'object') return []
-  const out: Array<{ key: string; label: string; value: string }> = []
-  for (const [k, v] of Object.entries(plan)) {
-    if (PREVIEW_SKIP_KEYS.has(k)) continue
-    const text = fieldToText(v)
-    if (text) out.push({ key: k, label: fieldLabel(k), value: text })
-  }
-  return out
-}
-// 展开预览：key_events 数组 → 字符串（带优先级标记保留）
-function planKeyEvents(plan: any): string[] {
-  if (!plan || !Array.isArray(plan.key_events)) return []
-  return plan.key_events.map((e: any) => typeof e === 'string' ? e : fieldToText(e)).filter(Boolean)
-}
-function planFocus(plan: any): string {
-  if (!plan || !Array.isArray(plan.character_focus)) return ''
-  return plan.character_focus.join('、')
 }
 // 节奏标签颜色映射
 function rhythmColor(tag: string): string {
@@ -677,42 +686,14 @@ async function deleteExpansion() {
             :key="String(ch.id)"
             :tab="'第' + ch.sub_index + '节 ' + ch.title + (ch.expansion_plan?.rhythm_tag ? ' 「' + ch.expansion_plan.rhythm_tag + '」' : '')"
           >
-            <div v-if="ch.expansion_plan" class="preview-plan" style="max-height:500px;overflow-y:auto;padding:8px 0">
-              <!-- 基础标签行 -->
-              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-                <a-tag v-if="ch.expansion_plan.emotional_tone" color="purple">{{ ch.expansion_plan.emotional_tone }}</a-tag>
-                <a-tag v-if="ch.expansion_plan.conflict_type" color="orange">{{ ch.expansion_plan.conflict_type }}</a-tag>
-                <a-tag v-if="ch.expansion_plan.estimated_words" color="green">约{{ ch.expansion_plan.estimated_words }}字</a-tag>
-              </div>
-              <!-- 剧情摘要 -->
-              <div v-if="ch.expansion_plan.plot_summary" class="plan-field">
-                <div class="plan-field-label">📝 剧情摘要</div>
-                <div class="plan-field-text">{{ ch.expansion_plan.plot_summary }}</div>
-              </div>
-              <!-- 关键事件 -->
-              <div v-if="planKeyEvents(ch.expansion_plan).length" class="plan-field">
-                <div class="plan-field-label">⚡ 关键事件</div>
-                <div class="plan-field-text">
-                  <div v-for="(ev, i) in planKeyEvents(ch.expansion_plan)" :key="i">• {{ ev }}</div>
-                </div>
-              </div>
-              <!-- 聚焦角色 -->
-              <div v-if="planFocus(ch.expansion_plan)" class="plan-field">
-                <div class="plan-field-label">👥 聚焦角色</div>
-                <div class="tag-row">
-                  <a-tag v-for="(name, i) in (ch.expansion_plan.character_focus || [])" :key="i" color="purple">{{ name }}</a-tag>
-                </div>
-              </div>
-              <!-- 叙事目标 -->
-              <div v-if="ch.expansion_plan.narrative_goal" class="plan-field">
-                <div class="plan-field-label">🎯 叙事目标</div>
-                <div class="plan-field-text">{{ ch.expansion_plan.narrative_goal }}</div>
-              </div>
-              <!-- 余下富字段 -->
-              <div v-for="f in getPlanExtraFields(ch.expansion_plan)" :key="f.key" class="plan-field">
-                <div class="plan-field-label">{{ f.label }}</div>
-                <div class="plan-field-text" style="white-space:pre-wrap;">{{ f.value }}</div>
-              </div>
+            <div v-if="ch.expansion_plan" style="padding:8px 0">
+              <ExpansionPlanView
+                :no-modal="true"
+                :open="true"
+                :plan="ch.expansion_plan"
+                :chapter-number="ch.chapter_number || 0"
+                :chapter-title="ch.title"
+              />
             </div>
             <div v-else class="plan-empty">暂无规划数据</div>
           </a-tab-pane>
@@ -784,13 +765,6 @@ async function deleteExpansion() {
 .preview-chap-head { display: flex; gap: 8px; margin-bottom: 4px; }
 .preview-chap-no { font-size: 12px; color: #4D8088; font-weight: 600; }
 .preview-chap-title { font-size: 14px; }
-.preview-plan { font-size: 13px; color: #595959; }
-.plan-field { margin-bottom: 10px; }
-.plan-field-label { font-size: 12px; font-weight: 600; color: #8C8C8C; margin-bottom: 4px; }
-.plan-field-text { font-size: 13px; color: #595959; line-height: 1.7; }
-.plan-field-row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 10px; }
-.plan-field-inline { font-size: 13px; color: #595959; }
-.plan-field-inline .plan-field-label { display: inline; margin-bottom: 0; margin-right: 2px; }
 .plan-empty { font-size: 12px; color: #BFBFBF; padding: 8px 0; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
 </style>

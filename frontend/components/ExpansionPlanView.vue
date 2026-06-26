@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// 章节规划只读详情 — 自动渲染 expansion_plan 全部字段，未来 AI 加新字段无需改这里
-const props = defineProps<{
-  open: boolean
-  chapterNumber: number
-  chapterTitle?: string
-  plan?: Record<string, any> | null
-  chapterSummary?: string
-}>()
+	// 章节规划只读详情 — 自动渲染 expansion_plan 全部字段，未来 AI 加新字段无需改这里
+	// noModal=true 时只渲染内容（供外部弹窗嵌入使用）
+	const props = defineProps<{
+	  open: boolean
+	  chapterNumber: number
+	  chapterTitle?: string
+	  plan?: Record<string, any> | null
+	  chapterSummary?: string
+	  noModal?: boolean
+	}>()
 
-const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>()
+	const emit = defineEmits<{ (e: 'update:open', v: boolean): void }>()
 
 // ===== 中文标签映射（与 outline.vue FIELD_LABELS 一致）=====
 const FIELD_LABELS: Record<string, string> = {
@@ -73,44 +75,6 @@ const characterFocus = computed<string[]>(() =>
 // 富字段：除标准字段外的所有额外字段（自动遍历，未来 AI 加新字段自动显示）
 type FieldEntry = { key: string; label: string; value: string; isArray: boolean }
 
-function formatFieldValue(k: string, v: any): string {
-  if (v == null || v === '') return ''
-  // character_intents：数组对象 → 中文格式化
-  if (k === 'character_intents') {
-    const arr = Array.isArray(v) ? v : (typeof v === 'string' ? tryParseJson(v) : [])
-    if (Array.isArray(arr)) {
-      return arr.map((item: any) => {
-        if (typeof item !== 'object' || !item) return String(item)
-        const name = item.character || item.name || '?'
-        const goal = item.this_chapter_goal || item.goal || ''
-        const want = item.immediate_want || item.want || ''
-        let line = `【${name}】`
-        if (goal) line += `目标：${goal}`
-        if (want) line += `；当前欲求：${want}`
-        return line
-      }).join('\n')
-    }
-  }
-  // shuang_design：对象 → 中文格式化
-  if (k === 'shuang_design') {
-    const obj = (typeof v === 'object' && v) ? v : tryParseJson(v)
-    if (obj && typeof obj === 'object') {
-      const parts: string[] = []
-      if (obj.info_asymmetry) parts.push(`信息差：${obj.info_asymmetry}`)
-      if (obj.shock_level) parts.push(`震惊层级：${obj.shock_level}`)
-      if (obj.emotional_rhythm) parts.push(`情绪节奏：${obj.emotional_rhythm}`)
-      if (obj.protagonist_style) parts.push(`主角逼格：${obj.protagonist_style}`)
-      if (Array.isArray(obj.spectator_layers) && obj.spectator_layers.length) {
-        parts.push(`围观分层：${obj.spectator_layers.join(' → ')}`)
-      }
-      return parts.join('\n') || JSON.stringify(obj)
-    }
-  }
-  // 通用对象
-  if (typeof v === 'object') return JSON.stringify(v, null, 2)
-  return String(v)
-}
-
 function tryParseJson(v: any): any {
   if (typeof v !== 'string') return v
   try { return JSON.parse(v) } catch { return v }
@@ -121,13 +85,51 @@ const extraFields = computed<FieldEntry[]>(() => {
   for (const [k, v] of Object.entries(planData.value)) {
     if (SKIP_KEYS.has(k)) continue
     if (v == null || v === '') continue
+
+    // shuang_design：拆成子字段独立展示
+    if (k === 'shuang_design') {
+      const obj = (typeof v === 'object' && v) ? v : tryParseJson(v)
+      if (obj && typeof obj === 'object') {
+        const subFields = [
+          ['info_asymmetry', '信息差'],
+          ['shock_level', '震惊层级'],
+          ['spectator_layers', '围观分层'],
+          ['emotional_rhythm', '情绪节奏'],
+          ['protagonist_style', '主角逼格'],
+        ]
+        for (const [subKey, subLabel] of subFields) {
+          const sv = obj[subKey]
+          if (sv == null || sv === '') continue
+          const text = Array.isArray(sv) ? sv.join(' → ') : String(sv)
+          entries.push({ key: `${k}.${subKey}`, label: subLabel, value: text, isArray: Array.isArray(sv) })
+        }
+      }
+      continue
+    }
+
+    // character_intents：拆成每个角色独立一行
+    if (k === 'character_intents') {
+      const arr = Array.isArray(v) ? v : (typeof v === 'string' ? tryParseJson(v) : [])
+      if (Array.isArray(arr)) {
+        for (const item of arr) {
+          if (typeof item !== 'object' || !item) continue
+          const name = item.character || item.name || '?'
+          let text = ''
+          if (item.this_chapter_goal) text += `目标：${item.this_chapter_goal}`
+          if (item.immediate_want) text += text ? `；当前欲求：${item.immediate_want}` : `当前欲求：${item.immediate_want}`
+          if (text) entries.push({ key: `${k}.${name}`, label: `角色「${name}」`, value: text, isArray: false })
+        }
+      }
+      continue
+    }
+
     const label = FIELD_LABELS[k] || k
     if (Array.isArray(v)) {
-      const text = v.map((x: any) => (typeof x === 'object' ? formatFieldValue(k, x) : String(x))).join('；')
+      const text = v.map((x: any) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join('；')
       if (text) entries.push({ key: k, label, value: text, isArray: true })
     } else if (typeof v === 'object') {
-      const text = formatFieldValue(k, v)
-      if (text) entries.push({ key: k, label, value: text, isArray: false })
+      const text = JSON.stringify(v, null, 2)
+      if (text !== '{}') entries.push({ key: k, label, value: text, isArray: false })
     } else {
       entries.push({ key: k, label, value: String(v), isArray: false })
     }
@@ -142,6 +144,7 @@ function close() {
 
 <template>
   <a-modal
+    v-if="!noModal"
     :open="open"
     :title="`📋 章节规划 · 第${chapterNumber}章`"
     :width="700"
@@ -211,7 +214,7 @@ function close() {
       <div class="view-block-text">{{ planData.reader_hook }}</div>
     </div>
 
-    <!-- 富字段：自动遍历所有额外字段（爽点/角色微意图等） -->
+    <!-- 富字段 -->
     <div v-if="extraFields.length" class="view-block extra-block">
       <div class="view-block-title">📌 更多设定（{{ extraFields.length }}）</div>
       <div class="extra-grid">
@@ -225,6 +228,74 @@ function close() {
     <a-empty v-if="!summary && !keyEvents.length && !characterFocus.length && !extraFields.length && !planData.narrative_goal"
       description="该章节暂无规划" style="margin: 40px 0" />
   </a-modal>
+
+  <!-- noModal 模式：仅内容，无弹窗外壳 -->
+  <div v-else>
+    <div v-if="planData.emotional_tone || planData.emotional_arc" class="view-block">
+      <div class="view-block-title">💫 情感基调</div>
+      <div class="view-block-text">{{ planData.emotional_tone || planData.emotional_arc }}</div>
+    </div>
+    <div v-if="planData.conflict_type" class="view-block">
+      <div class="view-block-title">⚔️ 冲突类型</div>
+      <div class="view-block-text">{{ planData.conflict_type }}</div>
+    </div>
+    <div v-if="planData.rhythm_tag" class="view-block">
+      <div class="view-block-title">🎵 节奏标签</div>
+      <a-tag :color="planData.rhythm_tag === '小高潮' ? 'red' : 'blue'">{{ planData.rhythm_tag }}</a-tag>
+    </div>
+
+    <div v-if="summary" class="view-block">
+      <div class="view-block-title">📝 剧情摘要</div>
+      <div class="view-block-text">{{ summary }}</div>
+    </div>
+
+    <div v-if="keyEvents.length" class="view-block">
+      <div class="view-block-title">⚡ 关键事件</div>
+      <div class="tag-row">
+        <a-tag v-for="(ev, i) in keyEvents" :key="i" :color="priorityColor(ev)">{{ ev }}</a-tag>
+      </div>
+    </div>
+
+    <div v-if="characterFocus.length" class="view-block">
+      <div class="view-block-title">👥 涉及角色</div>
+      <div class="tag-row">
+        <a-tag v-for="(c, i) in characterFocus" :key="i" color="orange">{{ c }}</a-tag>
+      </div>
+    </div>
+
+    <div v-if="planData.narrative_goal" class="view-block">
+      <div class="view-block-title">🎯 叙事目标</div>
+      <div class="view-block-text">{{ planData.narrative_goal }}</div>
+    </div>
+
+    <div v-if="planData.hook" class="view-block hook-block">
+      <div class="view-block-title">🪝 结尾钩子</div>
+      <div class="view-block-text hook-text">{{ planData.hook }}</div>
+    </div>
+
+    <div v-if="planData.scene_anchor" class="view-block scene-anchor-block">
+      <div class="view-block-title">📍 场景锚点</div>
+      <div class="view-block-text">{{ planData.scene_anchor }}</div>
+    </div>
+
+    <div v-if="planData.reader_hook" class="view-block reader-hook-block">
+      <div class="view-block-title">🔗 读者钩子</div>
+      <div class="view-block-text">{{ planData.reader_hook }}</div>
+    </div>
+
+    <div v-if="extraFields.length" class="view-block extra-block">
+      <div class="view-block-title">📌 更多设定（{{ extraFields.length }}）</div>
+      <div class="extra-grid">
+        <div v-for="f in extraFields" :key="f.key" class="extra-item">
+          <span class="extra-label">{{ f.label }}</span>
+          <span class="extra-value" :style="{ whiteSpace: f.isArray ? 'normal' : 'pre-wrap' }">{{ f.value }}</span>
+        </div>
+      </div>
+    </div>
+
+    <a-empty v-if="!summary && !keyEvents.length && !characterFocus.length && !extraFields.length && !planData.narrative_goal"
+      description="该章节暂无规划" style="margin: 40px 0" />
+  </div>
 </template>
 
 <style scoped>
@@ -234,8 +305,8 @@ function close() {
 .view-block-text { font-size: 14px; color: #595959; line-height: 1.7; white-space: pre-wrap; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .extra-block { background: #FFFBE6; border-radius: 8px; padding: 12px 14px; border: 1px dashed #FFE58F; }
-.extra-grid { columns: 2; column-gap: 10px; }
-.extra-item { break-inside: avoid; margin-bottom: 10px; display: flex; flex-direction: column; gap: 2px; }
+.extra-grid { display: flex; flex-direction: column; gap: 10px; }
+.extra-item { display: flex; flex-direction: column; gap: 2px; }
 .extra-label { font-size: 12px; font-weight: 600; color: #AD6800; }
 .extra-value { font-size: 13px; color: #595959; line-height: 1.7; word-break: break-word; }
 .hook-block { background: #F0F5FF; border-left: 3px solid #597EF7; border-radius: 6px; padding: 10px 12px; }

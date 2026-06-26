@@ -95,7 +95,8 @@ const FIELD_LABELS: Record<string, string> = {
 
 const EDIT_KEYS = new Set([
   'plot_summary', 'summary', 'key_events', 'character_focus',
-  'emotional_tone', 'conflict_type', 'narrative_goal', 'estimated_words',
+  'emotional_tone', 'emotional_arc', 'conflict_type', 'narrative_goal',
+  'estimated_words', 'sub_index', 'title', 'outline_id',
 ])
 
 type FieldEntry = { key: string; label: string; value: string }
@@ -299,7 +300,7 @@ async function onSave() {
 .word-hint { margin-left: 8px; color: #8C8C8C; font-size: 13px; }
 .extra-ref { background: #FFFBE6; border: 1px dashed #FFE58F; border-radius: 8px; padding: 12px 14px; margin-top: 8px; }
 .extra-ref-title { font-size: 12px; font-weight: 600; color: #AD6800; margin-bottom: 10px; }
-.extra-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.extra-grid { display: flex; flex-direction: column; gap: 10px; }
 .extra-item { display: flex; flex-direction: column; gap: 2px; }
 .extra-label { font-size: 12px; font-weight: 600; color: #AD6800; }
 .extra-value { font-size: 13px; color: #595959; line-height: 1.7; word-break: break-word; white-space: pre-wrap; }
