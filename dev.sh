@@ -71,7 +71,7 @@ stop_all() {
       pid=$(cat "$pidfile")
       if kill -0 "$pid" 2>/dev/null; then
         kill "$pid" 2>/dev/null || true
-        log "已停止 $name（PID: $pid）"
+        log "已停止 $name (PID: $pid)"
       fi
       rm -f "$pidfile"
     fi

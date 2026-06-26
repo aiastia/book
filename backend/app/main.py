@@ -60,7 +60,7 @@ async def _cleanup_zombie_tasks():
 
 
 async def _ensure_default_user():
-    """确保数据库中至少有一个默认用户（首次启动时自动创建）。"""
+    """确保数据库中至少有一个默认用户（首次启动时自动创建，且为管理员）。"""
     async with async_session() as db:
         exists = (await db.execute(select(User).limit(1))).scalar_one_or_none()
         if not exists:
@@ -69,11 +69,12 @@ async def _ensure_default_user():
                 password_hash=get_password_hash(_DEFAULT_USER["password"]),
                 nickname=_DEFAULT_USER["nickname"],
                 is_active=True,
+                is_admin=True,  # 第一个用户自动成为管理员
             )
             db.add(user)
             await db.commit()
             print(
-                f"[启动] 已创建默认用户 → 用户名: {_DEFAULT_USER['username']}, "
+                f"[启动] 已创建默认管理员 → 用户名: {_DEFAULT_USER['username']}, "
                 f"密码: {_DEFAULT_USER['password']}"
             )
 

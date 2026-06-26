@@ -1,7 +1,7 @@
 """认证路由"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.auth import get_password_hash, verify_password, create_access_token, get_current_user
@@ -32,10 +32,14 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.username == req.username))
     if result.scalar_one_or_none():
         raise HTTPException(400, "用户名已存在")
+    # 第一个注册的用户自动成为管理员
+    user_count = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    is_first_user = user_count == 0
     user = User(
         username=req.username,
         password_hash=get_password_hash(req.password),
         nickname=req.nickname or req.username,
+        is_admin=is_first_user,
     )
     db.add(user)
     await db.commit()
