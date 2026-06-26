@@ -1206,6 +1206,7 @@ class ChapterService:
             ).strip()[:500]
             if summary_text:
                 chapter.summary = summary_text
+                self.db.add(chapter)  # 确保 commit 后不丢失
             elif chapter.content:
                 chapter.summary = chapter.content.strip()[:150]
             key_events = analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
