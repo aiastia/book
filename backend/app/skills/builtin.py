@@ -122,6 +122,21 @@ async def init_builtin_skills(db: AsyncSession, force: bool = False):
                     sc.config = {k: v for k, v in (sc.config or {}).items() if k != "system_prompt"}
                     logger.info(f"[builtin] 清除用户 {sc.user_id} 对 {skill_data['name']} 的旧版本副本")
 
+    # 清理孤儿 Skill：文件已删除但 DB 残留的
+    builtin_names = {s["name"] for s in BUILTIN_SKILLS}
+    all_builtins = (await db.execute(
+        select(Skill).where(Skill.skill_type == "builtin")
+    )).scalars().all()
+    orphans = [s for s in all_builtins if s.name not in builtin_names]
+    for s in orphans:
+        # 先删关联的用户配置
+        configs = (await db.execute(select(SkillConfig).where(SkillConfig.skill_id == s.id))).scalars().all()
+        for sc in configs:
+            await db.delete(sc)
+        await db.delete(s)
+    if orphans:
+        logger.info(f"[builtin] 清理 {len(orphans)} 个孤儿 Skill: {[s.name for s in orphans]}")
+
     await db.commit()
     logger.info(f"[builtin] 提示词模板已就绪（{len(BUILTIN_SKILLS)} 个模板）{' [强制模式]' if force else ''}")
 

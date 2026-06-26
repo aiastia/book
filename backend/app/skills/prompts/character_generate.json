@@ -1,6 +1,6 @@
 {
   "name": "character_generate",
-  "display_name": "角色生成",
+  "display_name": "单个角色生成",
   "description": "AI 生成角色档案",
   "category": "character",
   "skill_type": "builtin",

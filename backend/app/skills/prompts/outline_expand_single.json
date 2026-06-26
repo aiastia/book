@@ -1,6 +1,6 @@
 {
   "name": "outline_expand_single",
-  "display_name": "大纲单批次展开",
+  "display_name": "大纲展开（1对多）",
   "description": "将大纲节点展开为详细章节规划（单批次）",
   "category": "import",
   "skill_type": "builtin",

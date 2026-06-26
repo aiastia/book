@@ -498,7 +498,7 @@ class ChapterService:
             - target_word_count: 目标字数（int）
             - style_config: 写作风格配置 dict（从 WritingStyle.config 取）
             - style_name: 风格名（展示用）
-            - use_legacy: 设为 True 回退旧 tool-calling 流程
+            - style_name: 风格名（展示用）
         """
         chapter, project = await self._get_chapter_and_project(chapter_id)
         await self._validate_generation(chapter)
@@ -552,44 +552,19 @@ class ChapterService:
                 if overrides.get("author_name"):
                     context["author_name"] = str(overrides["author_name"])
 
-            # ===== 预加载：大纲 + 角色列表（轻量，不调 AI，详细数据由 Writer 按需 tool-calling）=====
-            use_legacy = (overrides or {}).get("use_legacy", False)
-            chapter_data = ""
-            if not use_legacy:
-                chapter_data = await self._preload_chapter_data(chapter, project)
-                # 评分趋势单独注入（tool-calling 模式也需要）
-                context["quality_trends"] = await self._get_quality_trends(chapter) or ""
+            # ===== 预加载：章节规划 + 大纲 + 角色 + 前文 + 评分 + 场景锚点 + 微意图（不调 AI，详细数据由 Writer 按需 tool-calling）=====
+            chapter_data = await self._preload_chapter_data(chapter, project)
+            context["quality_trends"] = await self._get_quality_trends(chapter) or ""
 
             # 章节生成始终提供工具（AI 可按需查询角色/物品/地点/伏笔/大纲等）
             from app.services.chapter_tools import get_chapter_tools, make_tool_executor
             chapter_tools = get_chapter_tools()
             tool_exec = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
 
-            if use_legacy:
-                # 回退：全量构建上下文（手动启用 use_legacy 时使用）
-                context = await self.context_service.build_chapter_context(chapter, project)
-                if overrides:
-                    if overrides.get("narrative_pov"):
-                        context["narrative_pov"] = overrides["narrative_pov"]
-                        context["narrative_perspective"] = overrides["narrative_pov"]
-                    if overrides.get("target_word_count"):
-                        context["target_word_count"] = overrides["target_word_count"]
-                        context["word_count_requirement"] = f"目标{overrides['target_word_count']}字"
+            context["chapter_data"] = chapter_data
+            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
 
-                chapter_data_lines = self._format_legacy_context_as_data(context)
-                context["chapter_data"] = chapter_data_lines
-                context["user_prompt"] = f"请根据以上信息，写出第{chapter.chapter_number}章的正文内容。"
-
-                result = await self.skill_engine.execute_skill(
-                    skill_name, ai_client, context,
-                    tools=chapter_tools, tool_executor=tool_exec,
-                )
-            else:
-                # ===== Writer：大纲 + 角色列表已提供，其余按需 tool-calling =====
-                context["chapter_data"] = chapter_data
-                context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
-
-                result = await self.skill_engine.execute_skill(
+            result = await self.skill_engine.execute_skill(
                     skill_name, ai_client, context,
                     tools=chapter_tools, tool_executor=tool_exec,
                 )
