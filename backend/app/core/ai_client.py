@@ -511,7 +511,7 @@ class AIClient:
         tool_executor,
         model: str = None,
         temperature: float = None,
-        max_tokens: int = 16384,
+        max_tokens: int = None,
         max_rounds: int = 5,
         post_tool_messages: list[dict] = None,
     ) -> dict:
@@ -527,6 +527,7 @@ class AIClient:
             messages: 初始消息列表（system + user）
             tools: OpenAI function calling 格式的工具定义
             tool_executor: async def(tool_name, arguments_dict) -> str
+            max_tokens: None → 走 _resolve_max_tokens（用户 AI 设置 > settings 默认）
             max_rounds: 最大工具调用轮数（默认5，含最后一轮强制输出）
         """
         import json
@@ -579,6 +580,26 @@ class AIClient:
 
             # 没有工具调用 → 返回正文
             if not tool_calls:
+                # 推理模型可能输出过短（推理消耗大量 token 后正文被截断）
+                # 如果有内容但太短，且不是最后一轮，给它一次无工具重试机会
+                min_output = 2000  # 正文至少 ~2000 token（约 1300 字）
+                if content and len(content) < min_output and not is_last_round:
+                    logger.warning(
+                        f"[tools] 正文过短（{len(content)} 字符），可能推理模型 token 分配异常，"
+                        f"强制无工具重试..."
+                    )
+                    retry = await self.chat_stream_collect(
+                        messages=current_messages + [
+                            {"role": "system", "content": "请直接输出完整正文，不要调用工具。内容不足会判定失败，请确保写够目标字数。"},
+                        ],
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        tool_choice="none",
+                    )
+                    if not retry.get("error") and (retry.get("content") or ""):
+                        retry["tool_call_history"] = tool_call_history
+                        return retry
                 result["tool_call_history"] = tool_call_history
                 return result
 

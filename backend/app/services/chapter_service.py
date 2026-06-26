@@ -769,8 +769,8 @@ class ChapterService:
             if context.get("style_custom_prompt"):
                 _style_parts.append(f"<style_custom>{context['style_custom_prompt']}</style_custom>")
             context["writing_style_block"] = "\n".join(_style_parts) if _style_parts else ""
-            # 1-1 模板用 {chapter_data}，追加 style + items + locations
-            _append_parts = list(_style_parts)
+            # chapter_data 追加 items + locations（style 块已通过 writing_style_block 前置注入，不重复）
+            _append_parts = []
             if context.get("items_info"):
                 _append_parts.append(f"<items_info>{context['items_info']}</items_info>")
             if context.get("locations_info"):

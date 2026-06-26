@@ -418,9 +418,16 @@ class SkillEngine:
         # 兜底规范化：防止 DB 中残留旧版双花括号（{{ }} → { }）
         system_prompt = _normalize_braces(system_prompt)
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-        ]
+        # 写作风格前置：从 context 提取 style 块，作为第一条 system 消息（角色设定之前）
+        # 让 AI 在"理解任务"之前先进入"文风模式"，风格指令的优先级最高
+        _style_prefix = ""
+        if context.get("writing_style_block"):
+            _style_prefix = str(context["writing_style_block"])
+
+        messages = []
+        if _style_prefix:
+            messages.append({"role": "system", "content": _style_prefix})
+        messages.append({"role": "system", "content": system_prompt})
 
         # ===== 自动注入上下文（按 skill 类型选择性注入）=====
         all_blocks = _inject_context_blocks(context, skill_name)
