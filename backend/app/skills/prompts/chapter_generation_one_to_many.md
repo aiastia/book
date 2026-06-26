@@ -47,8 +47,6 @@
 @include:_shared_commercial_core.md
 </commercial_design>
 
-{writing_style_block}
-
 <constraints>
 @include:_shared_one_to_many_narrative.md
 
