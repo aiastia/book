@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useProjectApi } from '~/composables/useProjectApi'
 import { CheckOutlined } from '@ant-design/icons-vue'
 useHead({ title: 'AI 设置 — 墨语' })

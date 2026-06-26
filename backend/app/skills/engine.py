@@ -227,36 +227,32 @@ _SKILL_TO_THINKING_MODE = {
     "plot_analysis": "analysis",
 }
 
-def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict):
-    """根据项目思考模式设置临时覆盖 ai_client 的 reasoning_effort 和 temperature。
-    context 中的 _thinking_modes 由调用方在上下文构建时注入（Project.settings.thinking_modes）。
-    """
+def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict) -> dict:
+    """返回需要覆盖的参数 dict（temperature / reasoning），供 execute_skill 合并。"""
+    result = {}
     modes = context.get("_thinking_modes")
     if not modes or not isinstance(modes, dict):
-        return
-    # 查找匹配的模式 key
+        return result
     mode_key = _SKILL_TO_THINKING_MODE.get(skill_name)
     if not mode_key:
-        # 前缀匹配（如 chapter_generation_*）
         for prefix, key in _SKILL_TO_THINKING_MODE.items():
             if prefix.endswith("_") and skill_name.startswith(prefix):
                 mode_key = key
                 break
     if not mode_key or mode_key not in modes:
-        return
+        return result
     cfg = modes[mode_key]
     if isinstance(cfg, dict) and cfg.get("enabled"):
-        # 覆盖推理深度
         effort = cfg.get("reasoning_effort")
         if effort and effort != "none":
             ai_client.reasoning_effort = effort
             ai_client.reasoning_model = True
         elif effort == "none":
             ai_client.reasoning_model = False
-        # 覆盖温度
         t = cfg.get("temperature")
         if t is not None:
-            ai_client.default_temperature = t / 100 if t > 2 else t
+            result["temperature"] = t / 100 if t > 2 else t
+    return result
 
 
 class SkillEngine:
@@ -493,8 +489,9 @@ class SkillEngine:
                 presence_penalty = user_defaults.get("presence_penalty")
 
         if stream:
-            # 思考模式覆盖（在调用前临时设置 ai_client 的推理参数）
-            _apply_thinking_mode_override(ai_client, skill_name, context)
+            _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)
+            if _thinking_override.get("temperature") is not None and temperature is None:
+                temperature = _thinking_override["temperature"]
             return {
                 "stream": ai_client.chat_stream(
                     messages=messages,
@@ -507,7 +504,10 @@ class SkillEngine:
             }
 
         is_text_output = skill_name.startswith("chapter_generation") or skill_name == "ai_denoising"
-        _apply_thinking_mode_override(ai_client, skill_name, context)
+        # 思考模式覆盖（推理深度 + 温度）
+        _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)
+        if _thinking_override.get("temperature") is not None and temperature is None:
+            temperature = _thinking_override["temperature"]
         if is_text_output:
             result = None
             for attempt in range(3):
