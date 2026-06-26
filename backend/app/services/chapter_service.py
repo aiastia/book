@@ -832,6 +832,9 @@ class ChapterService:
             content = _re.sub(r'^\s*#{1,6}\s*第[一二三四五六七八九十百零\d]+章[^\n]*\n?', '', content)
             content = content.strip()
             if not content or not content.strip():
+                # Kimi 推理模型可能返回空 content + tool_calls，不是真的失败
+                if result.get("tool_calls"):
+                    return {"error": "AI 返回了空正文（仍在查询工具阶段，请重试）"}
                 chapter.status = "draft"
                 await self.db.commit()
                 return {"error": "AI 生成内容为空"}
