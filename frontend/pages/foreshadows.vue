@@ -173,11 +173,6 @@ async function onSave() {
     msg.error('保存失败：' + formatError(e))
   }
 }
-async function onDelete(id: number) {
-  if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteForeshadow(id); await refresh(); msg.success('已删除') }
-  catch (e: any) { msg.error('删除失败：' + formatError(e)) }
-}
 
 // ===== #15 伏笔闭环操作 =====
 const showChapterPrompt = ref(false)
