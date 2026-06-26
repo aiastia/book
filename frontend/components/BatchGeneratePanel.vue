@@ -165,8 +165,6 @@ function startPolling(taskId: number) {
             msg.success(`批量生成完成：${t.completed_chapters}/${t.total_chapters} 章`)
             emit('done')
           }
-          // 延时清理，让用户看到最终状态后再重置
-          setTimeout(() => { if (currentTask.value?.id === taskId) currentTask.value = null }, 5000)
         }
     } catch (e) {
       console.warn('轮询失败', e)
@@ -182,9 +180,13 @@ function stopPolling() {
 async function onCancel() {
   if (!currentTask.value) return
   if (!await msg.confirm('确认取消批量生成？')) return
+  stopPolling()
+  const taskId = currentTask.value.id
+  currentTask.value = null
   try {
-    await api.cancelBatchTask(currentTask.value.id)
-    msg.success('已请求取消')
+    await api.cancelBatchTask(taskId)
+    msg.success('已取消')
+    emit('done')  // 通知父组件刷新，让已生成的章节不再出现在空章节列表
   } catch (e: any) {
     msg.error('取消失败：' + formatError(e))
   }

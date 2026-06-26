@@ -653,12 +653,19 @@ class ChapterService:
 
             context["chapter_data"] = chapter_data
             # ===== 注入模板所需的独立变量（md 模板中 {variable} 占位符）=====
-            context["project_title"] = project.title or ""
-            context["genre"] = project.genre or "网文"
-            context["chapter_number"] = str(chapter.chapter_number)
-            context["chapter_title"] = chapter.title or ""
-            context["target_word_count"] = str(getattr(project, "target_word_count", 4000) or 4000)
-            context["narrative_perspective"] = project.narrative_pov or "第三人称"
+            # 注意：只在变量尚未设定时才注入，避免覆盖 batch API / overrides 传入的值
+            if "project_title" not in context:
+                context["project_title"] = project.title or ""
+            if "genre" not in context:
+                context["genre"] = project.genre or "网文"
+            if "chapter_number" not in context:
+                context["chapter_number"] = str(chapter.chapter_number)
+            if "chapter_title" not in context:
+                context["chapter_title"] = chapter.title or ""
+            if "target_word_count" not in context:
+                context["target_word_count"] = str(getattr(project, "target_word_count", 4000) or 4000)
+            if "narrative_perspective" not in context:
+                context["narrative_perspective"] = project.narrative_pov or "第三人称"
             # 从 expansion_plan 提取（1→N 模式的核心数据源）
             plan = (chapter.expansion_plan or {}) if isinstance(chapter.expansion_plan, dict) else {}
             if plan:
@@ -722,6 +729,10 @@ class ChapterService:
             except Exception:
                 context["relevant_memories"] = ""
                 context["recalled_memories"] = ""
+            # recent_chapters_context：最近章节脉络（供模板 {recent_chapters_context} 使用）
+            context["recent_chapters_context"] = context.get("relevant_memories", "")
+            context["recent_outlines"] = context.get("relevant_memories", "")
+            context["recent_expansion_plans"] = context.get("relevant_memories", "")
             context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
