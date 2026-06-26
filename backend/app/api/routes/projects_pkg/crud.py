@@ -21,15 +21,18 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
         select(Project).where(Project.user_id == user.id).order_by(Project.updated_at.desc())
     )
     projects = result.scalars().all()
-    # 批量取每个项目的当前总字数（单次 group-by 查询，避免 N+1）
+    # 批量取每个项目的当前总字数 + 实际章节数（单次 group-by 查询，避免 N+1）
     word_sums = {}
+    chapter_counts = {}
     if projects:
         rows = await db.execute(
-            select(Chapter.project_id, func.coalesce(func.sum(Chapter.word_count), 0))
+            select(Chapter.project_id, func.coalesce(func.sum(Chapter.word_count), 0), func.count(Chapter.id))
             .where(Chapter.project_id.in_([p.id for p in projects]))
             .group_by(Chapter.project_id)
         )
-        word_sums = {r[0]: r[1] for r in rows.all()}
+        for r in rows.all():
+            word_sums[r[0]] = r[1]
+            chapter_counts[r[0]] = r[2]
     return [
         {
             "id": p.id,
@@ -39,7 +42,7 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
             "status": p.status,
             "target_word_count": p.target_word_count,
             "current_word_count": word_sums.get(p.id, 0),
-            "chapter_count": p.chapter_count,
+            "chapter_count": chapter_counts.get(p.id, 0),
             "outline_mode": p.outline_mode or "one_to_one",
             "narrative_pov": p.narrative_pov or "第三人称",
             "cover_url": p.cover_url,
@@ -53,9 +56,13 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
 @router.get("/{project_id}")
 async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     p = await get_user_project(db, project_id, user)
-    # 动态计算当前总字数（从 chapters 表 sum，不依赖可能从未更新的 current_word_count 列）
+    # 动态计算当前总字数 + 实际章节数（从 chapters 表查，不依赖项目表的静态字段）
     word_sum = await db.scalar(
         select(func.coalesce(func.sum(Chapter.word_count), 0))
+        .where(Chapter.project_id == project_id)
+    )
+    actual_chapter_count = await db.scalar(
+        select(func.count(Chapter.id))
         .where(Chapter.project_id == project_id)
     )
     return {
@@ -66,7 +73,7 @@ async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user=
         "status": p.status,
         "target_word_count": p.target_word_count,
         "current_word_count": word_sum,
-        "chapter_count": p.chapter_count,
+        "chapter_count": actual_chapter_count or 0,
         "narrative_pov": p.narrative_pov,
         "outline_mode": p.outline_mode or "one_to_one",
         "cover_url": p.cover_url,
