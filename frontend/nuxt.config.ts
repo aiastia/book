@@ -60,13 +60,17 @@ export default defineNuxtConfig({
                    '@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
     },
     build: {
-      // 手动拆包：大依赖独立成 chunk，利用浏览器缓存
       rollupOptions: {
         output: {
           manualChunks: {
             'antd': ['ant-design-vue', '@ant-design/icons-vue'],
             'vue-flow': ['@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
           },
+        },
+        onwarn(warning, warn) {
+          // Nuxt 4 内部 module-preload-polyfill sourcemap 警告，非代码问题
+          if (warning.code === 'SOURCEMAP_ERROR' && warning.message?.includes('module-preload-polyfill')) return
+          warn(warning)
         },
       },
     },
