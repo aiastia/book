@@ -242,16 +242,22 @@ def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict) -> 
     if not mode_key or mode_key not in modes:
         return result
     cfg = modes[mode_key]
-    if isinstance(cfg, dict) and cfg.get("enabled"):
-        effort = cfg.get("reasoning_effort")
-        if effort and effort != "none":
-            ai_client.reasoning_effort = effort
-            ai_client.reasoning_model = True
-        elif effort == "none":
-            ai_client.reasoning_model = False
-        t = cfg.get("temperature")
-        if t is not None:
-            result["temperature"] = t / 100 if t > 2 else t
+    if not isinstance(cfg, dict):
+        return result
+    # enabled=False → 明确关闭推理模式（即使模型默认是推理模型也强制关）
+    if not cfg.get("enabled"):
+        ai_client.reasoning_model = False
+        return result
+    # enabled=True → 按用户配置的 effort 设置
+    effort = cfg.get("reasoning_effort")
+    if effort and effort != "none":
+        ai_client.reasoning_effort = effort
+        ai_client.reasoning_model = True
+    elif effort == "none":
+        ai_client.reasoning_model = False
+    t = cfg.get("temperature")
+    if t is not None:
+        result["temperature"] = t / 100 if t > 2 else t
     return result
 
 
