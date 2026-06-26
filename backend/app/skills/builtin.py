@@ -84,6 +84,8 @@ async def init_builtin_skills(db: AsyncSession, force: bool = False):
             existing.category = skill_data.get("category", existing.category)
             existing.display_name = skill_data.get("display_name", existing.display_name)
             existing.description = skill_data.get("description", existing.description)
+            existing.skill_type = skill_data.get("skill_type", existing.skill_type)
+            existing.is_enabled = skill_data.get("is_enabled", True)
             # 清除所有用户的 SkillConfig 覆盖
             configs = (await db.execute(
                 select(SkillConfig).where(SkillConfig.skill_id == existing.id)

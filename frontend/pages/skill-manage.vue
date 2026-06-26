@@ -31,11 +31,11 @@ const createFromMd = ref('')
 const creating = ref(false)
 const activeTab = ref<string>('form')
 
-const categories = ['custom', 'chapter', 'outline', 'character', 'world', 'analysis', 'foreshadow', 'inspire', 'skill', 'mcp', 'tool']
+const categories = ['custom', 'chapter', 'outline', 'character', 'world', 'analysis', 'foreshadow', 'inspire', 'skill', 'mcp', 'tool', 'import_book']
 const categoryLabels: Record<string, string> = {
   custom: '自定义', chapter: '章节', outline: '大纲', character: '角色',
   world: '世界观', analysis: '分析', foreshadow: '伏笔', inspire: '灵感',
-  skill: '写作技能', mcp: 'MCP', tool: '工具', other: '其他', import: '导入',
+  skill: '写作技能', mcp: 'MCP', tool: '工具', import_book: '拆书', other: '其他',
 }
 
 async function onToggle(s: any) {
@@ -221,7 +221,7 @@ const grouped = computed(() => {
                 {{ s.skill_type === 'custom' ? '自定义' : (categoryLabels[s.category] || s.category) }}
               </a-tag>
             </div>
-            <a-switch :checked="s.is_enabled" @change="onToggle(s)" />
+            <a-switch v-if="s.skill_type === 'custom' || s.skill_type === 'mcp'" :checked="s.is_enabled" @change="onToggle(s)" />
           </div>
           <div class="skill-desc">{{ s.description || '暂无描述' }}</div>
           <!-- @include 共享模块标签 -->
@@ -300,7 +300,7 @@ const grouped = computed(() => {
           </a-form-item>
           <a-form-item label="分类">
             <a-select v-model:value="createForm.category" style="width:100%;">
-              <a-select-option v-for="c in categories" :key="c" :label="categoryLabels[c] || c" :value="c" />
+              <a-select-option v-for="c in categories" :key="c" :value="c">{{ categoryLabels[c] || c }}</a-select-option>
             </a-select>
           </a-form-item>
           <a-form-item label="提示词内容 *" required>

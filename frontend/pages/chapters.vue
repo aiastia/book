@@ -323,7 +323,7 @@ async function onGenerate() {
   }
   generating.value = true
   try {
-    const { task_id } = await api.generateChapterAsync(editing.value.id)
+    const { task_id } = await api.generateChapterAsync(editing.value.id, selectedSkillKey.value || undefined)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })
 	    msg.success('章节生成任务已提交，可在右下角查看进度')

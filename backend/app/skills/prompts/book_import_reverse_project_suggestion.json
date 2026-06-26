@@ -2,7 +2,7 @@
   "name": "book_import_reverse_project_suggestion",
   "display_name": "拆书导入-反向项目提炼",
   "description": "基于前3章内容反向提炼简介、主题、类型、叙事视角与目标字数",
-  "category": "outline",
+  "category": "import_book",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

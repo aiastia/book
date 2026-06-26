@@ -443,7 +443,7 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
             "system_prompt": s.system_prompt,  # 原始内容（编辑用，保留 @include 结构）
             "has_includes": len(includes) > 0,
             "includes": includes,  # @include 引用列表
-            "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "") if user_cfg else "",
+            "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "") if (user_cfg and user_cfg.get("is_customized")) else "",
             "parameters": s.parameters,
             "config": s.config,
         })

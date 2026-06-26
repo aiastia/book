@@ -105,8 +105,8 @@ export function useProjectApi() {
   function generateChapter(chapterId: number) {
     return apiPost<any>(`/api/projects/${pid()}/chapters/${chapterId}/generate`, {}, { timeout: 300000 })
   }
-  function generateChapterAsync(chapterId: number) {
-    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, {}, { timeout: 10000 })
+  function generateChapterAsync(chapterId: number, skillName?: string) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, skillName ? { skill_name: skillName } : {}, { timeout: 10000 })
   }
 
   /** 清空章节内容 */

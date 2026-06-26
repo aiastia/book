@@ -144,19 +144,18 @@ async def generate_chapter(project_id: int, chapter_id: int, db: AsyncSession = 
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/generate-async")
-async def generate_chapter_async(project_id: int, chapter_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    """异步生成章节：立即返回 task_id，后台执行，前端轮询进度。"""
+async def generate_chapter_async(project_id: int, chapter_id: int, req: dict = {}, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """异步生成章节：立即返回 task_id，后台执行。可选 body: {skill_name} 注入自定义提示词。"""
     await get_user_project(db, project_id, user)
-    # 查章节信息用于任务标题
     ch = (await db.execute(select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id))).scalar_one_or_none()
     if not ch:
         raise HTTPException(404, "章节不存在")
-    # 检查前一章是否已分析
     block_msg = await _check_prev_analyzed(db, project_id, ch.chapter_number)
     if block_msg:
         raise HTTPException(409, block_msg)
 
     from app.services.async_ai_service import submit_async_task
+    skill_name = req.get("skill_name") if isinstance(req, dict) else None
 
     async def _run_chapter(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
@@ -165,7 +164,7 @@ async def generate_chapter_async(project_id: int, chapter_id: int, db: AsyncSess
         async with async_session() as task_db:
             service = ChapterService(task_db, payload["project_id"], payload["user_id"])
             await tracker.update(stage="generating", message=f"AI 正在生成第{payload['chapter_number']}章...")
-            result = await service.generate_chapter(payload["chapter_id"])
+            result = await service.generate_chapter(payload["chapter_id"], overrides=payload.get("overrides"))
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return
@@ -176,7 +175,10 @@ async def generate_chapter_async(project_id: int, chapter_id: int, db: AsyncSess
         user_id=user.id, project_id=project_id,
         task_type="chapter_generate",
         title=f"生成第{ch.chapter_number}章",
-        payload={"chapter_id": chapter_id, "project_id": project_id, "user_id": user.id, "chapter_number": ch.chapter_number},
+        payload={
+            "chapter_id": chapter_id, "project_id": project_id, "user_id": user.id, "chapter_number": ch.chapter_number,
+            "overrides": {"skill_name": skill_name} if skill_name else {},
+        },
         runner=_run_chapter,
     )
     return {"task_id": task_id, "chapter_id": chapter_id}

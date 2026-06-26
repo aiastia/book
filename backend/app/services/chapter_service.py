@@ -561,8 +561,31 @@ class ChapterService:
             chapter_tools = get_chapter_tools()
             tool_exec = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
 
+            # ===== 自定义 Skill 注册为 AI Tool =====
+            custom_skill_tools = await self._get_custom_skill_tools()
+            if custom_skill_tools:
+                chapter_tools = list(chapter_tools) + [t["def"] for t in custom_skill_tools]
+                orig_exec = tool_exec
+                custom_execs = {t["name"]: t["exec"] for t in custom_skill_tools}
+                async def tool_exec_with_custom(name: str, args: dict) -> str:
+                    if name in custom_execs:
+                        return await custom_execs[name](args)
+                    return await orig_exec(name, args)
+                tool_exec = tool_exec_with_custom
+
             context["chapter_data"] = chapter_data
             context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。写作前请先用工具查询你需要的详细信息（角色档案、伏笔状态、关系网络、前文剧情等）。大纲和角色列表已提供，无需重复查询。确认信息充分后再动笔。"
+
+            # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
+            skill_name_override = (overrides or {}).get("skill_name")
+            if skill_name_override:
+                enh_skill = await self.skill_engine.get_skill(skill_name_override)
+                if enh_skill and enh_skill.system_prompt:
+                    enh = enh_skill.system_prompt
+                    if "@include:" in enh:
+                        from app.skills.engine import _resolve_includes
+                        enh = _resolve_includes(enh)
+                    context["user_prompt"] += f"\n\n【附加指令】\n{enh}"
 
             result = await self.skill_engine.execute_skill(
                     skill_name, ai_client, context,
