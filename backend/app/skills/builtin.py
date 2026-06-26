@@ -81,6 +81,9 @@ async def init_builtin_skills(db: AsyncSession, force: bool = False):
             existing.system_prompt = skill_data["system_prompt"]
             existing.parameters = skill_data.get("parameters", {})
             existing.config = skill_data.get("config", {})
+            existing.category = skill_data.get("category", existing.category)
+            existing.display_name = skill_data.get("display_name", existing.display_name)
+            existing.description = skill_data.get("description", existing.description)
             # 清除所有用户的 SkillConfig 覆盖
             configs = (await db.execute(
                 select(SkillConfig).where(SkillConfig.skill_id == existing.id)
