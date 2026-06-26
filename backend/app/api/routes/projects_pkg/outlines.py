@@ -808,6 +808,10 @@ async def _expand_outline_core(
         if old_chapters:
             old_start_chapter = old_chapters[0].chapter_number  # 删除前记下起始号
             deleted_words = sum(c.word_count or 0 for c in old_chapters)
+            # 先清理关联的 PlotAnalysis / StoryMemory / 向量 / 分析伏笔 / GenerationHistory
+            chapter_service = ChapterService(db, project_id, user_id=user_id)
+            await chapter_service.cleanup_chapters_data([c.id for c in old_chapters])
+            # 再删除章节本身
             for c in old_chapters:
                 await db.delete(c)
             await db.flush()
@@ -1122,7 +1126,12 @@ async def delete_outline_chapters(project_id: int, outline_id: int, db: AsyncSes
         select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
     )).scalars().all()
     count = len(chapters)
-    for c in chapters:
-        await db.delete(c)
+    if chapters:
+        # 先清理关联的 PlotAnalysis / StoryMemory / 向量 / 分析伏笔 / GenerationHistory
+        chapter_service = ChapterService(db, project_id, user_id=user.id)
+        await chapter_service.cleanup_chapters_data([c.id for c in chapters])
+        # 再删除章节本身
+        for c in chapters:
+            await db.delete(c)
     await db.commit()
     return {"ok": True, "deleted": count}

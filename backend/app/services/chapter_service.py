@@ -1791,6 +1791,61 @@ class ChapterService:
                 import logging
                 logging.getLogger(__name__).warning(f"[memory] 批量写入向量失败（不影响主流程）: {e}")
 
+    async def cleanup_chapters_data(self, chapter_ids: list[int]):
+        """批量清理章节关联数据：PlotAnalysis、StoryMemory、ChromaDB向量、分析伏笔、GenerationHistory。
+
+        用于重新展开卷（replace模式）/ 删除章节前调用，避免孤儿数据残留。
+        """
+        if not chapter_ids:
+            return
+
+        # 1. 先查出章节号（用于清理分析来源的伏笔）
+        chapters = (await self.db.execute(
+            select(Chapter).where(Chapter.id.in_(chapter_ids))
+        )).scalars().all()
+        chapter_numbers = list(set(c.chapter_number for c in chapters if c.chapter_number))
+
+        # 2. 清理 ChromaDB 向量
+        if self.user_id:
+            try:
+                from app.services.memory_vector_service import MemoryVectorService
+                vs = MemoryVectorService()
+                for cid in chapter_ids:
+                    await vs.delete_chapter(self.user_id, self.project_id, cid)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[cleanup] 清理 ChromaDB 向量失败: {e}")
+
+        # 3. 删除 StoryMemory（SQLite）
+        memories = (await self.db.execute(
+            select(StoryMemory).where(
+                StoryMemory.project_id == self.project_id,
+                StoryMemory.chapter_id.in_(chapter_ids),
+            )
+        )).scalars().all()
+        for m in memories:
+            await self.db.delete(m)
+
+        # 4. 删除 PlotAnalysis
+        analyses = (await self.db.execute(
+            select(PlotAnalysis).where(PlotAnalysis.chapter_id.in_(chapter_ids))
+        )).scalars().all()
+        for a in analyses:
+            await self.db.delete(a)
+
+        # 5. 删除 GenerationHistory
+        histories = (await self.db.execute(
+            select(GenerationHistory).where(GenerationHistory.chapter_id.in_(chapter_ids))
+        )).scalars().all()
+        for h in histories:
+            await self.db.delete(h)
+
+        # 6. 清理分析来源的伏笔（按章节号）
+        for cn in chapter_numbers:
+            await self.foreshadow_service.clean_analysis_foreshadows(cn)
+
+        await self.db.flush()
+
     async def clear_chapter_content(self, chapter_id: int):
         """清空章节内容以重新生成"""
         result = await self.db.execute(select(Chapter).where(
