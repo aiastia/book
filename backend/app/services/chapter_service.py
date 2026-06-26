@@ -877,8 +877,38 @@ class ChapterService:
                 if plan.get("key_events"):
                     outline_parts.append("关键事件：\n" + "\n".join(f"- {e}" for e in plan["key_events"]))
                 context["chapter_outline"] = "\n".join(outline_parts) or (chapter.summary or "")
+                # expansion_rich：富字段（情绪基调/冲突/节奏/钩子/爽点——供 1→N 模板 {expansion_rich}）
+                _rich = []
+                if plan.get("emotional_tone") or plan.get("emotional_arc"):
+                    _rich.append(f"💫 情感基调：{plan.get('emotional_tone') or plan.get('emotional_arc')}")
+                if plan.get("conflict_type"):
+                    _rich.append(f"⚔️ 冲突类型：{plan['conflict_type']}")
+                if plan.get("rhythm_tag"):
+                    _rich.append(f"🎵 节奏标签：{plan['rhythm_tag']}")
+                if plan.get("narrative_goal"):
+                    _rich.append(f"🎯 叙事目标：{plan['narrative_goal']}")
+                if plan.get("reader_hook"):
+                    _rich.append(f"🔗 读者钩子：{plan['reader_hook']}")
+                if plan.get("character_focus"):
+                    _rich.append(f"👥 角色焦点：{', '.join(plan['character_focus'])}")
+                if plan.get("hook"):
+                    _rich.append(f"🪝 结尾钩子：{plan['hook']}")
+                sd = plan.get("shuang_design")
+                if isinstance(sd, dict):
+                    sd_lines = []
+                    if sd.get("info_asymmetry"): sd_lines.append(f"  信息差：{sd['info_asymmetry']}")
+                    if sd.get("shock_level"): sd_lines.append(f"  震惊层级：{sd['shock_level']}")
+                    if sd.get("spectator_layers"):
+                        sl = sd['spectator_layers']
+                        sd_lines.append("  围观分层：" + ("；".join(sl) if isinstance(sl, list) else str(sl)))
+                    if sd.get("emotional_rhythm"): sd_lines.append(f"  情绪节奏：{sd['emotional_rhythm']}")
+                    if sd.get("protagonist_style"): sd_lines.append(f"  主角逼格：{sd['protagonist_style']}")
+                    if sd_lines:
+                        _rich.append("📌 爽点设计：\n" + "\n".join(sd_lines))
+                context["expansion_rich"] = "\n".join(_rich) if _rich else ""
             else:
                 context["chapter_outline"] = chapter.summary or ""
+                context["expansion_rich"] = ""
             # characters_info：本章角色骨架（姓名+身份+性格+说话风格）
             # 只预加载保证角色声音一致的最小信息，外貌/动机/弱点/背景/能力由 AI 按需 query_character 查询
             chars = await self._list_chapter_characters(chapter)

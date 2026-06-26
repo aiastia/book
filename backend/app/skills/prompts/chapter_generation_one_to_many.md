@@ -16,6 +16,8 @@
 {chapter_outline}
 </outline>
 
+{expansion_rich}
+
 <characters priority="P1">
 【本章角色 - 请严格遵循角色设定】
 {characters_info}
