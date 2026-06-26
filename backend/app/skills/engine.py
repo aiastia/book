@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import logging
 """Skill 执行引擎"""
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,8 @@ from sqlalchemy import select
 from app.models.skill import Skill, SkillConfig
 from app.core.ai_client import AIClient
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # 提示词文件目录
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
@@ -429,6 +432,9 @@ class SkillEngine:
         _style_prefix = ""
         if context.get("writing_style_block"):
             _style_prefix = str(context["writing_style_block"])
+            logger.info(f"[skill] 写作风格前置注入成功，长度={len(_style_prefix)}")
+        else:
+            logger.warning(f"[skill] writing_style_block 为空，写作风格未前置注入。context keys: {list(context.keys())}")
 
         messages = []
         if _style_prefix:

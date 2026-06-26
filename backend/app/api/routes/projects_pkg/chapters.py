@@ -159,10 +159,36 @@ async def generate_chapter_async(project_id: int, chapter_id: int, req: dict = {
     overrides = {}
     if skill_name:
         overrides["skill_name"] = skill_name
+    has_style = False
     for k in ("style_config", "style_name", "style_custom_prompt", "style_traits", "style_reference_text"):
         v = req.get(k) if isinstance(req, dict) else None
         if v:
             overrides[k] = v
+            has_style = True
+
+    # 未传写作风格时，自动加载用户默认风格
+    if not has_style:
+        try:
+            from app.models.writing_style import WritingStyle
+            default_ws = (await db.execute(
+                select(WritingStyle).where(
+                    WritingStyle.user_id == user.id,
+                    WritingStyle.is_default == True,
+                )
+            )).scalar_one_or_none()
+            if default_ws:
+                if default_ws.config:
+                    overrides["style_config"] = default_ws.config
+                if default_ws.name:
+                    overrides["style_name"] = default_ws.name
+                if default_ws.custom_prompt:
+                    overrides["style_custom_prompt"] = default_ws.custom_prompt
+                if default_ws.style_traits:
+                    overrides["style_traits"] = default_ws.style_traits
+                if default_ws.reference_text:
+                    overrides["style_reference_text"] = default_ws.reference_text
+        except Exception:
+            pass
 
     async def _run_chapter(task_id: int, payload: dict):
         from app.services import background_task_service as bgs

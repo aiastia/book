@@ -180,6 +180,20 @@ async def run_batch_generation(task_id: int):
         style_traits = {}
         style_reference_text = ""
         author_name = ""
+        # style_id 为空时，自动加载项目默认风格（is_default=True）
+        if not style_id:
+            try:
+                from app.models.writing_style import WritingStyle
+                default_ws = (await db.execute(
+                    select(WritingStyle).where(
+                        WritingStyle.user_id == user_id,
+                        WritingStyle.is_default == True,
+                    )
+                )).scalar_one_or_none()
+                if default_ws:
+                    style_id = default_ws.id
+            except Exception:
+                pass
         if style_id:
             try:
                 from app.models.writing_style import WritingStyle

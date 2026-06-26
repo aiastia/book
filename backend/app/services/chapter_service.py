@@ -803,15 +803,27 @@ class ChapterService:
                 context["chapter_outline"] = "\n".join(outline_parts) or (chapter.summary or "")
             else:
                 context["chapter_outline"] = chapter.summary or ""
-            # characters_info：骨架+性格+说话风格（保证角色声音一致），
-            # 详细的背景/能力/动机/弱点需用 query_character 按需查询
+            # characters_info：本章角色完整骨架（性格+说话风格+外貌+动机+弱点）
+            # 预加载关键字段，避免 AI 调用 query_character 浪费一轮工具调用
             chars = await self._list_chapter_characters(chapter)
             if chars:
-                context["characters_info"] = "\n".join(
-                    f"- {c.name}（{c.role}）：{c.identity[:100] if c.identity else ''}。"
-                    f"性格：{c.personality or '暂无'}。说话风格：{c.speech_style or '暂无'}"
-                    for c in chars
-                )
+                char_lines = []
+                for c in chars:
+                    parts = [f"- {c.name}（{c.role}）"]
+                    if c.identity:
+                        parts.append(f"身份：{c.identity[:120]}")
+                    if c.personality:
+                        parts.append(f"性格：{c.personality}")
+                    if c.speech_style:
+                        parts.append(f"说话风格：{c.speech_style}")
+                    if c.appearance:
+                        parts.append(f"外貌：{c.appearance[:100]}")
+                    if c.motivation:
+                        parts.append(f"动机：{c.motivation[:80]}")
+                    if c.weakness:
+                        parts.append(f"弱点：{c.weakness[:80]}")
+                    char_lines.append("。".join(parts))
+                context["characters_info"] = "\n".join(char_lines)
             else:
                 context["characters_info"] = ""
             # 场景锚点 + 角色微意图（从 expansion_plan 直取）
@@ -889,7 +901,7 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
-            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色列表仅提供姓名与身份，性格、背景、能力、外貌等详细信息请通过 query_character 工具按需查询。大纲、场景锚点和角色微意图已提供，无需重复查询。确认信息充分后再动笔。"
+            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色性格、背景、说话风格、大纲、场景锚点和角色微意图已在上方提供完整信息。直接开始写作，无需调用工具查询。只有在写到某个尚未提供详细信息的次要角色/物品/地点时，才用工具补充查询。"
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
             skill_name_override = (overrides or {}).get("skill_name")
