@@ -110,8 +110,8 @@ export function useProjectApi() {
   }
 
   /** 清空章节内容 */
-  function clearChapter(chapterId: number) {
-    return apiPost<{ ok: boolean; chapter_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/clear`, {})
+  function clearChapter(chapterId: number, cascade: boolean = false) {
+    return apiPost<{ ok: boolean; chapter_id: number; cleared: number[] }>(`/api/projects/${pid()}/chapters/${chapterId}/clear?cascade=${cascade}`, {})
   }
 
   // ---- 角色 ----

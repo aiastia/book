@@ -371,11 +371,21 @@ async function onSave() {
 
 // ===== 清空 =====
 async function clearContent() {
-  if (!editing.value || !await msg.confirm('确认清空？')) return
+  if (!editing.value) return
+  const chNum = editing.value.chapter_number
+  const hasSubsequent = (chapters.value || []).some((c: any) => c.chapter_number > chNum && c.content?.trim())
+  const cascade = hasSubsequent && await msg.confirm(
+    `清空第${chNum}章后，第${chNum + 1}章及之后的章节内容将与新内容不衔接。\n是否一并清空后续章节？`,
+    '清空并级联'
+  )
+  if (!cascade && !await msg.confirm(`确认清空第${chNum}章？`)) return
   try {
-    await api.clearChapter(editing.value.id)
+    const res = await api.clearChapter(editing.value.id, cascade)
     editingContent.value = ''
     await refreshList()
+    if (cascade) {
+      msg.success(`已清空第 ${(res.cleared || []).join('、')} 章`)
+    }
   } catch (e: any) {
     msg.error('清空失败：' + formatError(e))
   }

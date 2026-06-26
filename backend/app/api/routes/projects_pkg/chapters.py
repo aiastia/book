@@ -243,10 +243,10 @@ async def batch_generate_chapters(project_id: int, req: dict, db: AsyncSession =
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/clear")
-async def clear_chapter(project_id: int, chapter_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def clear_chapter(project_id: int, chapter_id: int, cascade: bool = False, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     service = ChapterService(db, project_id, user.id)
-    chapter = await service.clear_chapter_content(chapter_id)
-    return {"ok": True, "chapter_id": chapter.id}
+    chapter, cleared = await service.clear_chapter_content(chapter_id, cascade=cascade)
+    return {"ok": True, "chapter_id": chapter.id, "cleared": cleared}
 
 
 # ===== 章节剧情分析（异步后台任务，对标 MuMu POST /chapters/{id}/analyze）=====

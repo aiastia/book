@@ -1927,8 +1927,8 @@ class ChapterService:
 
         await self.db.flush()
 
-    async def clear_chapter_content(self, chapter_id: int):
-        """清空章节内容以重新生成"""
+    async def clear_chapter_content(self, chapter_id: int, cascade: bool = False):
+        """清空章节内容以重新生成。cascade=True 时同时清空所有后续章节。"""
         result = await self.db.execute(select(Chapter).where(
             Chapter.id == chapter_id,
             Chapter.project_id == self.project_id,
@@ -1942,5 +1942,21 @@ class ChapterService:
         chapter.summary = ""
         chapter.quality_score = None
         chapter.quality_detail = {}
+        cleared = [chapter.chapter_number]
+        if cascade:
+            subsequent = (await self.db.execute(
+                select(Chapter).where(
+                    Chapter.project_id == self.project_id,
+                    Chapter.chapter_number > chapter.chapter_number,
+                ).order_by(Chapter.chapter_number)
+            )).scalars().all()
+            for ch in subsequent:
+                ch.content = ""
+                ch.word_count = 0
+                ch.status = "draft"
+                ch.summary = ""
+                ch.quality_score = None
+                ch.quality_detail = {}
+                cleared.append(ch.chapter_number)
         await self.db.commit()
-        return chapter
+        return chapter, cleared
