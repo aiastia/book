@@ -58,6 +58,13 @@ const typeMap: Record<string, { label: string; color: string }> = {
   反转: { label: '反转', color: 'purple' },
 }
 
+// 来源映射
+const sourceMap: Record<string, { label: string; color: string }> = {
+  planned: { label: 'AI 规划', color: 'blue' },
+  analysis: { label: '分析发现', color: 'green' },
+  manual: { label: '手动', color: 'default' },
+}
+
 // 统计卡片
 const stats = computed(() => {
   const list = foreshadows.value || []
@@ -214,6 +221,7 @@ const columns = [
   { title: '标题', dataIndex: 'title', key: 'title', width: 180 },
   { title: '内容', dataIndex: 'content', key: 'content', ellipsis: true, width: 200 },
   { title: '分类', dataIndex: 'foreshadow_type', key: 'foreshadow_type', width: 80 },
+  { title: '来源', dataIndex: 'source_type', key: 'source', width: 90 },
   { title: '关联角色', dataIndex: 'related_characters', key: 'chars', width: 130 },
   { title: '埋设章', dataIndex: 'plant_chapter_number', key: 'plant', width: 80, sorter: (a: any, b: any) => (a.plant_chapter_number || 9999) - (b.plant_chapter_number || 9999) },
   { title: '回收章', dataIndex: 'target_resolve_chapter_number', key: 'target', width: 80, sorter: (a: any, b: any) => (a.target_resolve_chapter_number || 9999) - (b.target_resolve_chapter_number || 9999) },
@@ -305,7 +313,7 @@ const filteredData = computed(() => {
       :data-source="filteredData"
       :pagination="{ pageSize: 15, showSizeChanger: true }"
       size="middle"
-      :scroll="{ x: 1000 }"
+      :scroll="{ x: 1100 }"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'status'">
@@ -315,6 +323,9 @@ const filteredData = computed(() => {
         </template>
         <template v-else-if="column.key === 'foreshadow_type'">
           <a-tag :color="typeMap[record.foreshadow_type]?.color || 'default'">{{ record.foreshadow_type || '—' }}</a-tag>
+        </template>
+        <template v-else-if="column.key === 'source'">
+          <a-tag :color="sourceMap[record.source_type]?.color || 'default'">{{ sourceMap[record.source_type]?.label || record.source_type || '—' }}</a-tag>
         </template>
         <template v-else-if="column.key === 'plant'">
           {{ record.plant_chapter_number ? `第${record.plant_chapter_number}章` : '—' }}
