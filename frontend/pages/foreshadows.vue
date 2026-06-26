@@ -82,6 +82,25 @@ const stats = computed(() => {
 const filterStatus = ref('')
 const filterType = ref('')
 const filterKeyword = ref('')
+const selectedRowKeys = ref<number[]>([])
+const hasSelected = computed(() => selectedRowKeys.value.length > 0)
+
+async function onDelete(id: number) {
+  if (!await msg.confirm('确认删除此伏笔？')) return
+  try { await api.deleteForeshadow(id); await refresh(); msg.success('已删除') }
+  catch (e: any) { msg.error('删除失败：' + formatError(e)) }
+}
+
+async function onBatchDelete() {
+  if (!selectedRowKeys.value.length) return
+  if (!await msg.confirm(`确认删除选中的 ${selectedRowKeys.value.length} 条伏笔？`)) return
+  try {
+    const res = await api.batchDeleteForeshadows(selectedRowKeys.value)
+    msg.success(`已删除 ${res.deleted} 条`)
+    selectedRowKeys.value = []
+    await refresh()
+  } catch (e: any) { msg.error('批量删除失败：' + formatError(e)) }
+}
 
 async function onPlan() {
   if (!await msg.confirm('AI 将根据已有大纲自动规划伏笔（主线/支线/彩蛋/反转），已有伏笔不受影响。确认开始？')) return
@@ -256,6 +275,7 @@ const filteredData = computed(() => {
   <PageHeader title="伏笔管理">
     <template #actions>
       <a-button @click="onSyncFromAnalysis">🔄 从分析同步</a-button>
+      <a-button v-if="hasSelected" danger @click="onBatchDelete">🗑 删除选中（{{ selectedRowKeys.length }}）</a-button>
       <a-button @click="openAdd">+ 手动添加</a-button>
       <a-button type="primary" :loading="generating" @click="onPlan">{{ generating ? 'AI 规划中…' : 'AI 规划伏笔' }}</a-button>
     </template>
@@ -312,6 +332,7 @@ const filteredData = computed(() => {
       v-if="filteredData.length"
       :columns="columns"
       :data-source="filteredData"
+      :row-selection="{ selectedRowKeys, onChange: (keys: any) => selectedRowKeys = keys as number[] }"
       :pagination="{ pageSize: 15, showSizeChanger: true }"
       size="middle"
       :scroll="{ x: 1100 }"

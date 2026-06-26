@@ -50,6 +50,19 @@ async def delete_foreshadow(project_id: int, foreshadow_id: int, db: AsyncSessio
     return {"ok": True}
 
 
+@router.post("/{project_id}/foreshadows/batch-delete")
+async def batch_delete_foreshadows(project_id: int, ids: list[int], db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """批量删除伏笔。"""
+    await get_user_project(db, project_id, user)
+    service = ForeshadowService(db, project_id)
+    deleted = 0
+    for fid in ids:
+        if await service.delete(fid):
+            deleted += 1
+    await db.commit()
+    return {"ok": True, "deleted": deleted}
+
+
 @router.post("/{project_id}/foreshadows/plan")
 async def plan_foreshadows(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """AI 自动规划伏笔"""

@@ -375,8 +375,21 @@ async function onSave() {
   } catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDelete(id: number) {
-  if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteOutline(id); await refresh(); msg.success('已删除') }
+  const o = (outlines.value || []).find((x: any) => x.id === id)
+  const hasChapters = o?.has_chapters
+  const hint = hasChapters
+    ? `此卷已展开为 ${o.chapter_count} 章正文。\n删除卷大纲将同时删除所有展开的章节及其分析数据，且不可恢复。`
+    : '确认删除此大纲？'
+  if (!await msg.confirm(hint)) return
+  try {
+    const res = await api.deleteOutline(id)
+    await refresh()
+    if (res?.deleted_chapters) {
+      msg.success(`已删除（含 ${res.deleted_chapters} 章正文）`)
+    } else {
+      msg.success('已删除')
+    }
+  }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 

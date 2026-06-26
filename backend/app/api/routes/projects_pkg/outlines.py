@@ -420,7 +420,61 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
             logger.info(f"[outline:{task_id}] session ok, fetching project...")
             proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
 
-            # ======== Phase 1: Information Collection ========
+            # ======== 首次大纲生成：直接全量注入，跳过两阶段（角色少，无前文/伏笔可查）========
+            existing_outlines = (await task_db.execute(
+                select(func.count(Outline.id)).where(Outline.project_id == payload["project_id"])
+            )).scalar()
+            is_first_outline = (existing_outlines or 0) == 0
+
+            if is_first_outline:
+                logger.info(f"[outline:{task_id}] first outline, using full injection (no two-phase)")
+                ctx_full = await _project_context(task_db, payload["project_id"], proj)  # 全量上下文
+                engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+                await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
+                result = await engine.execute_skill("outline_create", ai_client, {
+                    **ctx_full,
+                    "title": proj.title,
+                    "genre": proj.genre or "网文",
+                    "theme": proj.genre or "网文",
+                    "synopsis": proj.synopsis or "暂无简介",
+                    "chapter_count": str(payload["chapter_count"]),
+                    "narrative_perspective": proj.narrative_pov or "第三人称",
+                    "narrative_pov": proj.narrative_pov or "第三人称",
+                    "mcp_references": "",
+                    "requirements": "",
+                    "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。这是第一卷，没有前文大纲或伏笔需要参考。",
+                })
+                if result.get("error"):
+                    await tracker.fail(result["error"])
+                    return
+                # 跳过 Phase 1 收集和 Phase 2 生成，直接进入保存
+                await tracker.update(stage="saving", message="保存大纲...")
+                outlines_data = result.get("json") or []
+                if isinstance(outlines_data, list):
+                    created_objs = []
+                    for idx, item in enumerate(outlines_data):
+                        o = _build_outline(payload["project_id"], item, index=idx, char_names=ctx_full["char_names"], org_names=ctx_full["org_names"])
+                        task_db.add(o)
+                        created_objs.append(o)
+                    await task_db.flush()
+                    if (proj.outline_mode or "one_to_one") == "one_to_one":
+                        for o in created_objs:
+                            existing = (await task_db.execute(
+                                select(Chapter).where(Chapter.project_id == payload["project_id"], Chapter.chapter_number == o.chapter_number)
+                            )).scalars().first()
+                            if existing:
+                                continue
+                            ch = Chapter(
+                                project_id=payload["project_id"], chapter_number=o.chapter_number,
+                                title=o.title, summary=o.summary[:200] if o.summary else "",
+                                status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                            )
+                            task_db.add(ch)
+                    await task_db.commit()
+                await tracker.complete(message=f"大纲生成完成（{len(outlines_data)}章）")
+                return
+
+            # ======== 续写大纲：两阶段收集（有前文/伏笔可查）========
             logger.info(f"[outline:{task_id}] Phase 1: building skeleton context...")
             ctx_skeleton = await _project_context(task_db, payload["project_id"], proj, collect_only=True)
             logger.info(f"[outline:{task_id}] skeleton ok ({len(str(ctx_skeleton))} chars), creating engine...")
@@ -608,9 +662,26 @@ async def delete_outline(project_id: int, outline_id: int, db: AsyncSession = De
     o = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
     if not o:
         raise HTTPException(404, "大纲不存在")
+    # 级联删除该大纲展开的所有章节（1→N 模式）及其关联数据
+    from app.services.chapter_service import ChapterService
+    chapters = (await db.execute(
+        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+    )).scalars().all()
+    deleted_words = sum(c.word_count or 0 for c in chapters)
+    chapter_count = len(chapters)
+    if chapters:
+        # 1→1 模式下可能有章节的 chapter_number 和大纲相同但 outline_id 为空，也一起清理
+        chapter_service = ChapterService(db, project_id, user.id)
+        await chapter_service.cleanup_chapters_data([c.id for c in chapters])
+        for c in chapters:
+            await db.delete(c)
+        # 回收项目字数
+        if deleted_words > 0:
+            proj = await get_user_project(db, project_id, user)
+            proj.current_word_count = max(0, (proj.current_word_count or 0) - deleted_words)
     await db.delete(o)
     await db.commit()
-    return {"ok": True}
+    return {"ok": True, "deleted_chapters": chapter_count, "deleted_words": deleted_words}
 
 
 @router.post("/{project_id}/outlines/continue")

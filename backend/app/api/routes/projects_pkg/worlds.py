@@ -275,6 +275,7 @@ async def reindex_world_relation_vectors(project_id: int, db: AsyncSession = Dep
     async def _run():
         from app.core.database import async_session as _as
         synced = 0
+        failed = 0
         async with _as() as task_db:
             # 同步世界观
             worlds = (await task_db.execute(
@@ -282,10 +283,15 @@ async def reindex_world_relation_vectors(project_id: int, db: AsyncSession = Dep
             )).scalars().all()
             for w in worlds:
                 try:
+                    if not w.content or len(str(w.content).strip()) < 10:
+                        logger.warning(f"[reindex] 跳过世界观 id={w.id} '{w.name}'（内容不足10字）")
+                        failed += 1
+                        continue
                     await _sync_world_memory(project_id, w.id, w.name, w.category, w.content, user.id)
                     synced += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"[reindex] 世界观 {w.name} 同步失败: {e}")
+                    failed += 1
             # 同步关系
             rels = (await task_db.execute(
                 select(CharacterRelation).where(CharacterRelation.project_id == project_id)
@@ -296,7 +302,7 @@ async def reindex_world_relation_vectors(project_id: int, db: AsyncSession = Dep
                     synced += 1
                 except Exception:
                     pass
-        logger.info(f"[reindex] 项目 {project_id} 向量回填完成: {synced}/{total}")
+        logger.info(f"[reindex] 项目 {project_id} 向量回填完成: {synced}/{total}（跳过/失败 {failed}）")
 
     asyncio.ensure_future(_run())
     return {"ok": True, "total": total, "message": f"正在后台同步 {total} 条数据（{world_count} 个世界观 + {rel_count} 条关系）"}

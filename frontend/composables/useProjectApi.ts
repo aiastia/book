@@ -70,7 +70,7 @@ export function useProjectApi() {
   }
 
   function deleteOutline(outlineId: number) {
-    return apiDelete(`/api/projects/${pid()}/outlines/${outlineId}`)
+    return apiDelete<{ ok: boolean; deleted_chapters: number; deleted_words: number }>(`/api/projects/${pid()}/outlines/${outlineId}`)
   }
 
   // ---- 章节 ----
@@ -185,6 +185,9 @@ export function useProjectApi() {
 
   function deleteForeshadow(foreshadowId: number) {
     return apiDelete(`/api/projects/${pid()}/foreshadows/${foreshadowId}`)
+  }
+  function batchDeleteForeshadows(ids: number[]) {
+    return apiPost<{ ok: boolean; deleted: number }>(`/api/projects/${pid()}/foreshadows/batch-delete`, ids)
   }
 
   /** AI 自动规划伏笔 */
@@ -778,6 +781,7 @@ export function useProjectApi() {
     createForeshadow,
     updateForeshadow,
     deleteForeshadow,
+    batchDeleteForeshadows,
     planForeshadows,
     plantForeshadow,
     resolveForeshadow,
