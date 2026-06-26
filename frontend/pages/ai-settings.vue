@@ -362,8 +362,8 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
             <label>Temperature（随机性）</label>
             <span class="slider-value">{{ (defaultModel?.temperature ?? 70) / 100 }}</span>
           </div>
-          <a-slider :value="(defaultModel?.temperature ?? 70) / 100" :min="0" :max="1" :step="0.01" disabled />
-          <div class="slider-range"><span>0 (精确)</span><span>1 (创造)</span></div>
+          <a-slider :value="(defaultModel?.temperature ?? 70) / 100" :min="0" :max="2" :step="0.01" disabled />
+          <div class="slider-range"><span>0 (精确)</span><span>2 (创造)</span></div>
         </div>
         <div class="slider-group">
           <div class="slider-header">
