@@ -67,6 +67,9 @@ async function onResetAll() {
   if (!await msg.confirm('确认将所有提示词重置为系统默认版本？这将清除所有你自定义过的提示词，不可恢复。')) return
   try { await api.resetAllSkills(); await refresh(); msg.success('已全部重置') } catch (e: any) { msg.error('重置失败：' + formatError(e)) }
 }
+async function onReload() {
+  try { await api.reloadSkills(); await refresh(); msg.success('已从磁盘重新加载模板（用户自定义版本已保留）') } catch (e: any) { msg.error('加载失败：' + formatError(e)) }
+}
 async function onDeleteCustom(s: any) {
   if (!await msg.confirm(`确认删除自定义 Skill「${s.display_name || s.name}」？此操作不可恢复。`)) return
   try { await api.deleteCustomSkill(s.id); await refresh() } catch (e: any) { msg.error('删除失败：' + formatError(e)) }
@@ -175,6 +178,7 @@ const grouped = computed(() => {
   <PageHeader title="Skill 管理" back="/books">
     <template #actions>
       <a-button type="primary" @click="openCreate">+ 安装 Skill</a-button>
+      <a-button @click="onReload">从磁盘重新加载</a-button>
       <a-button danger @click="onResetAll">重置全部为系统默认</a-button>
     </template>
     </PageHeader>

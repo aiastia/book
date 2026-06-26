@@ -520,6 +520,26 @@ async def reset_all_skills(db: AsyncSession = Depends(get_db), user=Depends(get_
     return {"ok": True, "message": "所有提示词已重置为系统默认版本"}
 
 
+@router.post("/skills/reload")
+async def reload_skills_from_disk(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """从磁盘重新加载提示词模板，智能更新到数据库（不覆盖用户自定义版本）。
+    
+    与 reset-all 的区别：reset-all 清除所有用户自定义强制覆盖；
+    reload 只更新"用户未修改过"的模板，保留用户自定义内容。
+    用于提示词文件更新后，无需重启后端即可生效。
+    """
+    import app.skills.builtin as builtin
+    from app.skills.builtin import init_builtin_skills, load_builtin_skills
+    
+    # 重新从磁盘读取模板（绕过模块级缓存）
+    builtin.BUILTIN_SKILLS = load_builtin_skills()
+    
+    # 智能模式更新 DB（force=False，保留用户自定义）
+    await init_builtin_skills(db, force=False)
+    
+    return {"ok": True, "message": f"已从磁盘重新加载 {len(builtin.BUILTIN_SKILLS)} 个模板（用户自定义版本已保留）"}
+
+
 @router.post("/skills/create")
 async def create_custom_skill(req: SkillCreateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """用户自定义创建 Skill（可通过粘贴 MD 内容安装）。"""

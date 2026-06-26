@@ -404,6 +404,11 @@ export function useProjectApi() {
     return apiPost('/api/skills/reset-all', {})
   }
 
+  /** 从磁盘重新加载模板，智能更新 DB（保留用户自定义） */
+  function reloadSkills() {
+    return apiPost('/api/skills/reload', {})
+  }
+
   /** 用户自定义创建 Skill */
   function createSkill(body: { name: string; display_name?: string; description?: string; category?: string; system_prompt: string }) {
     return apiPost<{ ok: boolean; id: number; name: string }>('/api/skills/create', body)
@@ -893,6 +898,7 @@ export function useProjectApi() {
     updateSkill,
     resetSkill,
     resetAllSkills,
+    reloadSkills,
     createSkill,
     deleteCustomSkill,
     // Prompt Template

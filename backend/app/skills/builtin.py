@@ -129,7 +129,8 @@ async def init_builtin_skills(db: AsyncSession, force: bool = False):
                 select(PromptVersion).where(PromptVersion.id == pt_obj.current_version_id)
             )
             active_ver = ver_result.scalar_one_or_none()
-            if active_ver and active_ver.system_prompt != skill_data["system_prompt"]:
+            # 跟 DB 中原版比较（而非新文件），防止文件更新被误判为"用户自定义"
+            if active_ver and active_ver.system_prompt != existing.system_prompt:
                 user_customized = True
 
         if not user_customized:
