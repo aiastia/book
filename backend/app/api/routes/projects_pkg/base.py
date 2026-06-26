@@ -19,6 +19,8 @@ from app.models.organization import Organization
 from app.models.world import WorldSetting
 from app.models.foreshadow import Foreshadow
 from app.models.plot_analysis import PlotAnalysis
+from app.models.item import Item
+from app.models.location import Location
 from app.services.chapter_service import ChapterService
 from app.services.foreshadow_service import ForeshadowService
 from app.skills.engine import SkillEngine

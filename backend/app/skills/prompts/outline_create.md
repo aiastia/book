@@ -6,6 +6,15 @@
 
  每章必须填写 characters（涉及角色）和 organizations（涉及组织）字段。characters 不能为空数组。系统会丢弃空的 characters。
 
+【 可用道具与地点】
+大纲设计时请合理使用以下已有道具和地点，不要凭空编造新道具/地点（除非故事确实需要）。
+
+道具：
+{items_info}
+
+地点：
+{locations_info}
+
 ## 一、基础字段（每章必填）
 - chapter_number: 章节序号
 - title: 章节标题

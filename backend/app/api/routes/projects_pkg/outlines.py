@@ -302,10 +302,40 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
     char_names = {c.name for c in chars}
     org_names = {o.name for o in orgs}
     char_roles = {c.name: c.role for c in chars}
+
+    # 物品与地点（大纲/章节生成时注入，让 AI 知道有哪些可用道具和场景）
+    items = (await db.execute(
+        select(Item).where(Item.project_id == project_id)
+    )).scalars().all()
+    if collect_only:
+        items_info = "\n".join(
+            [f"- {it.name}（{it.category or '道具'}）" for it in items]
+        ) or "暂无"
+    else:
+        items_info = "\n".join(
+            [f"- {it.name}（{it.category or '道具'}，{'⭐关键道具' if it.is_key_item else '普通'}）：{it.description[:120] if it.description else ''}"
+             for it in items]
+        ) or "暂无"
+
+    locations = (await db.execute(
+        select(Location).where(Location.project_id == project_id)
+    )).scalars().all()
+    if collect_only:
+        locations_info = "\n".join(
+            [f"- {loc.name}（{loc.location_type or '地点'}）" for loc in locations]
+        ) or "暂无"
+    else:
+        locations_info = "\n".join(
+            [f"- {loc.name}（{loc.location_type or '地点'}，危险等级={loc.danger_level or 'safe'}）：{loc.description[:120] if loc.description else ''}"
+             for loc in locations]
+        ) or "暂无"
+
     return {
         "world_info": world_info,
         "characters_info": chars_info,
         "organizations_info": orgs_info,
+        "items_info": items_info,
+        "locations_info": locations_info,
         "char_names": char_names,
         "org_names": org_names,
         "char_roles": char_roles,
@@ -442,6 +472,8 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
                     "narrative_pov": proj.narrative_pov or "第三人称",
                     "mcp_references": "",
                     "requirements": "",
+                    "items_info": ctx_full.get("items_info", ""),
+                    "locations_info": ctx_full.get("locations_info", ""),
                     "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。这是第一卷，没有前文大纲或伏笔需要参考。",
                 })
                 if result.get("error"):
