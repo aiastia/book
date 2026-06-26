@@ -7,7 +7,7 @@
 撰写第{chapter_number}章《{chapter_title}》的完整正文。
 
 【基本要求】
-- 目标字数：{target_word_count}字（硬性要求，不足 70% 视为未完成。写完检查字数，不够就扩充场景的动作描写和对话博弈）
+- 参考字数：{target_word_count}字。不要刻意凑字数——把场景写透、动作写细、对话写活，字数自然就够了。
 - 叙事视角：{narrative_perspective}
 </task>
 

@@ -221,7 +221,7 @@ def get_chapter_tools() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "list_available_entities",
-                "description": "列出项目中所有可查询的实体概要（角色、组织、地点、物品、职业、世界设定）。用于了解'有哪些东西可查'，避免盲猜名字浪费查询轮数。建议作为第一轮的第一个调用，拿到全貌后再精准查询细节。",
+                "description": "列出项目中所有可查询的实体概要（角色、组织、地点、物品、职业、世界设定）。仅在不确定有哪些可查时才调用，预加载信息已覆盖本章大部分需求。",
                 "parameters": {
                     "type": "object",
                     "properties": {},

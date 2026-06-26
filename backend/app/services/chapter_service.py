@@ -708,7 +708,8 @@ class ChapterService:
                 context["_thinking_modes"] = project.settings.get("thinking_modes", {})
             if project:
                 context["project_title"] = project.title or ""
-                context["target_word_count"] = str(project.target_word_count or 4000)
+                _ov = overrides or {}
+                context["target_word_count"] = str(_ov.get("target_word_count", 4000))
                 context["narrative_pov"] = project.narrative_pov or "第三人称"
                 context["narrative_perspective"] = context["narrative_pov"]
             # 应用覆盖项
@@ -864,7 +865,8 @@ class ChapterService:
             if "chapter_title" not in context:
                 context["chapter_title"] = chapter.title or ""
             if "target_word_count" not in context:
-                context["target_word_count"] = str(getattr(project, "target_word_count", 4000) or 4000)
+                _ov = overrides or {}
+                context["target_word_count"] = str(_ov.get("target_word_count", 4000))
             if "narrative_perspective" not in context:
                 context["narrative_perspective"] = project.narrative_pov or "第三人称"
             # 从 expansion_plan 提取（1→N 模式的核心数据源）
@@ -880,19 +882,19 @@ class ChapterService:
                 # expansion_rich：富字段（情绪基调/冲突/节奏/钩子/爽点——供 1→N 模板 {expansion_rich}）
                 _rich = []
                 if plan.get("emotional_tone") or plan.get("emotional_arc"):
-                    _rich.append(f"💫 情感基调：{plan.get('emotional_tone') or plan.get('emotional_arc')}")
+                    _rich.append(f"[情感基调] {plan.get('emotional_tone') or plan.get('emotional_arc')}")
                 if plan.get("conflict_type"):
-                    _rich.append(f"⚔️ 冲突类型：{plan['conflict_type']}")
+                    _rich.append(f"[冲突类型] {plan['conflict_type']}")
                 if plan.get("rhythm_tag"):
-                    _rich.append(f"🎵 节奏标签：{plan['rhythm_tag']}")
+                    _rich.append(f"[节奏标签] {plan['rhythm_tag']}")
                 if plan.get("narrative_goal"):
-                    _rich.append(f"🎯 叙事目标：{plan['narrative_goal']}")
+                    _rich.append(f"[叙事目标] {plan['narrative_goal']}")
                 if plan.get("reader_hook"):
-                    _rich.append(f"🔗 读者钩子：{plan['reader_hook']}")
+                    _rich.append(f"[读者钩子] {plan['reader_hook']}")
                 if plan.get("character_focus"):
-                    _rich.append(f"👥 角色焦点：{', '.join(plan['character_focus'])}")
+                    _rich.append(f"[角色焦点] {', '.join(plan['character_focus'])}")
                 if plan.get("hook"):
-                    _rich.append(f"🪝 结尾钩子：{plan['hook']}")
+                    _rich.append(f"[结尾钩子] {plan['hook']}")
                 sd = plan.get("shuang_design")
                 if isinstance(sd, dict):
                     sd_lines = []
@@ -904,7 +906,7 @@ class ChapterService:
                     if sd.get("emotional_rhythm"): sd_lines.append(f"  情绪节奏：{sd['emotional_rhythm']}")
                     if sd.get("protagonist_style"): sd_lines.append(f"  主角逼格：{sd['protagonist_style']}")
                     if sd_lines:
-                        _rich.append("📌 爽点设计：\n" + "\n".join(sd_lines))
+                        _rich.append("[爽点设计]\n" + "\n".join(sd_lines))
                 context["expansion_rich"] = "\n".join(_rich) if _rich else ""
             else:
                 context["chapter_outline"] = chapter.summary or ""
