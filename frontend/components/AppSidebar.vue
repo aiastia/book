@@ -44,6 +44,17 @@ const adminGroup = computed(() => {
 function isBackToShelf(item: any, groupIndex: number) {
   return groupIndex === 0 && item.to.startsWith('/books')
 }
+
+// 管理员入口点击：用 router.push 确保客户端导航，不走 NuxtLink
+const router = useRouter()
+function navigateToAdmin(path: string) {
+  router.push(path)
+}
+
+// 判断分组是否为管理分组（用于整个侧栏 admin 条目统一走 button+router 而非 NuxtLink）
+function isAdminGroup(group: any) {
+  return group.title === '管理' || (group.items && group.items.length > 0 && group.items[0]?.to?.startsWith('/admin'))
+}
 </script>
 
 <template>
@@ -73,7 +84,20 @@ function isBackToShelf(item: any, groupIndex: number) {
         <div v-if="group.title" class="sidebar-group-title">{{ collapsed ? '' : group.title }}</div>
         <!-- 组间分隔线（置顶区与板块之间） -->
         <div v-else-if="gi > 0 && !collapsed" class="sidebar-group-divider"></div>
+        <template v-if="isAdminGroup(group)">
+          <button
+            v-for="item in group.items"
+            :key="item.to"
+            class="sidebar-nav-item"
+            :class="{ active: currentPath === item.to }"
+            @click="navigateToAdmin(item.to)"
+          >
+            <span class="sidebar-nav-icon"><AppIcon :name="item.icon" /></span>
+            <span v-if="!collapsed" class="sidebar-nav-label">{{ item.label }}</span>
+          </button>
+        </template>
         <SidebarNavItem
+          v-else
           v-for="item in group.items"
           :key="item.to"
           :to="item.to"
@@ -87,14 +111,16 @@ function isBackToShelf(item: any, groupIndex: number) {
       <!-- 管理员入口 -->
       <template v-if="adminGroup">
         <div class="sidebar-group-title">{{ collapsed ? '' : adminGroup.title }}</div>
-        <SidebarNavItem
+        <button
           v-for="item in adminGroup.items"
           :key="item.to"
-          :to="item.to"
-          :icon="item.icon"
-          :active="currentPath === item.to"
-          :collapsed="collapsed"
-        >{{ collapsed ? '' : item.label }}</SidebarNavItem>
+          class="sidebar-nav-item"
+          :class="{ active: currentPath === item.to }"
+          @click="navigateToAdmin(item.to)"
+        >
+          <span class="sidebar-nav-icon"><AppIcon :name="item.icon" /></span>
+          <span v-if="!collapsed" class="sidebar-nav-label">{{ item.label }}</span>
+        </button>
       </template>
     </nav>
 

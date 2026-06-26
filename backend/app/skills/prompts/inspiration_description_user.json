@@ -1,10 +1,10 @@
 {
   "name": "inspiration_description_user",
   "display_name": "灵感模式-简介生成(用户提示词)",
-  "description": "根据用户想法和书名生成6个简介选项的用户提示词",
+  "description": "根据用户想法和书名生成6个简介选项的用户触发词",
   "category": "inspire",
   "skill_type": "builtin",
-  "system_prompt": "我的创作想法：{initial_idea}\n已选书名：{title}\n\n请思考这个故事的核心冲突和情感驱动力，然后生成6个不同侧重点的简介选项（有些偏重世界观展开，有些偏重人物关系张力，有些偏重悬念设置）。",
+  "system_prompt": "请根据系统提示词中的要求，生成6个不同侧重点的简介选项。",
   "parameters": {
     "type": "object",
     "properties": {}

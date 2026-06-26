@@ -120,7 +120,7 @@ function onMenuClick({ key }: { key: string }) {
 </template>
 
 <style scoped>
-.sidebar-footer{padding:12px 16px;border-top:1px solid var(--color-border);}
+.sidebar-footer{border-top:1px solid var(--color-border);}
 .sidebar-user{display:flex;align-items:center;gap:10px;cursor:pointer;}
 .sidebar-user-info{min-width:0;}
 .sidebar-user-name{font-size:var(--text-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

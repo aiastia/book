@@ -62,7 +62,6 @@ const globalNav: NavItem[] = [
 
 // 管理员菜单（仅管理员可见）
 const adminNav: NavItem[] = [
-  { label: '← 返回首页', to: '/books', icon: 'home' },
   { label: '用户管理', to: '/admin/users', icon: 'users' },
   { label: '系统设置', to: '/admin/system', icon: 'bot' },
 ]
@@ -100,7 +99,8 @@ export function useNavigation() {
   // 分组化的项目菜单（新：AppSidebar 用）
   const groupedNav = computed<NavGroup[]>(() => {
     if (isAdmin.value) {
-      return [{ title: '管理', items: adminNav }]
+      // admin 页面也保持全局导航，管理入口在底部单独追加
+      return [{ title: '导航', items: globalNav }, { title: '管理', items: adminNav }]
     }
     if (!isProject.value) {
       return [{ title: '导航', items: globalNav }]
