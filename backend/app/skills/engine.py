@@ -123,17 +123,18 @@ _SKILL_BLOCKS = {
     "characters_batch_generation": ["project","world","orgs"],
     "character_generate":      ["project","world","orgs"],
     # 🔵 角色关系生成（初始化 step7）
-    "character_relations_generate": ["project","characters"],
+    "character_relations_generate": ["project"],  # characters_info 已在模板中通过变量注入，不再重复
     # 🔵 大纲生成/续写（初始化 step8 + 页面手动）
     "outline_create":          ["project","world","characters","orgs","past_outlines","foreshadow_ctx"],
     "outline_continue":        ["project","world","characters","orgs","recent","past_outlines","foreshadow_ctx"],
-    "outline_expand_":         ["project","world","characters","orgs","outline"],
+    "outline_expand_":         ["project","world","orgs","outline"],  # characters_info 已在模板中通过变量注入
     # ⚪ 角色职业/组织分配（初始化内部调用 + 页面手动触发）
     "career_assign":           ["project","characters"],
     "org_member_assign":       ["project","characters","orgs"],
     # 🟢 章节生成（页面逐章/批量生成）
-    "chapter_generation_":     ["project","world","characters","orgs","outline","previous","foreshadow","memory","recent","quality"],
-    "chapter_generate_":       ["project","world","characters","orgs","outline","previous","foreshadow","memory","recent","quality"],
+    # characters_info 和 chapter_careers 已在模板中通过变量注入，不再重复
+    "chapter_generation_":     ["project","world","outline","previous","foreshadow","memory","recent","quality"],
+    "chapter_generate_":       ["project","world","outline","previous","foreshadow","memory","recent","quality"],
     # ⚪ 章节后处理（自动摘要/分析）
     "chapter_summary":         ["project","outline"],
     "plot_analysis":           ["project","outline","foreshadow"],
@@ -143,7 +144,7 @@ _SKILL_BLOCKS = {
     "inspiration_":            ["project"],
     "book_import_":            ["project"],
     # 🟢 伏笔规划/去AI味/章节重写
-    "foreshadow_plan":         ["project","outline","foreshadow","characters"],
+    "foreshadow_plan":         ["project","outline","foreshadow"],  # characters_info 已在模板中通过变量注入
     "ai_denoising":            ["project","outline"],
     "chapter_planner":         ["project"],
     "partial_regenerate":      ["project","outline","characters"],
