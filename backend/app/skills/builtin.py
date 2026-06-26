@@ -118,20 +118,12 @@ async def init_builtin_skills(db: AsyncSession, force: bool = False):
             continue
 
         # 智能模式：判断用户是否真正自定义了
-        pt_name = skill_data["name"].upper()
-        pt_result = await db.execute(
-            select(PromptTemplate).where(PromptTemplate.name == pt_name)
-        )
-        pt_obj = pt_result.scalar_one_or_none()
-        user_customized = False
-        if pt_obj and pt_obj.current_version_id:
-            ver_result = await db.execute(
-                select(PromptVersion).where(PromptVersion.id == pt_obj.current_version_id)
-            )
-            active_ver = ver_result.scalar_one_or_none()
-            # 跟 DB 中原版比较（而非新文件），防止文件更新被误判为"用户自定义"
-            if active_ver and active_ver.system_prompt != existing.system_prompt:
-                user_customized = True
+        # 直接看 SkillConfig.is_customized（用户自定义的真实标志），
+        # 而非比较 PromptVersion vs Skill（两个表容易不一致，判断脆弱）
+        user_configs = (await db.execute(
+            select(SkillConfig).where(SkillConfig.skill_id == existing.id)
+        )).scalars().all()
+        user_customized = any(sc.is_customized for sc in user_configs)
 
         if not user_customized:
             old_prompt = existing.system_prompt
