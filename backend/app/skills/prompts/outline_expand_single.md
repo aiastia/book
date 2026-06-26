@@ -18,6 +18,7 @@
 {focus_kps_text}
 
 分配规则：{kp_allocation_rule}
+默认兜底：若未明确分配，按「前几章每章1个重点，最后一章承担剩余重点+收束，重点总数≤章节数×1.5」执行。
 
 {no_focus_fallback}
 {general_kps_rule}
@@ -53,6 +54,9 @@
 <context priority="P2">
 【上下文参考】
 {context_info}
+
+【衔接检查】
+展开每个子章节前，先确认：本子章节开始时，角色承接自上一卷/上一章的什么状态？上一卷结尾留下的最紧迫信号是什么？子章节的第一个动作必须回应这个信号——不得另起炉灶。
 </context>
 
 <character_intent_rules priority="P0">
@@ -84,7 +88,7 @@
 	    "shuang_design": {"info_asymmetry": "本章存在的信息不对称", "shock_level": "点震惊/网震惊/深度震惊/无", "spectator_layers": ["路人反应", "同行/内行反应", "权威/高层反应", "反派阵营反应"], "emotional_rhythm": "情绪拉扯描述", "protagonist_style": "主角逼格展示方式（具体行为场景描述）"},
     "reader_hook": "读者追读理由（50-100字）",
     "rhythm_tag": "起/承/小高潮（该大纲节点拆分的最后一章必须填'小高潮'）",
-    "scene_anchor": "（推荐，50-80字）核心空间的感官锚点",
+    "scene_anchor": "（必填，50-80字）核心空间的感官锚点",
     "character_intents": [{"character": "角色名", "this_chapter_goal": "本章目标", "immediate_want": "此刻最想要的"}],
     "estimated_words": 3000
   }

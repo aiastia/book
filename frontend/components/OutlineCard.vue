@@ -54,6 +54,10 @@ const FIELD_LABELS: Record<string, string> = {
   shuang_design: '爽点设计', reader_hook: '读者钩子', decision_basis: '决策依据',
   obstacle_type: '障碍类型', hook_type: '钩子类型', chapter_breath: '叙事节奏',
   foreshadow_plant: '伏笔埋设', foreshadow_advance: '伏笔推进',
+  character_intents: '角色微意图', scene_anchor: '场景锚点', emotional_arc: '情绪弧线',
+  narrative_goal: '叙事目标', conflict_type: '冲突类型', rhythm_tag: '节奏标记',
+  character: '角色', this_chapter_goal: '本章目标', immediate_want: '当前欲求',
+  new_characters_needed: '需新增角色',
 }
 const BASE_FIELD_KEYS = new Set([
   'chapter_number', 'title', 'summary', 'scenes', 'characters', 'organizations',
@@ -65,8 +69,33 @@ function fieldToText(v: any): string {
   if (typeof v === 'string') return v
   if (typeof v === 'number' || typeof v === 'boolean') return String(v)
   if (Array.isArray(v)) return v.map((x: any) => typeof x === 'object' ? JSON.stringify(x) : String(x)).join('；')
-  if (typeof v === 'object') return Object.entries(v).map(([k, val]) => `${k}：${fieldToText(val)}`).join('\n')
+  if (typeof v === 'object') return formatFieldObject(v)
   return String(v)
+}
+
+function formatFieldObject(obj: Record<string, any>): string {
+  // character_intents 特殊处理
+  if (obj.character && (obj.this_chapter_goal || obj.immediate_want)) {
+    const parts: string[] = []
+    parts.push(`【${obj.character || '?'}】`)
+    if (obj.this_chapter_goal) parts.push(`目标：${obj.this_chapter_goal}`)
+    if (obj.immediate_want) parts.push(`当前欲求：${obj.immediate_want}`)
+    return parts.join('；')
+  }
+  // 通用：只对已知中文标签的 key 做转换
+  const parts: string[] = []
+  for (const [k, val] of Object.entries(obj)) {
+    const label = FIELD_LABELS[k] || k
+    parts.push(`${label}：${fieldToText(val)}`)
+  }
+  return parts.join('\n')
+}
+
+function priorityColor(ev: string): string {
+  if (ev.includes('【重点】')) return 'red'
+  if (ev.includes('【一般】')) return 'blue'
+  if (ev.includes('【弱】')) return 'default'
+  return 'blue'
 }
 function getExtraFields(o: any): Array<{ key: string; label: string; value: string }> {
   const out: Array<{ key: string; label: string; value: string }> = []
@@ -143,7 +172,7 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
         <div class="section-label">💡 情节要点（{{ outline.key_points.length }}）</div>
         <div class="key-points">
           <div v-for="(p, i) in outline.key_points" :key="i" class="kp-item">
-            <span class="kp-dot">{{ Number(i) + 1 }}</span>
+            <a-tag :color="priorityColor(typeof p === 'string' ? p : '')" size="small" style="flex-shrink:0;margin-right:6px;">{{ String(i + 1) }}</a-tag>
             <span>{{ typeof p === 'string' ? p : p.content || p.point || p.event || JSON.stringify(p) }}</span>
           </div>
         </div>
@@ -200,8 +229,8 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
 .scene-title { font-weight: 500; color: #2B2B2B; }
 .scene-desc { color: #8C8C8C; }
 .extra-sec { background: #FFFBE6; border-radius: 6px; padding: 8px 10px; border: 1px dashed #FFE58F; }
-.extra-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.extra-item { display: flex; flex-direction: column; gap: 2px; }
+.extra-list { columns: 2; column-gap: 8px; }
+.extra-item { break-inside: avoid; margin-bottom: 8px; display: flex; flex-direction: column; gap: 2px; }
 .extra-key { font-size: 12px; color: #AD6800; font-weight: 500; }
 .extra-val { font-size: 13px; color: #595959; line-height: 1.6; word-break: break-word; }
 .item-footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; border-top: 1px solid #F0EEE8; }

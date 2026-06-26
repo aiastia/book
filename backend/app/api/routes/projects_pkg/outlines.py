@@ -1127,7 +1127,13 @@ async def _expand_outline_core(
         if target_chapter_count >= kp_count:
             kp_allocation_rule = f"共{kp_count}个【重点】，{target_chapter_count}个子章节。前{kp_count}个子章节各承担1个【重点】的推进，第{target_chapter_count}个子章节收束所有线索并引爆本卷小高潮。"
         else:
-            kp_allocation_rule = f"共{kp_count}个【重点】（多于子章节数{target_chapter_count}），部分子章节需承载多个【重点】。第1章必须让主角接触到核心信息源并开始推进第一个【重点】。"
+            # 重点多于子章节：前 N-1 章每章1个，最后一章承担剩余
+            overflow = kp_count - (target_chapter_count - 1)
+            kp_allocation_rule = (
+                f"共{kp_count}个【重点】，仅{target_chapter_count}个子章节。"
+                f"前{target_chapter_count - 1}个子章节各承担1个【重点】，"
+                f"第{target_chapter_count}个子章节承担剩余{overflow}个【重点】并收束全卷。"
+            )
     else:
         kp_allocation_rule = f"将卷概览中的核心剧情按自然节奏分配到{target_chapter_count}个子章节中。"
 
