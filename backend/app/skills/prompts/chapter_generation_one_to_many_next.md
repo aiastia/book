@@ -16,6 +16,8 @@
 {chapter_outline}
 </outline>
 
+{expansion_rich}
+
 <recent_context priority="P1">
 【最近章节规划 - 故事脉络参考】
 {recent_chapters_context}

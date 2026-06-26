@@ -996,6 +996,21 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
+            # continuation_point + previous_chapter_summary：上一章结尾衔接（续章模板用）
+            if chapter.chapter_number and chapter.chapter_number > 1:
+                prev_ending = await self._get_previous_ending(chapter)
+                context["continuation_point"] = prev_ending[-200:] if prev_ending else ""
+                from app.models.chapter import Chapter as ChModel
+                prev_ch = (await self.db.execute(
+                    select(ChModel).where(
+                        ChModel.project_id == self.project_id,
+                        ChModel.chapter_number == chapter.chapter_number - 1
+                    )
+                )).scalar_one_or_none()
+                context["previous_chapter_summary"] = prev_ch.summary or "" if prev_ch else ""
+            else:
+                context["continuation_point"] = ""
+                context["previous_chapter_summary"] = ""
             context["user_prompt"] = (
                 f"请写出第{chapter.chapter_number}章的正文。\n\n"
                 f"上方已提供骨架信息：本章角色（姓名/身份/性格/说话风格）、大纲、场景锚点、角色微意图、可用道具列表、可用地点列表。\n"
