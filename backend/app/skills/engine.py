@@ -575,6 +575,16 @@ class SkillEngine:
                 if "Connection" in err or "connection" in err or "Timeout" in err:
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
+                # 非连接错误（如 Bad Request）→ 不带工具重试一次
+                if tools and tool_executor and attempt < 2:
+                    logger.warning(f"[skill] 工具调用失败({err[:100]}), 降级为无工具模式重试")
+                    result = await ai_client.chat_stream_collect(
+                        messages=messages, model=model,
+                        temperature=temperature, top_p=top_p,
+                        max_tokens=max_tokens,
+                        frequency_penalty=frequency_penalty,
+                        presence_penalty=presence_penalty,
+                    )
                 break
         else:
             # JSON 输出技能：如果有工具，走 chat_with_tools 后解析 JSON
