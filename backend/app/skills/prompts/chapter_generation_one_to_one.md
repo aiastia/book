@@ -48,6 +48,8 @@
 伏笔该埋的埋，该推的推进
 </constraints>
 
+@include:_shared_narrative_techniques.md
+
 @include:_shared_writing_rules.md
 
 <output>

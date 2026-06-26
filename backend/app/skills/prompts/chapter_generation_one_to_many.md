@@ -74,6 +74,9 @@
  情绪区间扩展：
 - 每章至少出现一次「角色压不住」的瞬间——愤怒没压住、恐惧没藏好、怜悯没算清。不需要长篇，一句动作或对话即可
 - 首章之外，每章至少有一个让读者感到「疼」的物理细节——不是血腥，是具体的身体感受（烫、冷、刺、麻、痒）
+
+@include:_shared_narrative_techniques.md
+
 禁止事项】
 	@include:_shared_constraints.md
 </constraints>

@@ -46,6 +46,8 @@
 别重复上一章已经写完的内容。稳稳接住上一章的尾巴。大方向跟着大纲走，但允许角色在细节处偏离。人物的内核别崩，别写着写着就换了个人。字数别太离谱。
 </constraints>
 
+@include:_shared_narrative_techniques.md
+
 @include:_shared_writing_rules.md
 
 <output>
