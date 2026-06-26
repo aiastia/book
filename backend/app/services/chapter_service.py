@@ -724,7 +724,23 @@ class ChapterService:
                 for n in range(start_n, chapter.chapter_number):
                     s = await self._query_chapter_summary(n)
                     if s:
-                        recent_summaries.append(f"第{n}章：{s}")
+                        try:
+                            data = json.loads(s) if isinstance(s, str) else s
+                            title = data.get("title", "")
+                            summary = data.get("summary", "")
+                            # 如果没有分析摘要，用章节正文前150字兜底
+                            if not summary:
+                                ch = (await self.db.execute(
+                                    select(Chapter).where(
+                                        Chapter.project_id == self.project_id, Chapter.chapter_number == n
+                                    )
+                                )).scalars().first()
+                                if ch and ch.content:
+                                    summary = ch.content.strip()[:150]
+                            if summary or title:
+                                recent_summaries.append(f"第{n}章「{title}」：{summary}" if title else f"第{n}章：{summary}")
+                        except Exception:
+                            recent_summaries.append(f"第{n}章：{str(s)[:200]}")
                 context["relevant_memories"] = "\n".join(recent_summaries) if recent_summaries else ""
                 context["recalled_memories"] = context["relevant_memories"]
             except Exception:
@@ -1182,11 +1198,17 @@ class ChapterService:
             await _report(55, "分析完成，正在保存结果...")
 
             # 提取合并的摘要（省掉单独 _generate_summary 调用）
-            summary_text = str(analysis_data.get("summary") or analysis_data.get("suggestion") or "").strip()[:500]
-            key_events = analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
+            summary_text = str(
+                analysis_data.get("summary") or
+                analysis_data.get("suggestion") or
+                analysis_data.get("suggestions") or
+                ""
+            ).strip()[:500]
             if summary_text:
                 chapter.summary = summary_text
-                # key_events 存入 chapter.metadata 或忽略（目前用不到，仅摘要）
+            elif chapter.content:
+                chapter.summary = chapter.content.strip()[:150]
+            key_events = analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
 
             # 字段兼容层：统一 DB 提示词字段名 → 代码期望的字段名
             # hooks：DB 返回 list[{type,content,strength}]，兼容 dict 格式

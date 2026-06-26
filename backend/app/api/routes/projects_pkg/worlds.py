@@ -261,6 +261,7 @@ async def reindex_world_relation_vectors(project_id: int, db: AsyncSession = Dep
     后台异步执行，立即返回。
     """
     await get_user_project(db, project_id, user)
+    from app.models.character import CharacterRelation
     world_count = await db.scalar(
         select(func.count(WorldSetting.id)).where(WorldSetting.project_id == project_id)
     )
@@ -286,9 +287,8 @@ async def reindex_world_relation_vectors(project_id: int, db: AsyncSession = Dep
                 except Exception:
                     pass
             # 同步关系
-            from app.models.character import CharacterRelation as CR
             rels = (await task_db.execute(
-                select(CR).where(CR.project_id == project_id)
+                select(CharacterRelation).where(CharacterRelation.project_id == project_id)
             )).scalars().all()
             for r in rels:
                 try:
