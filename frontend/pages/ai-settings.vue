@@ -505,8 +505,8 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <label>Temperature（随机性）</label>
           <a-tag color="default">{{ tempDisplay }}</a-tag>
         </div>
-        <a-slider v-model:value="form.temperature" :min="0" :max="100" :step="1" />
-        <div class="slider-range"><span>0 (精确)</span><span>1 (创造)</span></div>
+        <a-slider v-model:value="form.temperature" :min="0" :max="200" :step="1" />
+        <div class="slider-range"><span>0 (精确)</span><span>2 (创造)</span></div>
       </div>
       <div class="slider-group">
         <div class="slider-header">
