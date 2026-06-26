@@ -1,0 +1,10 @@
+{
+  "name": "_shared_one_to_one_body",
+  "display_name": "共享：1→1 叙事本体",
+  "description": "1→1 章节共享叙事约束：写作哲学/角色认知/信息处理/张力松弛，被 chapter_generation_one_to_one 系列 @include 引用",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {"type": "object", "properties": {}},
+  "system_prompt_file": "_shared_one_to_one_body.md"
+}

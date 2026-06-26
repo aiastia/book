@@ -1,0 +1,10 @@
+{
+  "name": "_shared_chapter_context",
+  "display_name": "共享：场景锚点与角色微意图",
+  "description": "本章上下文：场景锚点（唯一空间）+ 角色微意图（驱动动作），所有章节提示词 @include 引用",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {"type": "object", "properties": {}},
+  "system_prompt_file": "_shared_chapter_context.md"
+}

@@ -203,7 +203,18 @@ const grouped = computed(() => {
             <a-switch :checked="s.is_enabled" @change="onToggle(s)" />
           </div>
           <div class="skill-desc">{{ s.description || '暂无描述' }}</div>
-          <div v-if="s.system_prompt" class="skill-prompt" @click="openEdit(s)" :title="'点击查看完整提示词（' + (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).length + '字）'">{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).slice(0, 300) }}{{ (s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt).length > 300 ? '... (点击查看全文)' : '' }}</div>
+          <!-- @include 共享模块标签 -->
+          <div v-if="s.has_includes" class="include-badge">
+            <a-tag v-for="inc in (s.includes || [])" :key="inc" color="blue" size="small" style="margin-right:4px">
+              📦 {{ inc }}
+            </a-tag>
+            <a-tooltip title="共享模块在提示词文件中管理：修改共享模块将影响所有引用它的 Skill">
+              <span style="font-size:11px;color:#8C8C8C;margin-left:4px;cursor:help">ℹ️</span>
+            </a-tooltip>
+          </div>
+          <div v-if="s.system_prompt" class="skill-prompt" @click="openEdit(s)" :title="'点击查看完整提示词（' + s.system_prompt.length + ' 字）'">
+            {{ s.system_prompt.slice(0, 300) }}{{ s.system_prompt.length > 300 ? '... (点击查看全文)' : '' }}
+          </div>
           <!-- 自定义开关 -->
           <div class="skill-custom-row">
             <span style="font-size:12px;color:#888;">自定义提示词</span>
@@ -225,9 +236,11 @@ const grouped = computed(() => {
   <a-modal
     v-model:open="editing"
     :title="'编辑提示词 — ' + (editing?.display_name || editing?.name || '')"
-    width="640px"
+    width="720px"
     :mask-closable="false"
   >
+    <a-alert v-if="editing?.has_includes" type="info" show-icon style="margin-bottom:12px"
+      message="含 @include 引用模块，编辑时请保留 @include 语法。共享模块内容请在对应卡片中修改。" />
     <a-textarea
       v-model:value="editPrompt"
       :rows="16"
@@ -324,6 +337,7 @@ description: 描述
 .skill-key:hover{background:#EBE0FF;}
 .skill-key code{font-family:monospace;}
 .skill-desc{font-size:13px;color:#888;margin-bottom:8px;line-height:1.5;}
+.include-badge{margin-bottom:6px;}
 .skill-prompt{font-size:12px;color:#aaa;background:#f9f9f9;padding:8px;border-radius:4px;margin-bottom:8px;font-family:monospace;line-height:1.4;max-height:120px;overflow:hidden;cursor:pointer;}
 .skill-actions{display:flex;gap:8px;}
 </style>

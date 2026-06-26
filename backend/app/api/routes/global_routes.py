@@ -400,6 +400,9 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
         snapshot = (user_cfg.get("system_prompt_snapshot") or "") if user_cfg else ""
         # 系统版本是否已更新（快照 ≠ 当前系统版本）
         system_updated = bool(is_customized and snapshot and snapshot != s.system_prompt)
+        # 解析 @include 引用列表
+        import re
+        includes = re.findall(r"@include:(\S+\.md)", s.system_prompt or "")
         out.append({
             "id": s.id,
             "name": s.name,
@@ -410,11 +413,14 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
             "is_enabled": user_cfg["is_enabled"] if user_cfg else s.is_enabled,
             "is_customized": is_customized,
             "system_updated": system_updated,
-            "system_prompt": s.system_prompt,  # 始终返回系统版本
+            "system_prompt": s.system_prompt,  # 原始内容（编辑用，保留 @include 结构）
+            "has_includes": len(includes) > 0,
+            "includes": includes,  # @include 引用列表
             "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "") if user_cfg else "",
             "parameters": s.parameters,
             "config": s.config,
         })
+    return out
     return out
 
 

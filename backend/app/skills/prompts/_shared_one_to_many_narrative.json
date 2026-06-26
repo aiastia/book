@@ -1,0 +1,10 @@
+{
+  "name": "_shared_one_to_many_narrative",
+  "display_name": "共享：1→N 叙事技法",
+  "description": "1→N 章节共享叙事约束：必须遵守规则 + 环境描写管控 + 结尾三模式。被 chapter_generation_one_to_many 系列 @include 引用",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {"type": "object", "properties": {}},
+  "system_prompt_file": "_shared_one_to_many_narrative.md"
+}

@@ -13,10 +13,11 @@ from app.core.config import settings
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
 
-def _resolve_includes(text: str, base_dir: str = None, seen: set = None) -> str:
+def _resolve_includes(text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None) -> str:
     """解析提示词中的 @include:filename 指令，替换为文件内容。
 
     支持嵌套 include（最多 5 层），自动检测循环引用。
+    user_overrides: {filename: content} 用户自定义的共享模块内容（优先于文件）
     """
     if base_dir is None:
         base_dir = _PROMPTS_DIR
@@ -27,6 +28,14 @@ def _resolve_includes(text: str, base_dir: str = None, seen: set = None) -> str:
         fname = m.group(1).strip()
         if fname in seen:
             return f"[@include 循环引用已截断: {fname}]"
+        # 用户自定义优先于文件
+        if user_overrides and fname in user_overrides:
+            seen.add(fname)
+            content = user_overrides[fname]
+            # 递归解析嵌套 include
+            if len(seen) < 5 and "@include:" in content:
+                content = _resolve_includes(content, base_dir, seen, user_overrides)
+            return content
         inc_path = os.path.join(base_dir, fname)
         if not os.path.isfile(inc_path):
             return f"[@include 文件不存在: {fname}]"
@@ -38,7 +47,7 @@ def _resolve_includes(text: str, base_dir: str = None, seen: set = None) -> str:
             return f"[@include 读取失败: {fname}]"
         # 递归解析嵌套 include，但限制深度
         if len(seen) < 5 and "@include:" in content:
-            content = _resolve_includes(content, base_dir, seen)
+            content = _resolve_includes(content, base_dir, seen, user_overrides)
         return content
 
     return re.sub(r"@include:(\S+\.md)", _replace, text)
@@ -273,6 +282,35 @@ class SkillEngine:
             return {"is_enabled": cfg.is_enabled, "is_customized": cfg.is_customized, "config": cfg.config}
         return None
 
+    async def _get_user_include_overrides(self) -> dict:
+        """收集用户自定义的共享模块内容（@include 解析时优先于文件）。
+
+        返回 {filename: content} 映射。
+        """
+        if not self.user_id:
+            return {}
+        # 查所有 shared 类型的 skill，且用户有自定义 system_prompt
+        result = await self.db.execute(
+            select(SkillConfig).join(Skill, SkillConfig.skill_id == Skill.id).where(
+                SkillConfig.user_id == self.user_id,
+                Skill.category == "shared",
+                SkillConfig.is_customized == True,
+            )
+        )
+        configs = result.scalars().all()
+        overrides = {}
+        for cfg in configs:
+            custom_prompt = (cfg.config or {}).get("system_prompt", "")
+            if not custom_prompt:
+                continue
+            # 查对应的 skill 名，构造 @include 文件名
+            skill = (await self.db.execute(select(Skill).where(Skill.id == cfg.skill_id))).scalar_one_or_none()
+            if skill:
+                # @include 引用的是 .md 文件名
+                fname = skill.name + ".md"
+                overrides[fname] = custom_prompt
+        return overrides
+
     async def execute_skill(
         self,
         skill_name: str,
@@ -303,9 +341,10 @@ class SkillEngine:
         if user_cfg and user_cfg.get("is_customized") and user_cfg.get("config", {}).get("system_prompt"):
             system_prompt = user_cfg["config"]["system_prompt"]
 
-        # 解析 @include 指令（支持提示词复用共享片段）
+        # 解析 @include 指令（支持提示词复用共享片段，用户自定义共享模块优先于文件）
         if "@include:" in system_prompt:
-            system_prompt = _resolve_includes(system_prompt)
+            user_include_overrides = await self._get_user_include_overrides()
+            system_prompt = _resolve_includes(system_prompt, user_overrides=user_include_overrides)
 
         # 替换提示词中的变量（兼容用户模板中直接写的 {变量}）
         had_user_prompt_var = "{user_prompt}" in system_prompt
