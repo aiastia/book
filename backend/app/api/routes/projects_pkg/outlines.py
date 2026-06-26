@@ -1239,6 +1239,9 @@ async def _expand_outline_core(
         # 标准字段兼容映射：emotional_arc → emotional_tone（供 chapter_context 读取）
         if plan.get("emotional_arc") and not plan.get("emotional_tone"):
             plan_data["emotional_tone"] = plan["emotional_arc"]
+        # 剥离已单独存储的冗余字段，避免 expansion_plan JSON 和 Chapter 列重复
+        for _strip_key in ("sub_index", "title", "estimated_words"):
+            plan_data.pop(_strip_key, None)
         ch = Chapter(
             project_id=project_id,
             outline_id=outline_id,

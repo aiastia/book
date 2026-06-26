@@ -91,6 +91,9 @@ const FIELD_LABELS: Record<string, string> = {
   scene_anchor: '场景锚点', character_intents: '角色微意图',
   ending_type: '结尾类型', chapter_breath: '章节节奏',
   obstacle_type: '障碍类型', scenes: '场景设定',
+  info_asymmetry: '信息差', shock_level: '震惊层级',
+  spectator_layers: '围观分层', emotional_rhythm: '情绪节奏',
+  protagonist_style: '主角逼格',
 }
 
 const EDIT_KEYS = new Set([
@@ -99,7 +102,7 @@ const EDIT_KEYS = new Set([
   'estimated_words', 'sub_index', 'title', 'outline_id',
 ])
 
-type FieldEntry = { key: string; label: string; value: string }
+type FieldEntry = { key: string; label: string; value: string; readOnly?: boolean }
 const extraFields = computed<FieldEntry[]>(() => {
   const plan = props.planData
   if (!plan || typeof plan !== 'object') return []
@@ -107,6 +110,36 @@ const extraFields = computed<FieldEntry[]>(() => {
   for (const [k, v] of Object.entries(plan)) {
     if (EDIT_KEYS.has(k)) continue
     if (v == null || v === '' || v === [] || (typeof v === 'object' && Object.keys(v).length === 0)) continue
+
+    // shuang_design：拆成子字段（可编辑）
+    if (k === 'shuang_design' && typeof v === 'object' && v) {
+      const subFields: [string, string][] = [
+        ['info_asymmetry', '信息差'], ['shock_level', '震惊层级'],
+        ['spectator_layers', '围观分层'], ['emotional_rhythm', '情绪节奏'],
+        ['protagonist_style', '主角逼格'],
+      ]
+      for (const [sk, sl] of subFields) {
+        const sv = (v as any)[sk]
+        if (sv == null || sv === '') continue
+        entries.push({ key: `shuang_design.${sk}`, label: sl, value: Array.isArray(sv) ? sv.join(' → ') : String(sv) })
+      }
+      continue
+    }
+
+    // character_intents：拆成每个角色（可编辑）
+    if (k === 'character_intents' && Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) {
+        const item = v[i]
+        if (typeof item !== 'object' || !item) continue
+        const name = item.character || item.name || '?'
+        let text = ''
+        if (item.this_chapter_goal) text += `目标：${item.this_chapter_goal}`
+        if (item.immediate_want) text += text ? `；当前欲求：${item.immediate_want}` : `当前欲求：${item.immediate_want}`
+        if (text) entries.push({ key: `character_intents.${i}`, label: `角色「${name}」`, value: text })
+      }
+      continue
+    }
+
     const label = FIELD_LABELS[k] || k
     const text = Array.isArray(v)
       ? v.map((x: any) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join('；')
@@ -183,17 +216,62 @@ async function onSave() {
   }
   saving.value = true
   try {
-    // 合并回原 plan（保留 AI 生成的富字段，不丢失）
+    // 从 extraFields 编辑值重建结构化对象
+    const extraMap: Record<string, any> = {}
+    const sdSubs: Record<string, string> = {}
+    const ciItems: Record<number, { character: string; text: string }> = {}
+    for (const f of extraFields.value) {
+      if (f.key.startsWith('shuang_design.')) {
+        sdSubs[f.key.split('.')[1]] = f.value
+      } else if (f.key.startsWith('character_intents.')) {
+        const idx = parseInt(f.key.split('.')[1])
+        if (!isNaN(idx)) ciItems[idx] = { character: f.label.replace('角色「', '').replace('」', ''), text: f.value }
+      } else {
+        extraMap[f.key] = f.value
+      }
+    }
+    // 重建 shuang_design 对象
+    let rebuiltShuang: any = null
+    if (Object.keys(sdSubs).length > 0) {
+      rebuiltShuang = { ...sdSubs }
+      // spectator_layers 用 → 分隔的还原为数组
+      if (rebuiltShuang.spectator_layers && rebuiltShuang.spectator_layers.includes(' → ')) {
+        rebuiltShuang.spectator_layers = rebuiltShuang.spectator_layers.split(' → ').map((s: string) => s.trim())
+      }
+    }
+    // 重建 character_intents 数组
+    let rebuiltCI: any[] | null = null
+    const ciKeys = Object.keys(ciItems).sort((a, b) => Number(a) - Number(b))
+    if (ciKeys.length > 0) {
+      rebuiltCI = ciKeys.map(k => {
+        const { character, text } = ciItems[Number(k)]
+        const goalMatch = text.match(/目标：(.+?)(?:；当前欲求|$)/)
+        const wantMatch = text.match(/当前欲求：(.+)$/)
+        return {
+          character,
+          this_chapter_goal: goalMatch ? goalMatch[1].trim() : '',
+          immediate_want: wantMatch ? wantMatch[1].trim() : '',
+        }
+      })
+    }
+
     const originalPlan = props.planData && typeof props.planData === 'object' ? { ...props.planData } : {}
-    const merged = {
-      ...originalPlan,                  // 先保留全部原有字段
-      plot_summary: summary.value,      // 覆盖编辑过的字段
+    const merged: Record<string, any> = {
+      ...originalPlan,
+      plot_summary: summary.value,
       key_events: keyEvents.value,
       character_focus: characterFocus.value,
       emotional_tone: emotionalTone.value,
       conflict_type: conflictType.value,
       narrative_goal: narrativeGoal.value,
     }
+    // 覆盖编辑过的额外字段
+    for (const [k, v] of Object.entries(extraMap)) {
+      merged[k] = v
+    }
+    if (rebuiltShuang) merged.shuang_design = rebuiltShuang
+    if (rebuiltCI) merged.character_intents = rebuiltCI
+
     await api.updateChapter(props.chapterId, { expansion_plan: merged })
     msg.success('规划保存成功')
     emit('saved', merged)
@@ -270,11 +348,11 @@ async function onSave() {
 
       <!-- AI 生成的其他富字段（只读参考，保存时不丢失） -->
       <div v-if="extraFields.length" class="extra-ref">
-        <div class="extra-ref-title">📌 AI 生成的其他设定（保存时自动保留）</div>
+        <div class="extra-ref-title">📌 AI 生成的其他设定（可编辑，保存时保留）</div>
         <div class="extra-grid">
           <div v-for="f in extraFields" :key="f.key" class="extra-item">
             <span class="extra-label">{{ f.label }}</span>
-            <span class="extra-value">{{ f.value }}</span>
+            <a-textarea v-model:value="f.value" :rows="String(f.value).length > 80 ? 3 : 2" size="small" style="font-size:12px" />
           </div>
         </div>
       </div>
