@@ -177,8 +177,6 @@ const displayFields = [
   { key:'speech_style', label:'说话风格' },
   { key:'mental_state', label:'当前心理' },
 ]
-// 副职业字符串 → 数组（用于标签显示）
-const subOccupationTags = (s: string) => (s || '').split(';').map(x => x.trim()).filter(Boolean)
 
 async function onGenerate() {
   // 组织补充要求（让 AI 知道有哪些组织可选）
@@ -338,8 +336,7 @@ loadAllRelations()
           <template v-if="expandedChars.has(c.id)">
             <div v-for="f in displayFields" :key="f.key" v-show="c[f.key] && !['identity','age','gender'].includes(f.key)" class="desc-row">
               <span class="desc-label">{{ f.label }}</span>
-              <span v-if="f.key === 'sub_occupations'" class="desc-value"><a-tag v-for="so in subOccupationTags(c[f.key])" :key="so" color="cyan" size="small">{{ so }}</a-tag></span>
-              <span v-else class="desc-value">{{ c[f.key] }}</span>
+              <span class="desc-value">{{ c[f.key] }}</span>
             </div>
             <!-- 人际关系 -->
             <div v-if="charRelations[c.id]?.length" class="desc-row"><span class="desc-label">关系</span><span class="desc-value" style="font-size:12px;line-height:1.8;">{{ charRelations[c.id].join('；') }}</span></div>
