@@ -26,5 +26,12 @@
   },
   "overrides": {
     "glob": "^13.0.0"
-  }
+  },
+  "pnpm": {},
+  "trustedDependencies": [
+    "@parcel/watcher",
+    "vue-demi",
+    "core-js",
+    "esbuild"
+  ]
 }
