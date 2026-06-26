@@ -6,6 +6,10 @@ const api = useProjectApi()
 const { data: skills, refresh } = await api.listSkills()
 const editing = ref<any>(null)
 const editPrompt = ref('')
+const editIncludes = computed(() => {
+  const matches = editPrompt.value.match(/@include:(\S+\.md)/g)
+  return matches ? [...new Set(matches)] : []
+})
 const showCreate = ref(false)
 const createForm = reactive({
   name: '',
@@ -241,6 +245,11 @@ const grouped = computed(() => {
   >
     <a-alert v-if="editing?.has_includes" type="info" show-icon style="margin-bottom:12px"
       message="含 @include 引用模块，编辑时请保留 @include 语法。共享模块内容请在对应卡片中修改。" />
+    <!-- @include 高亮标签 -->
+    <div v-if="editIncludes.length" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+      <span style="font-size:12px;color:#8C8C8C">引用模块：</span>
+      <a-tag v-for="inc in editIncludes" :key="inc" color="blue">{{ inc }}</a-tag>
+    </div>
     <a-textarea
       v-model:value="editPrompt"
       :rows="16"
