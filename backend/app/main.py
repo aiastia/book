@@ -27,7 +27,6 @@ from app.models.character_change_log import CharacterChangeLog  # 确保表在 c
 from app.models.relation_change_log import RelationChangeLog
 from app.models.mcp_server import McpServer  # 确保表在 create_all 前注册
 from app.skills.builtin import init_builtin_skills
-from app.skills.builtin import init_builtin_skills
 
 # 默认用户配置
 _DEFAULT_USER = {
