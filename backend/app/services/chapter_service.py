@@ -332,26 +332,11 @@ class ChapterService:
                 char_lines.append(f"  - {c.name}（{c.role}）")
             parts.append("\n".join(char_lines))
 
-        # 前2章摘要（让 AI 知道最近发生了什么，无需逐章查询）
-        start_n = max(1, chapter.chapter_number - 2)
-        for n in range(start_n, chapter.chapter_number):
-            summary = await self._query_chapter_summary(n)
-            if summary:
-                parts.append(f"第{n}章摘要：{summary}")
+        # 注：前章摘要在 generate_chapter 中通过 relevant_memories 统一聚合（前5章），
+        # 这里不再重复取前2章摘要
 
-        # 场景锚点 + 角色微意图（从 expansion_plan 提取，已在章节规划中生成）
-        if chapter.expansion_plan and isinstance(chapter.expansion_plan, dict):
-            plan = chapter.expansion_plan
-            if plan.get("scene_anchor"):
-                parts.append(f"场景锚点：{plan['scene_anchor']}")
-            ci = plan.get("character_intents")
-            if isinstance(ci, list) and ci:
-                ci_lines = ["角色微意图："]
-                for it in ci:
-                    if isinstance(it, dict):
-                        ci_lines.append(f"  - {it.get('character','?')}：目标「{it.get('this_chapter_goal','')}」，想要「{it.get('immediate_want','')}」")
-                if len(ci_lines) > 1:
-                    parts.append("\n".join(ci_lines))
+        # 注：场景锚点 + 角色微意图已在 generate_chapter 中作为独立 context 变量注入，
+        # 这里不再重复（避免 chapter_data 和 context 变量各一份）
 
         # 上章结尾 500 字（衔接锚点，让 AI 知道从哪接）
         if chapter.chapter_number and chapter.chapter_number > 1:
@@ -762,6 +747,41 @@ class ChapterService:
             chapter_data = await self._preload_chapter_data(chapter, project)
             context["quality_trends"] = await self._get_quality_trends(chapter) or ""
 
+            # 写作风格自动加载：overrides 里没传时，查用户默认风格（is_default=True）
+            if not context.get("writing_style") and not context.get("style_traits"):
+                try:
+                    from app.models.writing_style import WritingStyle
+                    default_ws = (await self.db.execute(
+                        select(WritingStyle).where(
+                            WritingStyle.user_id == self.user_id,
+                            WritingStyle.is_default == True,
+                        )
+                    )).scalar_one_or_none()
+                    if default_ws:
+                        import json as _json2
+                        if default_ws.config:
+                            context["writing_style"] = _json2.dumps(default_ws.config, ensure_ascii=False)
+                            _sc = default_ws.config
+                            context["style_enable_traits"] = _sc.get("enable_traits") if _sc.get("enable_traits") is not None else True
+                            context["style_enable_custom"] = _sc.get("enable_custom") if _sc.get("enable_custom") is not None else True
+                            if _sc.get("enable_dimensions") is not None:
+                                context["style_enable_dimensions"] = bool(_sc.get("enable_dimensions"))
+                            else:
+                                context["style_enable_dimensions"] = not bool(_sc.get("disable_dimensions"))
+                        if default_ws.name:
+                            context["style_name"] = default_ws.name
+                        if default_ws.style_traits:
+                            context["style_traits"] = _json2.dumps(default_ws.style_traits, ensure_ascii=False) if isinstance(default_ws.style_traits, dict) else str(default_ws.style_traits)
+                        if default_ws.custom_prompt:
+                            context["style_custom_prompt"] = str(default_ws.custom_prompt)
+                        if default_ws.reference_text:
+                            context["style_reference_text"] = str(default_ws.reference_text)
+                        if default_ws.author_name:
+                            context["author_name"] = str(default_ws.author_name)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"[chapter] 加载默认写作风格失败（不影响生成）: {e}")
+
             # 章节生成始终提供工具（AI 可按需查询角色/物品/地点/伏笔/大纲等）
             from app.services.chapter_tools import get_chapter_tools, make_tool_executor
             chapter_tools = get_chapter_tools()
@@ -842,27 +862,15 @@ class ChapterService:
                 context["chapter_outline"] = "\n".join(outline_parts) or (chapter.summary or "")
             else:
                 context["chapter_outline"] = chapter.summary or ""
-            # characters_info：本章角色完整骨架（性格+说话风格+外貌+动机+弱点）
-            # 预加载关键字段，避免 AI 调用 query_character 浪费一轮工具调用
+            # characters_info：本章角色骨架（姓名+身份+性格+说话风格）
+            # 只预加载保证角色声音一致的最小信息，外貌/动机/弱点/背景/能力由 AI 按需 query_character 查询
             chars = await self._list_chapter_characters(chapter)
             if chars:
-                char_lines = []
-                for c in chars:
-                    parts = [f"- {c.name}（{c.role}）"]
-                    if c.identity:
-                        parts.append(f"身份：{c.identity[:120]}")
-                    if c.personality:
-                        parts.append(f"性格：{c.personality}")
-                    if c.speech_style:
-                        parts.append(f"说话风格：{c.speech_style}")
-                    if c.appearance:
-                        parts.append(f"外貌：{c.appearance[:100]}")
-                    if c.motivation:
-                        parts.append(f"动机：{c.motivation[:80]}")
-                    if c.weakness:
-                        parts.append(f"弱点：{c.weakness[:80]}")
-                    char_lines.append("。".join(parts))
-                context["characters_info"] = "\n".join(char_lines)
+                context["characters_info"] = "\n".join(
+                    f"- {c.name}（{c.role}）：{c.identity[:100] if c.identity else ''}。"
+                    f"性格：{c.personality or '暂无'}。说话风格：{c.speech_style or '暂无'}"
+                    for c in chars
+                )
             else:
                 context["characters_info"] = ""
             # 场景锚点 + 角色微意图（从 expansion_plan 直取）
@@ -876,28 +884,29 @@ class ChapterService:
                 context["character_intents"] = "\n".join(ci_lines)
             else:
                 context["character_intents"] = ""
-            # 注入物品和地点列表（供章节生成参考，AI 不会凭空编造）
+            # 注入物品和地点列表（只给名称+类型，详细描述由 AI 按需 query_item/query_location 查询）
             try:
                 from app.models.item import Item
                 from app.models.location import Location
                 items = (await self.db.execute(select(Item).where(Item.project_id == self.project_id))).scalars().all()
                 locations = (await self.db.execute(select(Location).where(Location.project_id == self.project_id))).scalars().all()
                 context["items_info"] = "\n".join(
-                    [f"- {it.name}（{it.category or '道具'}{'，⭐关键道具' if it.is_key_item else ''}）：{it.description[:120] if it.description else ''}"
+                    [f"- {it.name}（{it.category or '道具'}{'，⭐关键道具' if it.is_key_item else ''}）"
                      for it in items]) if items else ""
                 context["locations_info"] = "\n".join(
-                    [f"- {loc.name}（{loc.location_type or '地点'}）：{loc.description[:120] if loc.description else ''}"
+                    [f"- {loc.name}（{loc.location_type or '地点'}）"
                      for loc in locations]) if locations else ""
             except Exception:
                 context["items_info"] = ""
                 context["locations_info"] = ""
-            # 职业体系数量（无职业时提示 AI 不要查）
+            # 职业体系提示（有职业体系时提示 AI 可用 query_career 查详情）
             career_count = 0
             try:
                 from app.models.career import Career
                 career_count = await self.db.scalar(select(func.count(Career.id)).where(Career.project_id == self.project_id)) or 0
             except Exception:
                 pass
+            context["career_hint"] = f"本项目已建立职业体系（{career_count}个职业），需要职业/境界细节时用 query_career 查询。" if career_count else ""
             # 伏笔提醒 + 相关记忆（从 service 获取）
             try:
                 fs_service = ForeshadowService(self.db, self.project_id)
@@ -940,7 +949,16 @@ class ChapterService:
             context["recent_chapters_context"] = context.get("relevant_memories", "")
             context["recent_outlines"] = context.get("relevant_memories", "")
             context["recent_expansion_plans"] = context.get("relevant_memories", "")
-            context["user_prompt"] = f"请写出第{chapter.chapter_number}章的正文。角色性格、背景、说话风格、大纲、场景锚点和角色微意图已在上方提供完整信息。直接开始写作，无需调用工具查询。只有在写到某个尚未提供详细信息的次要角色/物品/地点时，才用工具补充查询。"
+            context["user_prompt"] = (
+                f"请写出第{chapter.chapter_number}章的正文。\n\n"
+                f"上方已提供骨架信息：本章角色（姓名/身份/性格/说话风格）、大纲、场景锚点、角色微意图、可用道具列表、可用地点列表。\n"
+                f"这些信息足够你开始写作。需要更详细的设定时再查：\n"
+                f"- 角色的外貌/动机/弱点/背景/能力 → query_character\n"
+                f"- 物品的详细属性/归属/状态 → query_item\n"
+                f"- 地点的氛围/危险等级/描述 → query_location\n"
+                + (f"- 职业境界/能力详情 → query_career\n" if context.get("career_hint") else "")
+                + f"\n原则：信息够写就往下写，写到谁/用到什么才查什么，不要提前批量查询。"
+            )
 
             # 自定义 Skill 增强：选中的自定义提示词追加到 user_prompt
             skill_name_override = (overrides or {}).get("skill_name")
@@ -974,9 +992,30 @@ class ChapterService:
                 if lines and lines[-1].strip() == "```":
                     lines = lines[:-1]
                 content = "\n".join(lines)
-            # 去除开头的 markdown 标题（AI 偶尔输出「# 第一章 xxx」，系统框架本身已有标题）
+            # 清理开头的元信息行：书名/章节标题/加粗标题（系统框架本身已有标题）
             import re as _re
-            content = _re.sub(r'^\s*#{1,6}\s*第[一二三四五六七八九十百零\d]+章[^\n]*\n?', '', content)
+            # 移除开头的连续元信息行（书名行、章名行、空行），最多清理 5 行
+            for _ in range(5):
+                content = content.strip()
+                if not content:
+                    break
+                first_line = content.split("\n")[0].strip()
+                # 匹配：**书名**、**第X章 xxx**、# 标题、第X章 xxx、书名+章名组合
+                is_meta = False
+                if _re.match(r'^#{1,6}\s+', first_line):  # markdown 标题
+                    is_meta = True
+                elif _re.match(r'^\*{1,2}.+\*{1,2}$', first_line):  # **加粗** 或 *斜体* 整行
+                    is_meta = True
+                elif _re.match(r'^第[一二三四五六七八九十百零\d]+章', first_line):  # 第X章开头
+                    is_meta = True
+                elif _re.match(r'^《.+》', first_line):  # 《书名》开头
+                    is_meta = True
+                elif first_line == '---' or first_line == '***':  # 分隔线
+                    is_meta = True
+                if is_meta:
+                    content = "\n".join(content.split("\n")[1:])
+                else:
+                    break
             content = content.strip()
             if not content or not content.strip():
                 # Kimi 推理模型可能返回空 content + tool_calls，不是真的失败
