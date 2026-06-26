@@ -351,6 +351,67 @@ class ChapterService:
         )).scalars().all()
         return chars or []
 
+    async def _get_custom_skill_tools(self) -> list:
+        """获取已注册为 Tool 的自定义 Skill（通过 config.as_tool=true 标记）。"""
+        try:
+            from app.models.skill import Skill
+            skills = (await self.db.execute(
+                select(Skill).where(
+                    Skill.skill_type.in_(["custom", "mcp"]),
+                    Skill.is_enabled == True,
+                )
+            )).scalars().all()
+            tools = []
+            for s in skills:
+                cfg = s.config or {}
+                if not cfg.get("as_tool"):
+                    continue
+                tool_name = f"use_skill_{s.name.replace('-', '_').replace('.', '_')}"
+                desc = s.description or s.display_name or s.name
+                prompt = s.system_prompt or ""
+                if "@include:" in prompt:
+                    from app.skills.engine import _resolve_includes
+                    prompt = _resolve_includes(prompt)
+                tools.append({
+                    "name": tool_name,
+                    "def": {
+                        "type": "function",
+                        "function": {
+                            "name": tool_name,
+                            "description": f"写作增强：{desc}。调用此工具获取针对当前写作场景的专业指导。",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "context": {
+                                        "type": "string",
+                                        "description": "需要指导的当前写作场景或问题描述"
+                                    }
+                                },
+                                "required": ["context"]
+                            }
+                        }
+                    },
+                    "exec": self._make_skill_tool_executor(s, prompt),
+                })
+            return tools
+        except Exception:
+            return []
+
+    def _make_skill_tool_executor(self, skill, prompt: str):
+        """创建自定义 Skill 的 tool executor。"""
+        skill_name = skill.name
+        async def executor(args: dict) -> str:
+            import json
+            context_text = args.get("context", "")
+            # 注入 Skill 的 system_prompt 作为执行上下文
+            return json.dumps({
+                "skill": skill_name,
+                "prompt": prompt,
+                "context": context_text,
+                "instruction": f"请根据以上 Skill 提示词和上下文给出写作建议，然后继续完成正文。"
+            }, ensure_ascii=False)
+        return executor
+
     async def _query_character(self, name: str) -> str:
         from app.services.chapter_tools import _query_character
         return await _query_character(self.db, self.project_id, name)

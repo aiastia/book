@@ -105,8 +105,8 @@ export function useProjectApi() {
   function generateChapter(chapterId: number) {
     return apiPost<any>(`/api/projects/${pid()}/chapters/${chapterId}/generate`, {}, { timeout: 300000 })
   }
-  function generateChapterAsync(chapterId: number, skillName?: string) {
-    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, skillName ? { skill_name: skillName } : {}, { timeout: 10000 })
+  function generateChapterAsync(chapterId: number, skillName?: string, styleConfig?: any) {
+    return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, { skill_name: skillName, style_config: styleConfig }, { timeout: 10000 })
   }
 
   /** 清空章节内容 */
@@ -391,7 +391,7 @@ export function useProjectApi() {
   // ---- Skill 管理（全局接口，不依赖项目 ID） ----
   const listSkills = () => useApi<any[]>('/api/skills', { key: 'skills' })
 
-  function updateSkill(skillId: number, body: { system_prompt?: string; is_enabled?: boolean; is_customized?: boolean; config?: any }) {
+  function updateSkill(skillId: number, body: { system_prompt?: string; is_enabled?: boolean; is_customized?: boolean; as_tool?: boolean; config?: any }) {
     return apiPut(`/api/skills/${skillId}`, body)
   }
 

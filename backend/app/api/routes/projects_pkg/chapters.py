@@ -156,6 +156,7 @@ async def generate_chapter_async(project_id: int, chapter_id: int, req: dict = {
 
     from app.services.async_ai_service import submit_async_task
     skill_name = req.get("skill_name") if isinstance(req, dict) else None
+    style_config = req.get("style_config") if isinstance(req, dict) else None
 
     async def _run_chapter(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
@@ -177,7 +178,7 @@ async def generate_chapter_async(project_id: int, chapter_id: int, req: dict = {
         title=f"生成第{ch.chapter_number}章",
         payload={
             "chapter_id": chapter_id, "project_id": project_id, "user_id": user.id, "chapter_number": ch.chapter_number,
-            "overrides": {"skill_name": skill_name} if skill_name else {},
+            "overrides": {"skill_name": skill_name, "style_config": style_config} if (skill_name or style_config) else {},
         },
         runner=_run_chapter,
     )

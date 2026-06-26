@@ -303,7 +303,10 @@ async function loadSkillsIfEmpty() {
   if (availableSkills.value.length > 0) return
   try {
     const all = await fetchSkills()
-    availableSkills.value = all.filter((s: any) => s.is_enabled !== false)
+    availableSkills.value = all.filter((s: any) =>
+      s.is_enabled !== false &&
+      (s.skill_type === 'custom' || s.skill_type === 'mcp')
+    )
   } catch {}
 }
 
@@ -323,7 +326,12 @@ async function onGenerate() {
   }
   generating.value = true
   try {
-    const { task_id } = await api.generateChapterAsync(editing.value.id, selectedSkillKey.value || undefined)
+    const styleConfig = selectedStyleId.value ? writingStyles.value.find((s:any) => s.id === selectedStyleId.value) : undefined
+    const { task_id } = await api.generateChapterAsync(
+      editing.value.id,
+      selectedSkillKey.value || undefined,
+      styleConfig ? styleConfig.config : undefined,
+    )
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })
 	    msg.success('章节生成任务已提交，可在右下角查看进度')
@@ -941,7 +949,7 @@ async function onPlanSaved() {
         <!-- 高级选项行2：Skill + 模型 + 思考模式 -->
         <div class="editor-opts">
           <span>Skill：
-            <a-select v-model:value="selectedSkillKey" size="small" style="width: 160px" placeholder="AI自动选择" allow-clear>
+              <a-select v-model:value="selectedSkillKey" size="small" style="width: 160px" placeholder="不注入" allow-clear>
               <a-select-option v-for="s in availableSkills" :key="s.name || s.template_key" :value="s.name || s.template_key">
                 {{ s.display_name || s.template_name || s.name }}
               </a-select-option>

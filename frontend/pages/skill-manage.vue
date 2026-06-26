@@ -45,6 +45,9 @@ async function onToggleCustom(s: any) {
   const newVal = !s.is_customized
   try { await api.updateSkill(s.id, { is_customized: newVal }); await refresh(); msg.success(newVal ? '已开启自定义' : '已恢复系统默认') } catch (e: any) { msg.error('操作失败') }
 }
+async function onToggleTool(s: any) {
+  try { await api.updateSkill(s.id, { as_tool: !s.as_tool }); await refresh() } catch (e: any) { msg.error('操作失败') }
+}
 async function onAcceptSystem(s: any) {
   if (!await msg.confirm('确认用系统最新版本覆盖你的自定义版本？')) return
   try { await api.updateSkill(s.id, { system_prompt: s.system_prompt, is_customized: true }); await refresh(); msg.success('已更新为系统版本') } catch (e: any) { msg.error('更新失败') }
@@ -240,6 +243,10 @@ const grouped = computed(() => {
           <div class="skill-custom-row">
             <span style="font-size:12px;color:#888;">自定义提示词</span>
             <a-switch :checked="s.is_customized" size="small" @change="onToggleCustom(s)" />
+          </div>
+          <div v-if="s.skill_type === 'custom' || s.skill_type === 'mcp'" class="skill-custom-row">
+            <span style="font-size:12px;color:#888;">注册为 AI Tool</span>
+            <a-switch :checked="s.as_tool" size="small" @change="onToggleTool(s)" />
           </div>
           <div class="skill-actions">
             <a-button size="small" @click="openEdit(s)" :disabled="!s.is_customized && s.skill_type !== 'custom'">编辑提示词</a-button>

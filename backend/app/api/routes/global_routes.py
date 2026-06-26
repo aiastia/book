@@ -379,6 +379,7 @@ class SkillUpdateReq(BaseModel):
     is_enabled: Optional[bool] = None
     is_customized: Optional[bool] = None
     config: Optional[dict] = None
+    as_tool: Optional[bool] = None  # 注册自定义 Skill 为 AI Tool
 
 
 @router.get("/skills/variables")
@@ -446,6 +447,7 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
             "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "") if (user_cfg and user_cfg.get("is_customized")) else "",
             "parameters": s.parameters,
             "config": s.config,
+            "as_tool": (s.config or {}).get("as_tool", False),
         })
     return out
     return out
@@ -486,6 +488,8 @@ async def update_skill(skill_id: int, req: SkillUpdateReq, db: AsyncSession = De
         if not cfg.is_customized:
             cfg.is_customized = True
             cfg.system_prompt_snapshot = skill.system_prompt or ""
+    if req.as_tool is not None:
+        cfg.config = {**(cfg.config or {}), "as_tool": req.as_tool}
     if req.config is not None:
         cfg.config = {**(cfg.config or {}), **req.config}
     await db.commit()
