@@ -31,7 +31,6 @@ const testResult = ref<Record<number, string>>(
   JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(TEST_RESULT_KEY)) || '{}')
 )
 // 监听变化自动保存
-import { watch } from 'vue'
 watch(testResult, (v) => {
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem(TEST_RESULT_KEY, JSON.stringify(v))
