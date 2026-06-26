@@ -2,7 +2,7 @@
   "name": "chapter_generation_one_to_many",
   "display_name": "章节创作-1-N模式（第1章）",
   "description": "1-N模式：根据大纲创作章节内容（用于第1章，无前置章节）",
-  "category": "import",
+  "category": "chapter",
   "skill_type": "builtin",
   "config": {},
   "parameters": {
