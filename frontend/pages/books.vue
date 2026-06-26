@@ -157,7 +157,7 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
             <div class="book-title">{{ p.title }}</div>
             <div class="book-tags">
               <span class="book-tag">{{ p.genre || '其他' }}</span>
-              <span class="book-tag" :style="{background: (p.outline_mode || 'one_to_one') === 'one_to_many' ? '#EBF5F0' : '#EBF2FA', color: (p.outline_mode || 'one_to_one') === 'one_to_many' ? '#2D8C5A' : '#4D8088'}">
+              <span class="book-tag" :style="{background: (p.outline_mode || 'one_to_one') === 'one_to_many' ? '#D9F0E5' : '#E8EEF4', color: (p.outline_mode || 'one_to_one') === 'one_to_many' ? '#1A7A42' : '#6B7D8E'}">
                 {{ (p.outline_mode || 'one_to_one') === 'one_to_many' ? '1→N' : '1→1' }}
               </span>
             </div>

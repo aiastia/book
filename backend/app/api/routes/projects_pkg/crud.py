@@ -40,6 +40,8 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
             "target_word_count": p.target_word_count,
             "current_word_count": word_sums.get(p.id, 0),
             "chapter_count": p.chapter_count,
+            "outline_mode": p.outline_mode or "one_to_one",
+            "narrative_pov": p.narrative_pov or "第三人称",
             "cover_url": p.cover_url,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
