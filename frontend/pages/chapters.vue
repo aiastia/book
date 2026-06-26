@@ -208,7 +208,7 @@ function getOutlineTitle(outlineId: number | null): string {
 
 // ===== 可分析章节数 =====
 const batchAnalyzableCount = computed(() => {
-  return (chapters.value || []).filter((c: any) => c.word_count >= 50 && !c.analyzed).length
+  return (chapters.value || []).filter((c: any) => c.word_count >= 50 && (!c.analyzed || !c.summary)).length
 })
 
 // ===== 状态文本/颜色 =====
