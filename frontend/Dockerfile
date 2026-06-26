@@ -1,4 +1,4 @@
-# 前端 Dockerfile（Nuxt  SSL）
+# 前端 Dockerfile（Nuxt  SSR）
 FROM node:24-slim AS builder
 WORKDIR /app
 
