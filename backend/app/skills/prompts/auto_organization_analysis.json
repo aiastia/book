@@ -2,7 +2,7 @@
   "name": "auto_organization_analysis",
   "display_name": "自动组织分析",
   "description": "分析新生成的大纲，判断是否需要引入新组织",
-  "category": "import",
+  "category": "analysis",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

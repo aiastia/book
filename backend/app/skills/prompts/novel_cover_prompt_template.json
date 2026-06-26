@@ -2,7 +2,7 @@
   "name": "novel_cover_prompt_template",
   "display_name": "小说封面生成",
   "description": "根据项目基础信息生成小说封面绘制提示词，适用于竖版书籍封面",
-  "category": "import",
+  "category": "tool",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

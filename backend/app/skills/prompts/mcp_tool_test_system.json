@@ -2,7 +2,7 @@
   "name": "mcp_tool_test_system",
   "display_name": "MCP工具测试(系统提示词)",
   "description": "用于测试MCP插件功能的系统提示词",
-  "category": "import",
+  "category": "mcp",
   "skill_type": "builtin",
   "parameters": {
     "type": "object"

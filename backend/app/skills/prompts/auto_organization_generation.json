@@ -2,7 +2,7 @@
   "name": "auto_organization_generation",
   "display_name": "自动组织生成",
   "description": "根据剧情需求自动生成新组织的完整设定",
-  "category": "import",
+  "category": "analysis",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

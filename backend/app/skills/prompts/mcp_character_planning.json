@@ -2,7 +2,7 @@
   "name": "mcp_character_planning",
   "display_name": "MCP角色规划",
   "description": "使用MCP工具搜索资料辅助角色设计",
-  "category": "import",
+  "category": "mcp",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

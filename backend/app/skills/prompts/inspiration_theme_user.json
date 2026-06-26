@@ -2,7 +2,7 @@
   "name": "inspiration_theme_user",
   "display_name": "灵感模式-主题生成(用户提示词)",
   "description": "根据书名和简介生成6个深刻的主题选项的用户提示词",
-  "category": "import",
+  "category": "inspire",
   "skill_type": "builtin",
   "system_prompt": "我的创作想法：{initial_idea}\n书名：{title}\n简介：{description}\n\n请思考在这个设定下真正值得探讨的深层问题——不是表面的'主角变强了'，而是更深层的追问。生成6个有深度的主题陈述（如'权力是否能带来真正的自由？'），而非单字标签。",
   "parameters": {

@@ -2,7 +2,7 @@
   "name": "mcp_world_building_planning",
   "display_name": "MCP世界观规划",
   "description": "使用MCP工具搜索资料辅助世界观设计",
-  "category": "import",
+  "category": "mcp",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

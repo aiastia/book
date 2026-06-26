@@ -2,7 +2,7 @@
   "name": "single_organization_generation",
   "display_name": "组织生成",
   "description": "生成组织/势力的详细设定",
-  "category": "import",
+  "category": "analysis",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

@@ -2,7 +2,7 @@
   "name": "inspiration_theme_system",
   "display_name": "灵感模式-主题生成(系统提示词)",
   "description": "根据书名和简介生成6个深刻的主题选项的系统提示词",
-  "category": "import",
+  "category": "inspire",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

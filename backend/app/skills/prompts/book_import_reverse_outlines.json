@@ -2,7 +2,7 @@
   "name": "book_import_reverse_outlines",
   "display_name": "拆书导入-反向章节大纲",
   "description": "基于章节正文反向生成与OUTLINE_CREATE一致结构的大纲（单批次5章）",
-  "category": "import",
+  "category": "outline",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

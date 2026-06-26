@@ -2,7 +2,7 @@
   "name": "inspiration_genre_system",
   "display_name": "灵感模式-类型生成(系统提示词)",
   "description": "根据小说信息生成6个合适的类型标签的系统提示词",
-  "category": "import",
+  "category": "inspire",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

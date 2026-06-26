@@ -2,7 +2,7 @@
   "name": "ai_denoising",
   "display_name": "AI去味/润色",
   "description": "将AI生成的文本改写得更像人类作家手笔，局部修改、优先删除、不整段重写",
-  "category": "import",
+  "category": "skill",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

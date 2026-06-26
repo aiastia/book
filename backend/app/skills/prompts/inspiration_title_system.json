@@ -2,7 +2,7 @@
   "name": "inspiration_title_system",
   "display_name": "灵感模式-书名生成(系统提示词)",
   "description": "根据用户的原始想法生成6个书名建议的系统提示词",
-  "category": "import",
+  "category": "inspire",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",
