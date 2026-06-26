@@ -343,6 +343,33 @@ class ChapterService:
         from app.services.chapter_tools import _query_chapter_summary
         return await _query_chapter_summary(self.db, self.project_id, chapter_num)
 
+    async def _get_quality_trends(self, chapter: Chapter) -> str:
+        """获取前5章评分趋势（tool-calling 模式也注入）。"""
+        try:
+            from app.models.plot_analysis import PlotAnalysis
+            analyses = (await self.db.execute(
+                select(PlotAnalysis).where(
+                    PlotAnalysis.project_id == self.project_id,
+                    PlotAnalysis.chapter_number < (chapter.chapter_number or 1),
+                ).order_by(PlotAnalysis.chapter_number.desc()).limit(5)
+            )).scalars().all()
+            if not analyses:
+                return ""
+            lines = ["前5章质量分项趋势："]
+            for pa in reversed(analyses):
+                scores = {}
+                if isinstance(pa.scores, dict):
+                    scores = pa.scores
+                if scores:
+                    parts = [f"第{pa.chapter_number}章"]
+                    for dim in ['pacing','engagement','coherence','emotion','dialogue','description']:
+                        if dim in scores:
+                            parts.append(f"{dim}={scores[dim]}")
+                    lines.append("  " + " | ".join(parts))
+            return "\n".join(lines) if len(lines) > 1 else ""
+        except Exception:
+            return ""
+
     async def _get_outline_for_chapter(self, chapter_num: int, outline_id: int | None = None) -> str:
         # 1→N 模式：优先用 outline_id 查所属卷（Chapter.chapter_number ≠ Outline.chapter_number）
         ol = None
@@ -494,6 +521,8 @@ class ChapterService:
             chapter_data = ""
             if not use_legacy:
                 chapter_data = await self._preload_chapter_data(chapter, project)
+                # 评分趋势单独注入（tool-calling 模式也需要）
+                context["quality_trends"] = await self._get_quality_trends(chapter) or ""
 
             # 章节生成始终提供工具（AI 可按需查询角色/物品/地点/伏笔/大纲等）
             from app.services.chapter_tools import get_chapter_tools, make_tool_executor

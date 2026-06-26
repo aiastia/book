@@ -381,6 +381,17 @@ class SkillUpdateReq(BaseModel):
     config: Optional[dict] = None
 
 
+@router.get("/skills/variables")
+async def get_skill_variables(user=Depends(get_current_user)):
+    """获取提示词变量参考文档（VARIABLES.md 内容）。"""
+    import os
+    path = os.path.join(os.path.dirname(__file__), "../../skills/prompts/VARIABLES.md")
+    if not os.path.exists(path):
+        raise HTTPException(404, "变量参考文档不存在")
+    with open(path, encoding="utf-8") as f:
+        return {"content": f.read()}
+
+
 @router.get("/skills")
 async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """列出所有 Skill（含用户级配置覆盖）。"""

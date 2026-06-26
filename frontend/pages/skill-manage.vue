@@ -1,9 +1,17 @@
 <script setup lang="ts">
 import { useProjectApi } from '~/composables/useProjectApi'
+import { useApi } from '~/composables/useApi'
 useHead({ title: 'Skill 管理 — 墨语' })
 const msg = useMessage()
 const api = useProjectApi()
 const { data: skills, refresh } = await api.listSkills()
+
+// 加载变量参考文档
+const { apiGet } = useApi()
+async function loadVariables() {
+  try { variablesContent.value = (await apiGet<any>('/api/skills/variables')).content || '' }
+  catch { variablesContent.value = '' }
+}
 const editing = ref<any>(null)
 const editPrompt = ref('')
 const editIncludes = computed(() => {
@@ -11,6 +19,8 @@ const editIncludes = computed(() => {
   return matches ? [...new Set(matches)] : []
 })
 const showCreate = ref(false)
+const showVariables = ref(false)  // 变量参考折叠
+const variablesContent = ref('')
 const createForm = reactive({
   name: '',
   display_name: '',
@@ -165,7 +175,15 @@ const grouped = computed(() => {
       <a-button type="primary" @click="openCreate">+ 安装 Skill</a-button>
       <a-button danger @click="onResetAll">重置全部为系统默认</a-button>
     </template>
-  </PageHeader>
+    </PageHeader>
+
+    <!-- 变量参考（默认折叠） -->
+    <div style="margin-bottom:16px">
+      <a-button type="link" size="small" @click="showVariables = !showVariables; if(showVariables && !variablesContent) loadVariables()">
+        {{ showVariables ? '收起变量参考' : '变量参考' }}
+      </a-button>
+      <div v-if="showVariables" style="background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;padding:12px;margin-top:8px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:13px;line-height:1.7;white-space:pre-wrap;">{{ variablesContent || '加载中...' }}</div>
+    </div>
   <div class="page-content">
     <p style="color:#888;font-size:13px;margin-bottom:16px;">
       Skill 是 AI 生成各类型内容的提示词模板。可开关、自定义编辑、通过 MD 文档安装新 Skill。

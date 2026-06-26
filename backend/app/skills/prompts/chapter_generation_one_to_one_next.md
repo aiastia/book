@@ -16,6 +16,10 @@
 {chapter_data}
 </data>
 
+<quality priority="P3">
+{quality_trends}
+</quality>
+
 @include:_shared_chapter_context.md
 
 <commercial_design priority="P0">
