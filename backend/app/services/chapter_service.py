@@ -622,6 +622,23 @@ class ChapterService:
             chapter_tools = get_chapter_tools()
             tool_exec = make_tool_executor(self.db, self.project_id, chapter.chapter_number)
 
+            # ===== MCP 工具注入 =====
+            from app.services.mcp_client_service import McpClientService
+            mcp_service = McpClientService(self.db, self.user_id or 0)
+            mcp_tools = await mcp_service.fetch_tools()
+            if mcp_tools:
+                chapter_tools = list(chapter_tools) + mcp_tools
+                orig_exec = tool_exec
+                async def tool_exec_with_mcp(name: str, args: dict) -> str:
+                    for mt in mcp_tools:
+                        if mt["function"]["name"] == name:
+                            server_id = mt.get("_mcp_server")
+                            if server_id:
+                                actual_name = name.replace("mcp_", "", 1)
+                                return await mcp_service.execute_tool(server_id, actual_name, args)
+                    return await orig_exec(name, args)
+                tool_exec = tool_exec_with_mcp
+
             # ===== 自定义 Skill 注册为 AI Tool =====
             custom_skill_tools = await self._get_custom_skill_tools()
             if custom_skill_tools:

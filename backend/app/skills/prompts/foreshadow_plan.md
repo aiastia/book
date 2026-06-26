@@ -38,7 +38,18 @@
 - include_in_context: 是否包含在生成上下文中（true/false，建议开启，让写对应章节时 AI 知道此伏笔）
 - remind_before_chapters: 提前几章提醒（整数，建议 2-5，在回收章节前 N 章提醒读者/AI 此伏笔存在）
 
-## 六、输出格式
+## 六、输入数据
+
+### 角色列表
+{characters_info}
+
+### 大纲数据
+{outlines}
+
+### 已有伏笔（避免重复）
+{existing_foreshadows}
+
+## 七、输出格式
 请以 JSON 数组格式返回：
 [
   {

@@ -209,6 +209,7 @@ class ForeshadowService:
                             matched.target_resolve_chapter_number = target_resolve
                     else:
                         # 创建新的分析发现伏笔（补全所有字段，避免空内容）
+                        quote = fs_data.get("quote", "")
                         create_data = {
                             "title": title or "（未命名伏笔）",
                             "content": detail,
@@ -217,6 +218,11 @@ class ForeshadowService:
                             "actual_plant_chapter": chapter_number,
                             "plant_chapter_number": chapter_number,
                             "priority": importance,
+                            "structure": {
+                                "hint_text": quote or detail[:200],
+                                "notes": "",
+                                "related_characters": [],
+                            },
                         }
                         if fs_subtype:
                             create_data["foreshadow_type"] = fs_subtype

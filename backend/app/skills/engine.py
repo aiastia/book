@@ -134,7 +134,7 @@ _SKILL_BLOCKS = {
     "inspiration_":            ["project"],
     "book_import_":            ["project"],
     # 🟢 伏笔规划/去AI味/章节重写
-    "foreshadow_plan":         ["project","outline","foreshadow"],
+    "foreshadow_plan":         ["project","outline","foreshadow","characters"],
     "ai_denoising":            ["project","outline"],
     "chapter_planner":         ["project"],
     "partial_regenerate":      ["project","outline","characters"],

@@ -18,12 +18,14 @@ from app.api.routes.project_init import router as project_init_router
 from app.api.routes.tasks import router as tasks_router
 from app.api.routes.ws_tasks import router as ws_tasks_router
 from app.api.routes.admin import router as admin_router
+from app.api.routes.mcp import router as mcp_router
 from app.core.auth import get_password_hash
 from app.core.database import Base, async_session, engine
 from app.models.user import User
 from app.models.skill import Skill
 from app.models.character_change_log import CharacterChangeLog  # 确保表在 create_all 前注册
 from app.models.relation_change_log import RelationChangeLog
+from app.models.mcp_server import McpServer  # 确保表在 create_all 前注册
 from app.skills.builtin import init_builtin_skills
 from app.skills.builtin import init_builtin_skills
 
@@ -299,6 +301,7 @@ app.include_router(project_init_router)
 app.include_router(tasks_router)
 app.include_router(ws_tasks_router)
 app.include_router(admin_router)
+app.include_router(mcp_router)
 
 # 前端静态文件
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

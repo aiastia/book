@@ -55,6 +55,7 @@ const globalNav: NavItem[] = [
   { label: 'AI 设置', to: '/ai-settings', icon: 'bot' },
   { label: '提示词模板', to: '/prompts', icon: 'message' },
   { label: 'Skill 管理', to: '/skill-manage', icon: 'star' },
+  { label: 'MCP 插件', to: '/mcp', icon: 'plugin' },
   { label: '帮助说明', to: '/help', icon: 'help' },
   { label: '关于我们', to: '/about', icon: 'info' },
 ]
