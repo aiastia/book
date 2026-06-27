@@ -36,6 +36,130 @@ _SCORE_ORDER = [
 ]
 
 
+# ===== 写作风格注入格式化 =====
+# config 维度字段 → 中文标签（维度底色，给 AI 一个整体方向）
+_STYLE_DIM_LABELS = {
+    "pov": "视角",
+    "pacing": "节奏",
+    "tone": "语气",
+    "sentence_length": "句式",
+    "description_focus": "描写侧重",
+    "dialogue_ratio": "对话占比",
+    "vocabulary": "用词",
+}
+# traits 特征字段 → 中文标签（仿写准则，比维度更具体的笔法指令）
+_STYLE_TRAIT_LABELS = {
+    "summary": "总纲",
+    "sentence_pattern": "句式",
+    "vocabulary": "用词",
+    "imagery": "意象",
+    "rhythm": "节奏",
+    "tone": "语气",
+    "signature_techniques": "标志手法",
+    "avoid_list": "避免",
+}
+# 总纲优先排在最前
+_TRAIT_ORDER = ["summary", "sentence_pattern", "vocabulary", "imagery",
+                "rhythm", "tone", "signature_techniques", "avoid_list"]
+
+
+def _parse_style_value(raw) -> dict:
+    """把 context 里的 style 值统一解析成 dict。
+    数据源可能是 dict、JSON 字符串、或空值。"""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            import json as _j
+            parsed = _j.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _format_kv_value(v) -> str:
+    """把维度值（字符串/列表）格式化为可读文本。"""
+    if isinstance(v, (list, tuple)):
+        return "、".join(str(x) for x in v if x)
+    return str(v).strip() if v else ""
+
+
+def _format_style_block(context: dict) -> str:
+    """把 context 里的写作风格字段，格式化为中文标签的纯文本块。
+    输出结构：
+      【写作风格】{name}
+      <writing_style>
+      视角: 第三人称
+      节奏: 快
+      ...
+      </writing_style>
+      <style_traits>
+      [总纲] ...
+      [句式] ...
+      </style_traits>
+      <style_custom>...</style_custom>
+    """
+    import json as _j
+    parts = []
+
+    name = context.get("style_name") or ""
+    if name:
+        parts.append(f"【写作风格】{name}")
+
+    # 维度配置（底色）
+    en_dim = context.get("style_enable_dimensions", True)
+    cfg = _parse_style_value(context.get("writing_style")) if en_dim else {}
+    # 剔除代码字段，只留维度
+    cfg_lines = []
+    for key, label in _STYLE_DIM_LABELS.items():
+        if key in cfg:
+            val = _format_kv_value(cfg.get(key))
+            if val:
+                cfg_lines.append(f"{label}: {val}")
+    if cfg_lines:
+        parts.append("<writing_style>\n" + "\n".join(cfg_lines) + "\n</writing_style>")
+
+    # 文风特征（仿写准则）
+    en_traits = context.get("style_enable_traits", True)
+    traits = _parse_style_value(context.get("style_traits")) if en_traits else {}
+    trait_lines = []
+    for key in _TRAIT_ORDER:
+        if key in traits:
+            label = _STYLE_TRAIT_LABELS.get(key, key)
+            val = _format_kv_value(traits.get(key))
+            if val:
+                trait_lines.append(f"[{label}] {val}")
+    # 兜底：含未映射 key 时也输出
+    for key, val in traits.items():
+        if key in _TRAIT_ORDER:
+            continue
+        v = _format_kv_value(val)
+        if v:
+            trait_lines.append(f"[{key}] {v}")
+    if trait_lines:
+        parts.append("<style_traits>\n" + "\n".join(trait_lines) + "\n</style_traits>")
+
+    # 自定义提示词
+    en_custom = context.get("style_enable_custom", True)
+    custom = (context.get("style_custom_prompt") or "").strip()
+    if custom and en_custom:
+        parts.append(f"<style_custom>\n{custom}\n</style_custom>")
+
+    # 范文参考（仅供体会笔法，严禁照抄；截断防超长）
+    ref = (context.get("style_reference_text") or "").strip()
+    if ref:
+        parts.append(
+            "<style_reference>\n"
+            "以下范文仅供体会笔法（节奏、语气、句式、意象的整体感觉），"
+            "严禁抄袭其中的具体内容/意象/句子，只学笔法不学内容：\n"
+            + ref[:800]
+            + "\n</style_reference>"
+        )
+
+    return "\n\n".join(parts)
+
+
 def _check_content_degradation(content: str) -> str | None:
     """检测 AI 生成内容是否退化成垃圾（英文词典/元评论/碎片分隔符堆砌）。
 
@@ -835,18 +959,9 @@ class ChapterService:
                 tool_exec = tool_exec_with_custom
 
             context["chapter_data"] = chapter_data
-            # 注入写作风格块：拼装为独立文本，由 engine 作为第一条 system 消息前置注入。
+            # 注入写作风格块：格式化为中文标签纯文本，由 engine 作为第一条 system 消息前置注入。
             # 注意：不要在 prompt 模板里写 {writing_style_block} 占位符——那会造成与前置消息重复。
-            _style_parts = []
-            if context.get("style_name"):
-                _style_parts.append(f"【写作风格】{context['style_name']}")
-            if context.get("writing_style"):
-                _style_parts.append(f"<writing_style>{context['writing_style']}</writing_style>")
-            if context.get("style_traits"):
-                _style_parts.append(f"<style_traits>{context['style_traits']}</style_traits>")
-            if context.get("style_custom_prompt"):
-                _style_parts.append(f"<style_custom>{context['style_custom_prompt']}</style_custom>")
-            context["writing_style_block"] = "\n".join(_style_parts) if _style_parts else ""
+            context["writing_style_block"] = _format_style_block(context)
             # chapter_data 追加 items + locations（style 块由 writing_style_block 前置注入，不在此处重复）
             _append_parts = []
             if context.get("items_info"):
