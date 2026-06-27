@@ -29,6 +29,18 @@ _TOP_LEVEL_TAGS = [
 # 工具模式下应移到 post_tool 的标签（工具调用结束后才注入）
 _POST_TOOL_TAGS = {"commercial_design", "constraints", "output"}
 
+# 消息角色分配：system = 永久指令（怎么写），user = 本章输入（写什么）
+_SYSTEM_TAGS = {
+    "system", "tone_rules", "constraints", "commercial_design",
+    "self_check", "output",
+}
+_USER_TAGS = {
+    "task", "outline", "continuation", "data", "characters",
+    "items_locations", "scene_anchor", "character_intents",
+    "recent_context", "quality", "foreshadow_reminders",
+    "expansion_rich", "memory",
+}
+
 
 def _resolve_includes(
     text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None, depth: int = 0
@@ -123,11 +135,12 @@ _TAG_RE = re.compile(r"</?([a-z_]+)(?:\s[^>]*)?>")
 
 
 def _split_system_prompt_by_tags(content: str) -> list[dict]:
-    """将已解析的 system prompt 按顶级 XML 标签拆成多条独立消息。
+    """将已解析的 system prompt 按顶级 XML 标签拆成多条消息，自动分配角色。
 
-    每个顶级 <tagname>...</tagname> 块成为一条 system 消息。
-    标签之间的裸文本作为单独的消息保留。
-    嵌套标签（在父标签内部的子标签）不拆分。
+    system 标签 → role=system（永久写作指令）
+    user 标签   → role=user（本章特定输入）
+    裸文本      → role=user（默认为输入材料）
+    嵌套标签不拆分。
     """
     if not content.strip():
         return [{"role": "system", "content": content}]
@@ -137,9 +150,17 @@ def _split_system_prompt_by_tags(content: str) -> list[dict]:
     if not tags:
         return [{"role": "system", "content": content.strip()}]
 
+    def _role_for_tag(name: str) -> str:
+        if name in _SYSTEM_TAGS:
+            return "system"
+        if name in _USER_TAGS:
+            return "user"
+        return "system"  # 未知标签默认 system
+
     messages = []
     depth = 0
-    block_start = 0  # 当前块的起始位置
+    block_start = 0
+    current_tag = None  # 当前顶级块的标签名
 
     for m in tags:
         is_close = m.group(0).startswith("</")
@@ -147,34 +168,37 @@ def _split_system_prompt_by_tags(content: str) -> list[dict]:
 
         if is_close:
             depth -= 1
-            if depth == 0 and tag_name in known and block_start >= 0:
+            if depth == 0 and tag_name in known and block_start >= 0 and tag_name == current_tag:
                 block = content[block_start : m.end()].strip()
                 if block:
-                    messages.append({"role": "system", "content": block})
+                    role = _role_for_tag(tag_name)
+                    messages.append({"role": role, "content": block})
                 block_start = m.end()
+                current_tag = None
         else:
             if depth == 0:
                 if tag_name in known:
-                    # 新顶级块：先提交前置裸文本
+                    # 新顶级块：先提交前置裸文本（默认 user role）
                     if m.start() > block_start:
                         untagged = content[block_start : m.start()].strip()
                         if untagged:
-                            messages.append({"role": "system", "content": untagged})
+                            messages.append({"role": "user", "content": untagged})
                     block_start = m.start()
+                    current_tag = tag_name
                 else:
-                    # 非顶级标签（如 <tag> 未在 _TOP_LEVEL_TAGS 中）：重置块起点
                     if block_start < m.start():
                         untagged = content[block_start : m.start()].strip()
                         if untagged:
-                            messages.append({"role": "system", "content": untagged})
+                            messages.append({"role": "user", "content": untagged})
                     block_start = m.start()
+                    current_tag = None
             depth += 1
 
-    # 尾部残留
+    # 尾部残留 → user
     if block_start < len(content):
         remaining = content[block_start:].strip()
         if remaining:
-            messages.append({"role": "system", "content": remaining})
+            messages.append({"role": "user", "content": remaining})
 
     return messages if messages else [{"role": "system", "content": content}]
 
@@ -677,8 +701,9 @@ class SkillEngine:
         split_msgs = _split_system_prompt_by_tags(system_prompt)
         messages.extend(split_msgs)
         logger.warning(
-            f"[skill] 系统提示词已拆分为 {len(split_msgs)} 条独立消息 "
-            f"(tags: {[m['content'][:30] for m in split_msgs]})"
+            f"[skill] 系统提示词已拆分为 {len(split_msgs)} 条消息 "
+            f"({sum(1 for m in split_msgs if m['role']=='system')} system + "
+            f"{sum(1 for m in split_msgs if m['role']=='user')} user)"
         )
 
         # ===== 自动注入上下文（按 skill 类型选择性注入）=====
