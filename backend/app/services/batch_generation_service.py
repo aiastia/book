@@ -274,7 +274,9 @@ async def run_batch_generation(task_id: int):
         # 独立 session 处理单章
         success = False
         last_err = ""
-        for attempt in range(max_retries + 1):
+        attempt = 0
+        max_attempts = max_retries + 1
+        while attempt < max_attempts:
             try:
                 async with async_session() as chap_db:
                     # 获取章节信息
@@ -329,10 +331,12 @@ async def run_batch_generation(task_id: int):
                         logger.warning(
                             f"[batch] 第{ch_num}章生成失败（尝试 {attempt + 1}）: {last_err}"
                         )
-                        # 504/超时错误需要更长冷却时间，否则立刻重试大概率继续失败
+                        attempt += 1
+                        # 504/gateway → Cloudflare 建议等 120s，指数退避：60s/90s/120s
                         delay = 2
-                        if any(k in str(last_err).lower() for k in ("504", "timeout", "gateway", "time-out")):
-                            delay = min(30 * (attempt + 1), 120)
+                        if any(k in str(last_err).lower() for k in ("504", "gateway", "time-out")):
+                            delay = min(60 + 30 * (attempt - 1), 120)
+                            max_attempts = max(max_attempts, attempt + 2)  # 504 多给两次机会
                         await asyncio.sleep(delay)
                         continue
                     success = True
@@ -344,9 +348,11 @@ async def run_batch_generation(task_id: int):
             except Exception as e:
                 last_err = str(e)
                 logger.warning(f"[batch] 第{chapter_id}章异常（尝试 {attempt + 1}）: {e}")
+                attempt += 1
                 delay = 2
-                if any(k in last_err.lower() for k in ("504", "timeout", "gateway", "time-out")):
-                    delay = min(30 * (attempt + 1), 120)
+                if any(k in last_err.lower() for k in ("504", "gateway", "time-out")):
+                    delay = min(60 + 30 * (attempt - 1), 120)
+                    max_attempts = max(max_attempts, attempt + 2)
                 await asyncio.sleep(delay)
 
         if not success:

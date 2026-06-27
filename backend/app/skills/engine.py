@@ -734,10 +734,9 @@ class SkillEngine:
                 err_lower = err.lower()
                 if ("connection" in err_lower or "timeout" in err_lower
                     or "time-out" in err_lower or "gateway" in err_lower or "504" in err_lower):
-                    # 504/gateway 错误需要更长冷却，指数退避：30s, 60s, 90s
-                    delay = min(30 * (attempt + 1), 120)
+                    # 504/gateway → 指数退避：60s/90s/120s，Cloudflare 建议至少 120s
+                    delay = min(60 + 30 * attempt, 120)
                     await asyncio.sleep(delay)
-                    # 连接错误允许更多重试（最多 5 次）
                     if attempt + 1 >= max_attempts and max_attempts < 5:
                         max_attempts += 1
                     continue
