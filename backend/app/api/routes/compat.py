@@ -247,6 +247,7 @@ class BookCreate(BaseModel):
     title: str
     genre: str = ""
     synopsis: str = ""
+    outline_mode: str = "one_to_one"  # one_to_one: 传统 1大纲→1章 | one_to_many: 细化 1大纲→N章
 
 
 @router.post("/books")
@@ -256,11 +257,17 @@ async def create_book(
     """新建书（项目）。"""
     if not user:
         raise HTTPException(401, "请先登录")
-    p = Project(user_id=user.id, title=req.title, genre=req.genre, synopsis=req.synopsis)
+    mode = req.outline_mode
+    if mode not in ("one_to_one", "one_to_many"):
+        mode = "one_to_one"
+    p = Project(
+        user_id=user.id, title=req.title, genre=req.genre, synopsis=req.synopsis,
+        outline_mode=mode,
+    )
     db.add(p)
     await db.commit()
     await db.refresh(p)
-    return {"id": p.id, "title": p.title}
+    return {"id": p.id, "title": p.title, "outline_mode": p.outline_mode}
 
 
 # ---------- 当前项目下的章节/大纲/角色/世界观 ----------

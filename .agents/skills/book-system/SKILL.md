@@ -23,54 +23,50 @@ password: "你的密码"
 
 ### 📖 创建新书（交互式灵感模式）
 
-灵感模式一步步问，和网页端体验一样：
+灵感模式一步步问。**第四步选类型时，同时决定 1-1 / 1-N 模式**：
 
 ```
 用户: /book 创建新书
 
-→ 第一步：书名是什么？
+→ 第一步：书名？
 用户: 《仙王的日常生活》
-→ POST /api/projects/{id}/inspiration/step/title  → 返回书名确认
 
 → 第二步：一句话简介？
 用户: 修仙大佬在都市开餐馆
-→ POST /api/projects/{id}/inspiration/step/description
 
 → 第三步：核心主题/风格？
 用户: 轻松日常，反套路修仙
-→ POST /api/projects/{id}/inspiration/step/theme
 
-→ 第四步：类型？
-用户: 玄幻
-→ POST /api/projects/{id}/inspiration/step/genre
+→ 第四步：类型 + 模式？
+  1) 玄幻 · 1-1（传统，1大纲→1章）
+  2) 玄幻 · 1-N（细化，1大纲→N章，适合长篇规划）
+  3) 都市 · 1-1
+  4) 都市 · 1-N
+  5) 自定义输入
+用户: 2
+→ POST /api/books {"title":"仙王的日常生活","genre":"玄幻","outline_mode":"one_to_many"}
 
-→ 快速补全世界观和角色设定
-→ POST /api/projects/{id}/inspiration/quick-complete
-
-完成后展示汇总，询问：「要继续生成大纲吗？」
-```
-
-也可以一次性提供：
-
-```
-/book 创建《仙王的日常生活》——修仙大佬在都市伪装普通人开面馆，轻松日常反套路玄幻
+→ 快速补全世界观
 → POST /api/projects/{id}/inspiration/quick-complete
 ```
 
-### 📝 大纲（自动决定 1-1 / 1-N 模式）
+**1-1 vs 1-N 的区别**：
+| | 1-1 | 1-N |
+|---|---|---|
+| 大纲 | 1个大纲 = 1章 | 1个大纲 = 1卷（展开为多章） |
+| 章节生成 | 每章基于上一章续写 | 每章基于大纲+关键事件 |
+| 适合 | 短篇、随性写 | 长篇规划、批量生成 |
+
+模式在创建时决定，**创建后不可更改**。
+
+### 📝 大纲
 
 ```
 查看大纲     GET /api/projects/{id}/outlines
-生成大纲     POST /api/projects/{id}/outlines/generate-async → 轮询
+生成大纲     POST /api/projects/{id}/outlines/generate-async → 轮询，1-1直接建章
 续写大纲     POST /api/projects/{id}/outlines/continue-async → 轮询
-展开大纲     POST /api/projects/{id}/outlines/{outline_id}/expand-async
+展开大纲     POST /api/projects/{id}/outlines/{outline_id}/expand-async → 仅1-N模式，1大纲→N章
 ```
-
-**1-1 vs 1-N 自动切换逻辑**：
-- 大纲展开（expand）后 → 章节获得 `expansion_plan`（详细规划）→ 生成时自动走 **1-N 模式**（大纲驱动，批量生成）
-- 大纲未展开 → 章节走 **1-1 模式**（基于上一章内容续写）
-
-用户不需要手动选择，系统根据大纲状态自动决定。
 
 ### ✍️ 章节生成
 
