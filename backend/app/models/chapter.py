@@ -27,6 +27,7 @@ class Chapter(Base):
     quality_alert = Column(
         String(50), default=""
     )  # 质量告警：low_score/consistency_issue/low_coherence
+    raw_output = Column(Text, default="")  # 清理/改写前的原始 AI 输出
     generation_history = Column(JSON, default=list)  # 生成历史记录
     style_config = Column(JSON, default=dict)  # 本章写作风格覆盖
     created_at = Column(DateTime, default=datetime.utcnow)

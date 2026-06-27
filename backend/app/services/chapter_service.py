@@ -1493,6 +1493,8 @@ class ChapterService:
             # 文本后处理：机械规则清理 AI 口癖
             from app.services.text_cleaner import clean_generated_text
 
+            # 保存原始输出（清理前），供前端对比
+            chapter.raw_output = content
             result = clean_generated_text(content)
             content = result.cleaned_text
             if result.stats:

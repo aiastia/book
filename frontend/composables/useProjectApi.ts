@@ -411,6 +411,12 @@ export function useProjectApi() {
   function testEmbedding(baseUrl: string, apiKey: string, embeddingModel: string) {
     return apiPost<{ ok: boolean; dim: number; model: string }>('/api/ai-models/test-embedding', { base_url: baseUrl, api_key: apiKey, embedding_model: embeddingModel }, { timeout: 30000 })
   }
+  function testRewrite(baseUrl: string, apiKey: string, model: string) {
+    return apiPost<{ ok: boolean; msg: string }>('/api/ai-models/test-rewrite', { base_url: baseUrl, api_key: apiKey, model }, { timeout: 15000 })
+  }
+  function fetchRewriteRemoteModels(baseUrl: string, apiKey: string) {
+    return apiPost<{ models: Array<{ id: string; owned_by: string }> }>('/api/ai-models/fetch-remote', { base_url: baseUrl, api_key: apiKey, provider: 'openai' }, { timeout: 20000 })
+  }
 
   // ---- Skill 管理（全局接口，不依赖项目 ID） ----
   const listSkills = () => useApi<any[]>('/api/skills', { key: 'skills' })
@@ -921,6 +927,8 @@ export function useProjectApi() {
     fetchDefaultRemoteModels,
     fetchModelRemoteModels,
     testEmbedding,
+    testRewrite,
+    fetchRewriteRemoteModels,
     // Skill
     listSkills,
     updateSkill,

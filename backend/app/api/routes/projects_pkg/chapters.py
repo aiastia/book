@@ -154,6 +154,7 @@ async def get_chapter(
         "sub_index": c.sub_index or 1,
         "generation_mode": c.generation_mode or "one_to_one",
         "expansion_plan": c.expansion_plan,
+        "raw_output": c.raw_output or "",
     }
 
 

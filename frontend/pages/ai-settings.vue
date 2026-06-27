@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useProjectApi } from '~/composables/useProjectApi'
 import { CheckOutlined } from '@ant-design/icons-vue'
 useHead({ title: 'AI 设置 — 墨语' })
@@ -268,6 +268,77 @@ const inspirationStageTemps = computed(() => {
 
 // 默认模型的参数
 const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_default))
+
+// ===== 润色用 API =====
+const rewriteForm = reactive({ base_url: '', api_key: '', model: '' })
+const rewriteEnabled = ref(false)
+const rewriteOk = ref(false)
+const savingRewrite = ref(false)
+const testingRewrite = ref(false)
+const rewriteResult = ref('')
+const rewriteLoaded = ref(false)
+
+function loadRewriteConfig() {
+  if (rewriteLoaded.value || !models.value?.length) return
+  const def = defaultModel.value || models.value[0]
+  if (!def) return
+  rewriteForm.base_url = def.rewrite_base_url || ''
+  rewriteForm.api_key = def.rewrite_api_key || ''
+  rewriteForm.model = def.rewrite_model || ''
+  rewriteEnabled.value = !!(def.rewrite_base_url || def.rewrite_api_key || def.rewrite_model)
+  rewriteLoaded.value = true
+}
+watch(models, () => loadRewriteConfig(), { immediate: true })
+
+async function onSaveRewrite() {
+  const def = defaultModel.value || models.value?.[0]
+  if (!def) { msg.warning('请先添加一个 AI 模型'); return }
+  savingRewrite.value = true
+  try {
+    await api.updateAiModel(def.id, {
+      rewrite_base_url: rewriteForm.base_url || '',
+      rewrite_api_key: rewriteForm.api_key || '',
+      rewrite_model: rewriteForm.model || '',
+    })
+    rewriteOk.value = false
+    msg.success('润色 API 已保存')
+  } catch (e: any) { msg.error('保存失败') }
+  finally { savingRewrite.value = false }
+}
+
+async function onTestRewrite() {
+  if (!rewriteForm.base_url) { msg.warning('请先填写 Base URL'); return }
+  if (!rewriteForm.api_key) { msg.warning('请填写 API Key 后再测试'); return }
+  testingRewrite.value = true
+  rewriteResult.value = '测试中…'
+  try {
+    const r = await api.testRewrite(rewriteForm.base_url, rewriteForm.api_key, rewriteForm.model || 'gpt-4o-mini')
+    rewriteOk.value = !!(r as any)?.ok
+    rewriteResult.value = (r as any)?.ok ? `✅ ${(r as any).msg}` : `❌ ${(r as any).msg}`
+  } catch (e: any) {
+    rewriteOk.value = false
+    rewriteResult.value = '❌ ' + formatError(e)
+  } finally { testingRewrite.value = false }
+}
+
+const fetchingRewriteModels = ref(false)
+const rewriteRemoteModels = ref<Array<{ id: string }>>([])
+
+async function fetchRewriteModels() {
+  if (!rewriteForm.base_url) { msg.warning('请先填写 Base URL'); return }
+  fetchingRewriteModels.value = true
+  try {
+    const r = await api.fetchRewriteRemoteModels(rewriteForm.base_url, rewriteForm.api_key)
+    rewriteRemoteModels.value = (r as any).models || []
+    if (!rewriteRemoteModels.value.length) msg.warning('未获取到可用模型')
+  } catch (e: any) { msg.error('获取失败：' + formatError(e)) }
+  finally { fetchingRewriteModels.value = false }
+}
+function selectRewriteModel(id: string) {
+  rewriteForm.model = id
+  rewriteRemoteModels.value = []
+  fetchingRewriteModels.value = false
+}
 </script>
 
 <template>
@@ -504,24 +575,6 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
         {{ embedResult }}
       </div>
 
-      <!-- Diff Rewrite 润色 API -->
-      <a-divider orientation="left">🖊️ 润色用 API（可选，独立于章节生成）</a-divider>
-      <a-alert
-        message="用于「去 AI 指纹」的 Diff Rewrite。留空则降级使用上方的模型。建议用便宜小模型（如 gpt-4o-mini）。"
-        type="info" show-icon :closable="false" style="margin-bottom:12px;"
-      />
-      <div class="form-row-2">
-        <a-form-item label="Base URL">
-          <a-input v-model:value="form.rewrite_base_url" placeholder="留空=用上方 Base URL" />
-        </a-form-item>
-        <a-form-item label="API Key">
-          <a-input v-model:value="form.rewrite_api_key" placeholder="留空=用上方 API Key" />
-        </a-form-item>
-      </div>
-      <a-form-item label="模型">
-        <a-input v-model:value="form.rewrite_model" placeholder="gpt-4o-mini" />
-      </a-form-item>
-
       <!-- 参数设置 -->
       <a-divider orientation="left">模型参数</a-divider>
 
@@ -662,6 +715,53 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
       <a-button type="primary" :loading="saving" @click="onSave">保存</a-button>
     </template>
   </a-modal>
+
+  <!-- 润色用 API 配置（独立于章节生成） -->
+  <a-card class="section-card" size="small" style="margin-top:16px">
+    <template #title>
+      <span>🖊️ 润色用 API（去 AI 指纹）</span>
+      <a-tag v-if="rewriteEnabled && rewriteOk" color="success" style="margin-left:12px">已连接</a-tag>
+      <a-tag v-else-if="rewriteEnabled && !rewriteOk" color="warning" style="margin-left:12px">待测试</a-tag>
+      <a-tag v-else color="default" style="margin-left:12px">未启用</a-tag>
+    </template>
+    <template #extra>
+      <a-switch v-model:checked="rewriteEnabled" size="small" style="margin-right:8px" />
+      <a-button size="small" :loading="testingRewrite" @click="onTestRewrite">🧪 测试</a-button>
+    </template>
+    <a-alert
+      message="独立于章节生成 API。留空则降级使用默认模型。建议用便宜小模型（如 gpt-4o-mini），一次请求不到一分钱。"
+      type="info" show-icon :closable="false" style="margin-bottom:12px;"
+    />
+    <div class="form-row-2">
+      <div>
+        <label style="font-size:12px;color:#666">Base URL</label>
+        <a-input v-model:value="rewriteForm.base_url" placeholder="https://api.openai.com/v1" size="small" style="margin-top:4px" />
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666">API Key</label>
+        <a-input-password v-model:value="rewriteForm.api_key" placeholder="sk-..." size="small" style="margin-top:4px" />
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:12px;align-items:flex-end">
+      <div>
+        <label style="font-size:12px;color:#666">模型</label>
+        <a-input v-model:value="rewriteForm.model" placeholder="gpt-4o-mini" size="small" style="margin-top:4px;width:240px" />
+      </div>
+      <a-button size="small" :loading="fetchingRewriteModels" @click="fetchRewriteModels">获取模型</a-button>
+      <a-button type="primary" size="small" :loading="savingRewrite" @click="onSaveRewrite">保存</a-button>
+    </div>
+    <div v-if="rewriteRemoteModels.length" class="remote-models" style="margin-top:8px">
+      <div
+        v-for="rm in rewriteRemoteModels" :key="rm.id"
+        class="remote-model-item"
+        :class="{ selected: rewriteForm.model === rm.id }"
+        @click="selectRewriteModel(rm.id)"
+      >{{ rm.id }}</div>
+    </div>
+    <div v-if="rewriteResult" class="test-result" :class="{ ok: rewriteResult.startsWith('✅'), err: rewriteResult.startsWith('❌') }" style="margin-top:8px">
+      {{ rewriteResult }}
+    </div>
+  </a-card>
 
   <ThinkingModesCard />
 </template>

@@ -3,6 +3,7 @@
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
+import { diffWords } from 'diff'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
 
@@ -24,6 +25,9 @@ const { data: outlines } = await api.getOutlines()
 const editorOpen = ref(false)
 const editing = ref<any>(null)
 const editingContent = ref('')
+const rawOutput = ref('')
+const showRaw = ref(false)
+const rawDiff = computed(() => rawOutput.value && editingContent.value ? diffWords(rawOutput.value, editingContent.value) : [])
 const editingTitle = ref('')
 const generating = ref(false)
 const saving = ref(false)
@@ -293,6 +297,7 @@ async function openEditor(c: any) {
   // 加载章节内容
   const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`).catch(() => null)
   if (ch) editingContent.value = ch.content || ''
+  rawOutput.value = ch?.raw_output || ''
 
   // 加载编辑器选项（并行）
   await Promise.all([
@@ -1023,6 +1028,20 @@ async function onPlanSaved() {
           </span>
         </div>
 
+        <!-- RAW 原始输出（diff 对比） -->
+        <div v-if="rawOutput" style="margin-bottom:12px">
+          <a-button size="small" type="link" @click="showRaw = !showRaw" style="padding:0">
+            {{ showRaw ? '收起对比' : '📄 查看清理前后对比' }}
+          </a-button>
+          <div v-if="showRaw" class="raw-output-panel">
+            <template v-for="(part, idx) in rawDiff" :key="idx">
+              <span v-if="part.added" class="diff-added">{{ part.value }}</span>
+              <span v-else-if="part.removed" class="diff-removed">{{ part.value }}</span>
+              <span v-else>{{ part.value }}</span>
+            </template>
+          </div>
+        </div>
+
         <!-- 内容编辑区 -->
         <div class="ch-editor">
           <a-textarea v-model:value="editingContent" :rows="18" :disabled="generating" placeholder="点击AI创作生成正文..." />
@@ -1274,6 +1293,9 @@ async function onPlanSaved() {
 .editor-opts { display: flex; gap: 20px; font-size: 13px; color: #595959; flex-wrap: wrap; }
 .editor-foot { font-size: 12px; color: #8C8C8C; text-align: right; }
 .ch-editor textarea { font-family: 'Noto Serif SC', serif; font-size: 15px; line-height: 2; }
+.raw-output-panel { max-height:300px; overflow:auto; background:#fffbe6; border:1px solid #ffe58f; border-radius:6px; padding:12px; font-size:13px; white-space:pre-wrap; color:#8c6d1f; margin-top:4px; }
+.diff-added { background:#d4edda; color:#155724; padding:0 2px; border-radius:2px; }
+.diff-removed { background:#f8d7da; color:#721c24; text-decoration:line-through; padding:0 2px; border-radius:2px; }
 
 /* 阅读器 */
 .reader-layout { display: grid; grid-template-columns: 1fr 280px; gap: 14px; height: calc(100vh - 160px); }

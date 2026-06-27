@@ -235,6 +235,31 @@ async def test_ai_model(
     return {"ok": True, "reply": resp["content"][:50], "model": resp["model"]}
 
 
+# ---- 润色 API 测试 ----
+class TestRewriteReq(BaseModel):
+    base_url: str
+    api_key: str
+    model: str = "gpt-4o-mini"
+
+
+@router.post("/ai-models/test-rewrite")
+async def test_rewrite(req: TestRewriteReq, user=Depends(get_current_user)):
+    """测试润色 API 连通性。"""
+    base = req.base_url.rstrip("/")
+    api_key = req.api_key
+    if not api_key:
+        raise HTTPException(400, "API Key 不能为空")
+
+    client = AIClient(base_url=base, api_key=api_key, model=req.model)
+    resp = await client.chat_stream_collect(
+        messages=[{"role": "user", "content": "回复一个字：好"}],
+        max_tokens=10,
+    )
+    if resp.get("error"):
+        raise HTTPException(400, f"连接失败: {resp['error']}")
+    return {"ok": True, "msg": f"连接成功，模型: {resp.get('model', req.model)}"}
+
+
 # ---- AI 模型：从远程获取可用模型列表 ----
 class FetchModelsReq(BaseModel):
     base_url: str
