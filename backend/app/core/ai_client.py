@@ -287,10 +287,14 @@ class AIClient:
                 for tc in (message.tool_calls or [])
             ]
             usage = resp.usage
+            cached = 0
+            if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
+                cached = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
             return {
                 "content": content,
                 "model": resp.model,
                 "input_tokens": usage.prompt_tokens if usage else 0,
+                "cached_tokens": cached,
                 "output_tokens": usage.completion_tokens if usage else 0,
                 "duration_ms": int((time.time() - start) * 1000),
                 "tool_calls": tool_calls,
@@ -389,10 +393,15 @@ class AIClient:
                         }
                     )
 
+            cached = 0
+            if usage_info and hasattr(usage_info, 'prompt_tokens_details') and usage_info.prompt_tokens_details:
+                cached = getattr(usage_info.prompt_tokens_details, 'cached_tokens', 0) or 0
+
             return {
                 "content": content,
                 "model": model_name,
                 "input_tokens": usage_info.prompt_tokens if usage_info else 0,
+                "cached_tokens": cached,
                 "output_tokens": usage_info.completion_tokens if usage_info else 0,
                 "duration_ms": int((time.time() - start) * 1000),
                 "tool_calls": tool_calls,
@@ -473,9 +482,12 @@ class AIClient:
             content = result["content"].strip()
 
         # 记录每次 AI 调用的 token 消耗，便于排查重复计费
-        logger.info(
+        cached = result.get("cached_tokens", 0)
+        cache_pct = f" {cached}/{result.get('input_tokens', 0)}" if cached else ""
+        logger.warning(
             f"[AI] model={result.get('model', '?')} "
-            f"input={result.get('input_tokens', 0)} output={result.get('output_tokens', 0)} "
+            f"input={result.get('input_tokens', 0)}{' 缓存' + cache_pct if cached else ''} "
+            f"output={result.get('output_tokens', 0)} "
             f"duration={result.get('duration_ms', 0)}ms content_len={len(content)}"
         )
 
