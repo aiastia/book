@@ -1714,6 +1714,20 @@ class ChapterService:
             logger.warning(f"[analyze] 章节{chapter.chapter_number}内容不足50字，跳过分析")
             return
 
+        # 清理该章节旧的 PlotAnalysis（重新生成/重新分析时避免堆积）
+        old_analyses = (
+            await self.db.execute(
+                select(PlotAnalysis).where(
+                    PlotAnalysis.project_id == self.project_id,
+                    PlotAnalysis.chapter_id == chapter.id,
+                )
+            )
+        ).scalars().all()
+        for a in old_analyses:
+            await self.db.delete(a)
+        if old_analyses:
+            await self.db.flush()
+
         # 获取角色信息
         from app.models.character import Character
 
@@ -2835,5 +2849,10 @@ class ChapterService:
                 ch.quality_score = None
                 ch.quality_detail = {}
                 cleared.append(ch.chapter_number)
+        # 清理关联数据（PlotAnalysis / StoryMemory / 分析伏笔 / ChromaDB 向量）
+        cleared_ids = [chapter.id]
+        if cascade and subsequent:
+            cleared_ids.extend(ch.id for ch in subsequent)
+        await self.cleanup_chapters_data(cleared_ids)
         await self.db.commit()
         return chapter, cleared
