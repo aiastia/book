@@ -18,8 +18,8 @@
 {expansion_rich}
 
 <recent_context priority="P1">
-【最近章节规划 - 故事脉络参考】
-{recent_chapters_context}
+【最近章节脉络 - 故事脉络参考】
+{relevant_memories}
 </recent_context>
 
 <continuation priority="P0">
@@ -57,11 +57,6 @@
 {foreshadow_reminders}
 </foreshadow_reminders>
 
-<memory priority="P2">
-【相关记忆 - 参考】
-{relevant_memories}
-</memory>
-
 <quality_feedback priority="P3">
 {quality_trends}
 </quality_feedback>
@@ -73,7 +68,6 @@
 
 <constraints>
 @include:_shared_one_to_many_narrative.md
-续章补充：自然承接上一章结尾，不重复已发生事件
 
 【续章专属 - 开篇规则（第2章起弹性约束）】
 - 本章开篇必须在一个"正在进行的事件"中。可以是以下任一方式，但不能是纯环境描写或背景介绍：
@@ -89,23 +83,17 @@
 - 禁止：纯环境描写开头、背景介绍开头、角色外貌描述开头、角色站在某处"思考人生"开头
 - 开篇的"静"必须有内在的"紧"——读者能感觉到下一秒就要出事
 
-【反重复特别指令】
- 检查本章开篇是否与"衔接锚点"内容重复
- 检查本章情节是否与"上一章已完成剧情"重复
- 确保本章推进到了大纲中规划的新事件
-
 禁止事项
-	@include:_shared_constraints.md
+		@include:_shared_constraints.md
 </constraints>
 
 @include:_shared_writing_rules.md
 
 <output>
 【输出规范】
-直接输出小说正文内容，从一个正在进行的事件开始。
-无需任何前言、后记或解释性文字。
+直接输出小说正文内容，无需任何前言、后记或解释性文字。
 章节结尾必须落在动作/对话的中断上，且必须产生紧迫感。
-- 如果本章有装逼/打脸高潮，结尾截在围观者反应最强烈的时刻（不要写完所有人的反应，留一部分给读者想象和下一章）
+- 如果本章有装逼/打脸高潮，结尾截在围观者反应最强烈的时刻
 
 现在开始创作：
 </output>

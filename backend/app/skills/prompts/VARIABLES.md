@@ -24,8 +24,9 @@
 |------|------|
 | `{continuation_point}` | 上一章末尾衔接点（500字） |
 | `{previous_chapter_summary}` | 上一章摘要 |
-| `{recent_chapters_context}` | 最近几章上下文 |
 | `{quality_trends}` | 评分趋势反馈 |
+
+> 注：`{relevant_memories}` 同时用于 `<recent_context>`（最近章节脉络），不再使用独立的 `{recent_chapters_context}` 变量。
 
 ## 共享模块
 

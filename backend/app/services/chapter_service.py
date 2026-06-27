@@ -1389,14 +1389,8 @@ class ChapterService:
                 context["relevant_memories"] = (
                     "\n".join(recent_summaries) if recent_summaries else ""
                 )
-                context["recalled_memories"] = context["relevant_memories"]
             except Exception:
                 context["relevant_memories"] = ""
-                context["recalled_memories"] = ""
-            # recent_chapters_context：最近章节脉络（供模板 {recent_chapters_context} 使用）
-            context["recent_chapters_context"] = context.get("relevant_memories", "")
-            context["recent_outlines"] = context.get("relevant_memories", "")
-            context["recent_expansion_plans"] = context.get("relevant_memories", "")
             # continuation_point + previous_chapter_summary：上一章结尾衔接（续章模板用）
             if chapter.chapter_number and chapter.chapter_number > 1:
                 prev_ending = await self._get_previous_ending(chapter)

@@ -20,6 +20,11 @@
 {quality_trends}
 </quality>
 
+<recent_context priority="P1">
+【最近章节脉络 - 参考】
+{relevant_memories}
+</recent_context>
+
 @include:_shared_chapter_context.md
 
 <commercial_design priority="P0">

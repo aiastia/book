@@ -247,8 +247,8 @@ _SKILL_BLOCKS = {
     "org_member_assign": ["project", "characters", "orgs"],
     # 🟢 章节生成（页面逐章/批量生成）
     # characters_info 和 chapter_careers 已在模板中通过变量注入，不再重复
-    # outline/foreshadow/memory 也在模板中注入，此处仅保留额外 context
-    "chapter_generation_": ["project", "world", "previous", "recent", "quality"],
+    # outline/foreshadow/memory/previous/recent/quality 也在各模板中注入，此处不再重复
+    "chapter_generation_": ["project", "world"],
     "chapter_generate_": ["project", "world", "previous", "recent", "quality"],
     # ⚪ 章节后处理（自动摘要/分析）
     "chapter_summary": ["project", "outline"],

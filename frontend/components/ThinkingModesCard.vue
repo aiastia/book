@@ -76,7 +76,9 @@ onMounted(load)
               <a-select v-model:value="modes[g.key].reasoning_effort" size="small" style="width:100px">
                 <a-select-option v-for="eo in effortOptions" :key="eo.value" :value="eo.value">{{ eo.label }}</a-select-option>
               </a-select>
-              <span style="font-size:11px;margin-left:8px">温度：</span>
+              <a-tooltip title="实际 temperature = 输入值 ÷ 100，例如 100 = 1.0">
+                <span style="font-size:11px;margin-left:8px;cursor:help;border-bottom:1px dashed #8c8c8c">温度：</span>
+              </a-tooltip>
               <a-input-number v-model:value="modes[g.key].temperature" size="small" :min="0" :max="200" :step="5" style="width:70px" placeholder="默认" />
             </div>
           </template>
