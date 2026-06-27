@@ -34,7 +34,6 @@ const editForm = reactive({
     description_focus: ['动作'], // 动作/心理/环境/对话/线索（多选）
     dialogue_ratio: '中',        // 高/中/低（单选）
     vocabulary: ['通俗'],        // 通俗/文雅/华丽（多选）
-    pov: '第三人称',             // 第一/第三/全知（单选）
     // 三个区块的启用开关（关闭=隐藏内容、不注入，但数据保留）
     enable_traits: true,         // ① 作家文风模仿
     enable_custom: true,         // ② 自定义提示词
@@ -82,12 +81,11 @@ const optionGroups: Record<string, string[]> = {
   description_focus: ['动作', '心理', '环境', '对话', '线索'],
   dialogue_ratio: ['高', '中', '低'],
   vocabulary: ['通俗', '文雅', '华丽', '古雅', '冷峻', '诗意', '粗犷'],
-  pov: ['第一人称', '第三人称', '全知视角'],
 }
 const labels: Record<string, string> = {
   pacing: '节奏', tone: '基调', sentence_length: '句式',
   description_focus: '描写侧重', dialogue_ratio: '对话占比',
-  vocabulary: '用词风格', pov: '叙事视角',
+  vocabulary: '用词风格',
 }
 // 支持多选的维度（其余为单选）。多选维度的值存为数组，单选存为字符串。
 const multiKeys = new Set(['tone', 'description_focus', 'vocabulary'])
@@ -131,7 +129,6 @@ const defaultConfig: Record<string, any> = {
   description_focus: ['动作'],
   dialogue_ratio: '中',
   vocabulary: ['通俗'],
-  pov: '第三人称',
 }
 function openAdd() {
   isNew.value = true
@@ -166,7 +163,6 @@ function openEdit(s: any) {
     description_focus: normValue('description_focus', cfg.description_focus),
     dialogue_ratio: normValue('dialogue_ratio', cfg.dialogue_ratio),
     vocabulary: normValue('vocabulary', cfg.vocabulary),
-    pov: normValue('pov', cfg.pov),
     // 三个区块开关（兼容旧 disable_dimensions）
     enable_traits: cfg.enable_traits !== undefined ? !!cfg.enable_traits : true,
     enable_custom: cfg.enable_custom !== undefined ? !!cfg.enable_custom : true,
@@ -251,7 +247,7 @@ async function onApplyToProject(id: number) {
 
   <div class="page-content">
     <a-alert type="info" :closable="false" style="margin-bottom:16px;"
-      message="写作风格从 7 个维度定义：节奏/基调/句式/描写侧重/对话占比/用词/视角。设为项目默认后，AI 生成章节会自动遵循。" />
+      message="写作风格从 6 个维度定义：节奏/基调/句式/描写侧重/对话占比/用词。设为项目默认后，AI 生成章节会自动遵循。叙事视角请在项目设定中配置。" />
 
     <div v-if="styles && styles.length" class="style-grid">
       <a-card v-for="s in styles" :key="s.id" hoverable :class="{ preset: s.is_preset, 'is-default': isProjectDefault(s) }">

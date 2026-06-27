@@ -481,6 +481,11 @@ class SkillEngine:
         messages = []
         if _style_prefix:
             messages.append({"role": "system", "content": _style_prefix})
+        # 叙事视角独立注入：与写作风格解耦，统一来自 context["narrative_perspective"]。
+        # 所有页面选择的视角都汇聚到这一个值（优先 overrides，否则项目默认），无需在 md 模板里写占位符。
+        _pov = (context.get("narrative_perspective") or "").strip()
+        if _pov:
+            messages.append({"role": "system", "content": f"叙事视角：{_pov}"})
         messages.append({"role": "system", "content": system_prompt})
 
         # ===== 自动注入上下文（按 skill 类型选择性注入）=====

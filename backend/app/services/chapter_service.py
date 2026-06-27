@@ -38,8 +38,8 @@ _SCORE_ORDER = [
 
 # ===== 写作风格注入格式化 =====
 # config 维度字段 → 中文标签（维度底色，给 AI 一个整体方向）
+# 注意：pov（视角）不属于文风，由 engine 作为独立上下文注入，不在此处
 _STYLE_DIM_LABELS = {
-    "pov": "视角",
     "pacing": "节奏",
     "tone": "语气",
     "sentence_length": "句式",
