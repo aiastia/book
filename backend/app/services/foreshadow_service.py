@@ -127,24 +127,20 @@ class ForeshadowService:
                 )
             parts.append("\n".join(lines))
 
-        # 3. 超期未回收的伏笔
+        # 3. 超期未回收的伏笔（只给标题，不让 AI 产生"必须回收"的焦虑；不得与原文矛盾）
         overdue = await self.get_overdue_foreshadows(chapter_number)
         if overdue:
-            lines = ["⚠️ 【超期未回收伏笔】"]
+            lines = ["⚠️ 【超期未回收伏笔】（不要求本章回收，但提及以下设定时不得矛盾）"]
             for fs in overdue:
-                lines.append(
-                    f"  - {fs.title}（第{fs.actual_plant_chapter or '?'}章埋入，已超期）: {fs.content}"
-                )
+                lines.append(f"  - {fs.title}（第{fs.actual_plant_chapter or '?'}章）")
             parts.append("\n".join(lines))
 
-        # 4. 本章应埋入的伏笔（新增！）
+        # 4. 本章应埋入的伏笔（只给标题——知道种什么就够了，不需要全文）
         pending_plant = await self.get_pending_plant_foreshadows(chapter_number)
         if pending_plant:
-            lines = ["🌱 【本章应埋入的伏笔】"]
+            lines = ["🌱 【本章应埋入的伏笔】（在剧情中自然植入，不要生硬宣告）"]
             for fs in pending_plant:
-                lines.append(
-                    f"  - {fs.title}: {fs.content}（计划在第{fs.plant_chapter_number}章埋入，第{fs.target_resolve_chapter_number or '?'}章回收）"
-                )
+                lines.append(f"  - {fs.title}（第{fs.target_resolve_chapter_number or '?'}章回收）")
             parts.append("\n".join(lines))
 
         return "\n\n".join(parts) if parts else "暂无伏笔提醒"
