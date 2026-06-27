@@ -1491,10 +1491,12 @@ class ChapterService:
                 return {"error": "AI 生成内容为空"}
 
             # 文本后处理：机械规则清理 AI 口癖
-            from app.services.text_cleaner import clean_generated_text
+            from app.services.text_cleaner import clean_generated_text, _strip_xml_like_tags
 
             # 保存原始输出（清理前），供前端对比
-            chapter.raw_output = content
+            # 先剥离 DSML/XML 工具调用标签，防止工具调用内容污染 raw_output
+            raw_for_save, _dsml_removed = _strip_xml_like_tags(content)
+            chapter.raw_output = raw_for_save
             result = clean_generated_text(content)
             content = result.cleaned_text
             if result.stats:

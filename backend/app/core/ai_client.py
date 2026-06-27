@@ -12,6 +12,7 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
 
     支持格式：
     - Kimi: <|tool_calls_section_begin|>...<|tool_calls_section_end|>
+    - DSML: <｜DSML｜tool_calls>...<invoke name="x">...</invoke>...</｜DSML｜tool_calls>
     - 通用: 任何包含 function name + arguments 的结构化文本
     返回标准 tool_calls 列表或 None。
     """
@@ -44,6 +45,49 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
                 }
             )
         return tool_calls if tool_calls else None
+
+    # DSML 格式：<｜DSML｜tool_calls>...<invoke name="x">...<parameter ...>...</invoke>...</｜DSML｜tool_calls>
+    # 使用全角竖线 ｜ (U+FF5C) 作为分隔符
+    if "｜DSML｜tool_calls" in content or "<｜DSML｜invoke" in content:
+        tool_calls = []
+        for match in re.finditer(
+            r"<｜DSML｜invoke\s+name\s*=\s*\"([^\"]+)\">(.*?)</｜DSML｜invoke>",
+            content,
+            re.DOTALL,
+        ):
+            name = match.group(1).strip()
+            body = match.group(2)
+            args = {}
+            for pm in re.finditer(
+                r"<｜DSML｜parameter\s+name\s*=\s*\"([^\"]+)\"[^>]*>(.*?)</｜DSML｜parameter>",
+                body,
+                re.DOTALL,
+            ):
+                pname = pm.group(1).strip()
+                pval = pm.group(2).strip()
+                # 尝试解析 JSON，否则保留字符串
+                try:
+                    pval = json.loads(pval)
+                except Exception:
+                    pass
+                args[pname] = pval
+            clean_name = name.replace("functions.", "").split(":")[0]
+            tool_calls.append(
+                {
+                    "id": f"dsml_{clean_name}",
+                    "type": "function",
+                    "function": {
+                        "name": clean_name,
+                        "arguments": json.dumps(args, ensure_ascii=False),
+                    },
+                }
+            )
+        return tool_calls if tool_calls else None
+
+    # 兜底：检测任意 <|...|> 格式的 tool_call 标记（防止未来新格式泄漏）
+    if re.search(r"<\|[^>]+\|tool_call", content):
+        return []  # 返回空列表触发 content="" 清理
+
     return None
 
 

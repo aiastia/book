@@ -253,6 +253,67 @@ def _apply_stats(text: str) -> tuple[str, dict]:
     return text, report
 
 
+def _strip_xml_like_tags(text: str) -> tuple[str, int]:
+    """移除 DSML/XML 风格的工具调用标签，防止泄漏到正文。
+
+    匹配：
+    - <｜DSML｜...> ... </｜DSML｜...>  全角竖线 DSML 格式
+    - <|...|> 半角竖线格式（Kimi 残留等）
+    - 自闭合标签 <.../>
+    返回 (cleaned_text, removed_count)
+    """
+    removed = 0
+
+    # 1. 移除完整 DSML 标签对 <｜DSML｜xxx>...</｜DSML｜xxx>
+    #    匹配跨越换行的标签内容
+    dsml_pattern = re.compile(
+        r"<[｜\|]DSML[｜\|][^>]*>.*?</[｜\|]DSML[｜\|][^>]*>",
+        re.DOTALL,
+    )
+    while dsml_pattern.search(text):
+        text, n = dsml_pattern.subn("", text)
+        removed += n
+        if n == 0:
+            break
+
+    # 2. 移除自闭合的 DSML parameter 标签：<｜DSML｜parameter ... />
+    param_pattern = re.compile(
+        r"<[｜\|]DSML[｜\|]parameter\s[^>]*?/>",
+        re.DOTALL,
+    )
+    text, n = param_pattern.subn("", text)
+    removed += n
+
+    # 3. 移除 Kimi 风格的 tool_call 残留标签
+    kimi_pattern = re.compile(
+        r"<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>",
+        re.DOTALL,
+    )
+    text, n = kimi_pattern.subn("", text)
+    removed += n
+
+    kimi_single = re.compile(
+        r"<\|tool_call_begin\|>.*?<\|tool_call_end\|>",
+        re.DOTALL,
+    )
+    text, n = kimi_single.subn("", text)
+    removed += n
+
+    # 4. 兜底：移除任何残留的 <|...|> 或 <｜...｜> 标签（单行，非贪婪）
+    #    防止任何未知的工具调用格式泄漏
+    residual_pattern = re.compile(
+        r"<[｜\|]\S+?[｜\|][^>]*?(?:>.*?</[｜\|]\S+?[｜\|][^>]*?>|/>)",
+        re.DOTALL,
+    )
+    text, n = residual_pattern.subn("", text)
+    removed += n
+
+    # 5. 清理残留的空行
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip(), removed
+
+
 # ====================================================================
 # 主清理函数
 # ====================================================================
@@ -311,6 +372,11 @@ def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
 
     _reset_body_counts()
     stats_report: dict = {}
+
+    # ---- 第负一层：移除 DSML/XML 工具调用标签（安全网） ----
+    text, xml_removed = _strip_xml_like_tags(text)
+    if xml_removed:
+        stats_report["移除工具调用标签"] = xml_removed
 
     # ---- 第零层：删除连续重复段落（最严重的硬伤，先于一切处理） ----
     text, dup_stats = _dedupe_repeated_paragraphs(text)
