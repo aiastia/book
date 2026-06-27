@@ -1423,12 +1423,10 @@ class ChapterService:
                 f"  → 如果写对手戏/情感戏，需要确认两人关系 → query_character_relations\n\n"
 
                 f"📍 写到新场景时：\n"
-                f"  → 如果提示词只给了场景名，需要氛围/危险等级/描述 → query_location\n"
-                f"  → 如果是新地点（query_location 返回未找到）→ generate_location 创建\n\n"
+                f"  → 需要氛围/危险等级/描述 → query_location\n\n"
 
                 f"🔧 写到道具/装备时：\n"
-                f"  → 需要确认归属/属性/状态 → query_item\n"
-                f"  → 如果是新物品（query_item 返回未找到）→ generate_item 创建\n\n"
+                f"  → 需要确认归属/属性/状态 → query_item\n\n"
 
                 f"🏛️ 写到势力/组织冲突时：\n"
                 f"  → 需要确认组织架构/成员/势力值 → query_organization\n\n"
@@ -1463,10 +1461,13 @@ class ChapterService:
 
                 f"【不要做的事】\n"
                 f"- 不要在第一轮就调 list_available_entities——先根据提示词判断缺什么\n"
-                f"- 不要把所有角色都查一遍——只查你正在写的\n"
+                f"- 不要把角色/物品/地点全查一遍——只查正在写的\n"
                 f"- 不要对同一个实体反复查询——查一次就够了\n"
                 f"- 不要查提示词里已经给出的信息\n"
-                f"- 查询返回「未找到」就说明数据不存在，不要换关键词反复查\n\n"
+                f"- 查询返回「未找到」→ 停止，不要换关键词重试同一实体。\n"
+                f"  物品名可能是武器昵称/能力名/称呼（如\"血刃\"不一定是DB条目），\n"
+                f"  直接按大纲或上下文中已有的描述继续写作\n"
+                f"- generate_item / generate_location 仅在大纲明确引入且需要跨章复用时才调\n\n"
 
                 f"现在开始写吧。"
             )
