@@ -1506,13 +1506,14 @@ class ChapterService:
             import logging
             logger = logging.getLogger(__name__)
             if clean_result.stats:
-                logger.info(f"[cleaner] 第{chapter.chapter_number}章指纹清理: {clean_result.stats}")
+                logger.warning(f"[cleaner] 第{chapter.chapter_number}章指纹清理: {clean_result.stats}")
 
             # Diff Rewrite：用小模型改写 cleaner 改不了的句式（如果用户配置了润色 API）
             try:
                 from app.models.ai_model import AIModelConfig as _Cfg
 
                 cfg = None
+                logger.warning(f"[rewrite] 第{chapter.chapter_number}章 开始检查润色配置 (user_id={self.user_id})")
                 if self.user_id:
                     # 优先取默认模型
                     cfg = (
@@ -1523,6 +1524,7 @@ class ChapterService:
                             )
                         )
                     ).scalar_one_or_none()
+                    logger.warning(f"[rewrite] 第{chapter.chapter_number}章 默认模型: {cfg.name if cfg else 'None'}")
                     # 降级：任意一个有润色配置的模型（字段非空字符串）
                     if not cfg or not (cfg.rewrite_base_url or cfg.rewrite_api_key or cfg.rewrite_model):
                         cfg = (
@@ -1533,18 +1535,19 @@ class ChapterService:
                                 ).limit(1)
                             )
                         ).scalar_one_or_none()
+                        logger.warning(f"[rewrite] 第{chapter.chapter_number}章 降级查询模型: {cfg.name if cfg else 'None'}")
                 if cfg and (cfg.rewrite_base_url or cfg.rewrite_api_key or cfg.rewrite_model):
                     from app.services.diff_rewrite_service import diff_rewrite
 
                     rw_base = cfg.rewrite_base_url or cfg.base_url
                     rw_key = cfg.rewrite_api_key or cfg.api_key
                     rw_model = cfg.rewrite_model or "gpt-4o-mini"
-                    logger.info(f"[rewrite] 第{chapter.chapter_number}章 Diff Rewrite 启动 (model={rw_model}, base={rw_base[:50]}...)")
+                    logger.warning(f"[rewrite] 第{chapter.chapter_number}章 Diff Rewrite 启动 (model={rw_model}, base={rw_base[:50]}...)")
                     content, rw_stats = await diff_rewrite(content, rw_base, rw_key, rw_model)
                     if rw_stats:
-                        logger.info(f"[rewrite] 第{chapter.chapter_number}章 Diff Rewrite: {rw_stats}")
+                        logger.warning(f"[rewrite] 第{chapter.chapter_number}章 Diff Rewrite: {rw_stats}")
                 else:
-                    logger.info(f"[rewrite] 第{chapter.chapter_number}章 跳过（未配置润色 API 或无默认模型）")
+                    logger.warning(f"[rewrite] 第{chapter.chapter_number}章 跳过（未配置润色 API 或无默认模型）")
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f"[rewrite] Diff Rewrite 失败（不影响章节）: {e}")
