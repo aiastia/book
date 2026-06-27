@@ -1,0 +1,13 @@
+{
+  "name": "_shared_chunqiu_brush",
+  "display_name": "共享：春秋笔法",
+  "description": "共享模块 — 被 _shared_writing_rules 通过 @include 引用。春秋笔法三条心法：用词即态度、不给结论、克制即力量。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_chunqiu_brush.md"
+}
