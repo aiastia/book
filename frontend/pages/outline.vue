@@ -13,6 +13,28 @@ const { data: outlines, refresh } = await api.getOutlines()
 const generating = ref(false)
 const genCount = ref(10)
 const showGen = ref(false)
+
+// 待补充物品/地点
+const pendingEntities = ref<{ pending_items: any[]; pending_locations: any[]; total: number } | null>(null)
+const fillingEntities = ref(false)
+async function checkPendingEntities() {
+  try {
+    const res = await $fetch(`/api/projects/${currentProjectId.value}/outlines/pending-entities`)
+    if (res.total > 0) pendingEntities.value = res
+    else pendingEntities.value = null
+  } catch (_) { pendingEntities.value = null }
+}
+async function fillPendingEntities() {
+  fillingEntities.value = true
+  try {
+    await $fetch(`/api/projects/${currentProjectId.value}/outlines/generate-pending-entities`, { method: 'POST' })
+    pendingEntities.value = null
+    msg.success('物品和地点已补充')
+  } catch (e: any) { msg.error('补充失败：' + formatError(e)) }
+  finally { fillingEntities.value = false }
+}
+// 页面加载和轮询完成后检查
+checkPendingEntities()
 const editing = ref<any>(null)
 const editForm = reactive({
   title: '', summary: '', emotion: '', goal: '',
@@ -503,6 +525,18 @@ async function deleteExpansion() {
         {{ outlines && outlines.length ? '续写大纲' : 'AI 生成大纲' }}
       </a-button>
     </div>
+
+    <a-alert
+      v-if="pendingEntities"
+      type="warning" show-icon style="margin-bottom:12px;"
+    >
+      <template #message>
+        大纲引入了 {{ pendingEntities.pending_items.length }} 个新物品、{{ pendingEntities.pending_locations.length }} 个新地点
+        <a-button size="small" type="primary" :loading="fillingEntities" @click="fillPendingEntities" style="margin-left:12px;">
+          补充入库
+        </a-button>
+      </template>
+    </a-alert>
 
     <div v-if="outlines && outlines.length" class="outline-list">
       <OutlineCard
