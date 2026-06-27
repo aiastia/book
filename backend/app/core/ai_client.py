@@ -516,10 +516,15 @@ class AIClient:
                 return last_result
 
             # AI 调用本身的错误
-            # 连接错误（Connection error）也重试，其他错误（401/权限）不重试
+            # 连接错误（Connection error / 504 Gateway / Cloudflare）也重试，其他错误（401/权限）不重试
             err_msg = last_result.get("error") or ""
+            err_lower = err_msg.lower()
             is_conn_error = (
-                "Connection" in err_msg or "connection" in err_msg or "Timeout" in err_msg
+                "connection" in err_lower
+                or "timeout" in err_lower
+                or "time-out" in err_lower
+                or "gateway" in err_lower
+                or "504" in err_lower
             )
             if (
                 last_result.get("error")

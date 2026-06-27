@@ -19,7 +19,7 @@ _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
 
 def _resolve_includes(
-    text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None
+    text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None, depth: int = 0
 ) -> str:
     """解析提示词中的 @include:filename 指令，替换为文件内容。
 
@@ -33,6 +33,7 @@ def _resolve_includes(
         seen = set()
 
     def _replace(m: re.Match) -> str:
+        nonlocal depth
         fname = m.group(1).strip()
         if fname in seen:
             return f"[@include 循环引用已截断: {fname}]"
@@ -41,8 +42,8 @@ def _resolve_includes(
             seen.add(fname)
             content = user_overrides[fname]
             # 递归解析嵌套 include
-            if len(seen) < 5 and "@include:" in content:
-                content = _resolve_includes(content, base_dir, seen, user_overrides)
+            if depth < 5 and "@include:" in content:
+                content = _resolve_includes(content, base_dir, seen, user_overrides, depth + 1)
             return _normalize_braces(content)
         inc_path = os.path.join(base_dir, fname)
         if not os.path.isfile(inc_path):
@@ -54,8 +55,8 @@ def _resolve_includes(
         except Exception:
             return f"[@include 读取失败: {fname}]"
         # 递归解析嵌套 include，但限制深度
-        if len(seen) < 5 and "@include:" in content:
-            content = _resolve_includes(content, base_dir, seen, user_overrides)
+        if depth < 5 and "@include:" in content:
+            content = _resolve_includes(content, base_dir, seen, user_overrides, depth + 1)
         return _normalize_braces(content)
 
     result = re.sub(r"@include:(\S+\.md)", _replace, text)
@@ -729,7 +730,9 @@ class SkillEngine:
                 if not result.get("error"):
                     break
                 err = result.get("error", "")
-                if "Connection" in err or "connection" in err or "Timeout" in err:
+                err_lower = err.lower()
+                if ("connection" in err_lower or "timeout" in err_lower
+                    or "time-out" in err_lower or "gateway" in err_lower or "504" in err_lower):
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
                 # 非连接错误（如 Bad Request）→ 不带工具重试一次
