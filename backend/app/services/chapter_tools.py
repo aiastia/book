@@ -17,6 +17,8 @@
 11. query_outline - 查大纲规划（计划 vs 实际对比）
 12. list_available_entities - 列出项目中所有可查询的实体概要（角色/组织/地点/物品）
 13. query_memory - 向量语义检索历史记忆（已写章节的剧情/角色变化/伏笔/重要情节）
+14. generate_item - 按需生成新物品/道具（当 query_item 返回未找到时调用）
+15. generate_location - 按需生成新地点/场景（当 query_location 返回未找到时调用）
 """
 
 import json
@@ -259,6 +261,58 @@ def get_chapter_tools() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_item",
+                "description": "当 query_item 返回「未找到」时，用此工具按需生成新物品/道具。大纲或正文中提到的新物品都应通过此工具创建，确保后续章节可查询。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "物品名",
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": ["装备", "消耗品", "材料", "关键道具", "杂物", "其他"],
+                            "description": "物品分类",
+                        },
+                        "description_hint": {
+                            "type": "string",
+                            "description": "从上下文中提取的物品描述线索（在大纲/正文中它是怎么被提到的）",
+                        },
+                    },
+                    "required": ["name", "category"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_location",
+                "description": "当 query_location 返回「未找到」时，用此工具按需生成新地点/场景。大纲或正文中提到的新地点都应通过此工具创建。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "地点名",
+                        },
+                        "location_type": {
+                            "type": "string",
+                            "enum": ["建筑", "自然景观", "秘境", "城市", "室内", "其他"],
+                            "description": "地点类型",
+                        },
+                        "description_hint": {
+                            "type": "string",
+                            "description": "从上下文中提取的地点描述线索",
+                        },
+                    },
+                    "required": ["name", "location_type"],
+                },
+            },
+        },
     ]
 
 
@@ -327,6 +381,22 @@ def make_tool_executor(db: AsyncSession, project_id: int, chapter_number: int = 
                     query=arguments.get("query", ""),
                     memory_type=arguments.get("memory_type", "all"),
                     limit=arguments.get("limit", 5),
+                )
+
+            elif tool_name == "generate_item":
+                return await _generate_item(
+                    db, project_id,
+                    name=arguments.get("name", ""),
+                    category=arguments.get("category", "杂物"),
+                    description_hint=arguments.get("description_hint", ""),
+                )
+
+            elif tool_name == "generate_location":
+                return await _generate_location(
+                    db, project_id,
+                    name=arguments.get("name", ""),
+                    location_type=arguments.get("location_type", "其他"),
+                    description_hint=arguments.get("description_hint", ""),
                 )
 
             else:
@@ -1114,3 +1184,96 @@ async def _query_memory(
     except Exception as e:
         logger.warning(f"[tools] query_memory 失败: {e}")
         return json.dumps({"error": f"记忆检索失败: {str(e)[:200]}"}, ensure_ascii=False)
+
+
+async def _generate_item(
+    db: AsyncSession, project_id: int,
+    name: str, category: str = "杂物", description_hint: str = "",
+) -> str:
+    """按需生成新物品。如果已存在则返回已有记录。"""
+    if not name.strip():
+        return json.dumps({"error": "请提供物品名"}, ensure_ascii=False)
+
+    # 检查是否已存在
+    from app.models.item import Item
+    existing = (
+        (await db.execute(select(Item).where(Item.project_id == project_id)))
+        .scalars().all()
+    )
+    matched = [i for i in existing if name in i.name or i.name in name]
+    if matched:
+        i = matched[0]
+        return json.dumps({
+            "name": i.name, "category": i.category, "rarity": i.rarity,
+            "description": (i.description or "")[:200],
+            "_note": "物品已存在，返回已有记录",
+        }, ensure_ascii=False)
+
+    # 创建新物品
+    hint = f"（上下文线索：{description_hint[:200]}）" if description_hint else ""
+    item = Item(
+        project_id=project_id,
+        name=name,
+        category=category,
+        rarity="普通",
+        item_type="道具",
+        description=f"大纲提及的新物品。{hint}",
+        status="available",
+    )
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+
+    logger.warning(f"[tools] 自动生成物品: {name} (category={category})")
+    return json.dumps({
+        "name": item.name, "category": item.category, "rarity": item.rarity,
+        "description": item.description or "",
+        "_note": "新物品已创建，可通过 query_item 查询详情",
+    }, ensure_ascii=False)
+
+
+async def _generate_location(
+    db: AsyncSession, project_id: int,
+    name: str, location_type: str = "其他", description_hint: str = "",
+) -> str:
+    """按需生成新地点。如果已存在则返回已有记录。"""
+    if not name.strip():
+        return json.dumps({"error": "请提供地点名"}, ensure_ascii=False)
+
+    # 检查是否已存在
+    from app.models.location import Location
+    existing = (
+        (await db.execute(select(Location).where(Location.project_id == project_id)))
+        .scalars().all()
+    )
+    matched = [l for l in existing if name in l.name or l.name in name]
+    if matched:
+        l = matched[0]
+        return json.dumps({
+            "name": l.name, "location_type": l.location_type,
+            "description": (l.description or "")[:200],
+            "danger_level": l.danger_level,
+            "_note": "地点已存在，返回已有记录",
+        }, ensure_ascii=False)
+
+    # 创建新地点
+    hint = f"（大纲线索：{description_hint[:200]}）" if description_hint else ""
+    loc = Location(
+        project_id=project_id,
+        name=name,
+        location_type=location_type,
+        description=f"大纲提及的新地点。{hint}",
+        atmosphere="",
+        danger_level="safe",
+    )
+    db.add(loc)
+    await db.commit()
+    await db.refresh(loc)
+
+    logger.warning(f"[tools] 自动生成地点: {name} (type={location_type})")
+    return json.dumps({
+        "name": loc.name, "location_type": loc.location_type,
+        "description": loc.description or "",
+        "danger_level": loc.danger_level,
+        "_note": "新地点已创建，可通过 query_location 查询详情",
+    }, ensure_ascii=False)

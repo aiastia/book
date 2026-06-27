@@ -1423,10 +1423,12 @@ class ChapterService:
                 f"  → 如果写对手戏/情感戏，需要确认两人关系 → query_character_relations\n\n"
 
                 f"📍 写到新场景时：\n"
-                f"  → 如果提示词只给了场景名，需要氛围/危险等级/描述 → query_location\n\n"
+                f"  → 如果提示词只给了场景名，需要氛围/危险等级/描述 → query_location\n"
+                f"  → 如果是新地点（query_location 返回未找到）→ generate_location 创建\n\n"
 
                 f"🔧 写到道具/装备时：\n"
-                f"  → 需要确认归属/属性/状态 → query_item\n\n"
+                f"  → 需要确认归属/属性/状态 → query_item\n"
+                f"  → 如果是新物品（query_item 返回未找到）→ generate_item 创建\n\n"
 
                 f"🏛️ 写到势力/组织冲突时：\n"
                 f"  → 需要确认组织架构/成员/势力值 → query_organization\n\n"
