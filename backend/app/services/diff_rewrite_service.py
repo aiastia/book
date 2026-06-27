@@ -145,7 +145,7 @@ def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
             matches.append({"start": start, "end": end, "sentence": sentence})
 
     # 只有超过阈值时才标记
-    threshold = 4
+    threshold = 1  # 提示词已禁止，残留即标记改写
     if len(matches) <= threshold:
         return []
 
