@@ -3,7 +3,6 @@
 import { useProjectApi } from '~/composables/useProjectApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
-import { diffWords } from 'diff'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
 
@@ -27,7 +26,6 @@ const editing = ref<any>(null)
 const editingContent = ref('')
 const rawOutput = ref('')
 const showRaw = ref(false)
-const rawDiff = computed(() => rawOutput.value && editingContent.value ? diffWords(rawOutput.value, editingContent.value) : [])
 const editingTitle = ref('')
 const generating = ref(false)
 const saving = ref(false)
@@ -59,6 +57,60 @@ function openAnalysis(c: any) {
   nextTick(() => {
     analysisPanelRef.value?.open()
   })
+}
+
+// ===== 分析建议 → 重写 → 对比 =====
+const rewriteCompareOpen = ref(false)
+const rewriteOriginal = ref('')
+const rewriteNew = ref('')
+
+async function onRewriteWithSuggestions(suggestions: string[]) {
+  if (!analysisPanelChapter.value) return
+  const ch = analysisPanelChapter.value
+  // 把建议拼成修改指令
+  const instructions = suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')
+  // 获取原文内容
+  const full = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${ch.id}`).catch(() => null)
+  rewriteOriginal.value = full?.content || ''
+  rewriteNew.value = ''
+  rewriteCompareOpen.value = false
+
+  // 调重写 API
+  try {
+    msg.loading('正在根据建议重写...')
+    const r = await api.regenerateChapter(ch.id, {
+      modification_instructions: instructions,
+      focus_areas: [],
+      preserve_elements: [],
+      length_mode: 'similar',
+      target_word_count: null,
+      version_note: '根据分析建议重写',
+    })
+    rewriteNew.value = r?.regenerated_content || ''
+    msg.destroyAll()
+    if (rewriteNew.value) {
+      rewriteCompareOpen.value = true
+    } else {
+      msg.warning('重写未返回内容')
+    }
+  } catch (e: any) {
+    msg.destroyAll()
+    msg.error('重写失败：' + formatError(e))
+  }
+}
+
+async function onApplyRewriteCompare() {
+  if (!analysisPanelChapter.value) return
+  const ch = analysisPanelChapter.value
+  try {
+    await api.updateChapter(ch.id, { content: rewriteNew.value })
+    msg.success('已应用新内容')
+    rewriteCompareOpen.value = false
+    analysisPanelChapter.value = null
+    await refreshList()
+  } catch (e: any) {
+    msg.error('应用失败：' + formatError(e))
+  }
 }
 
 // ===== 修改弹窗 =====
@@ -1034,33 +1086,18 @@ async function onPlanSaved() {
           </div>
         </div>
 
-        <!-- RAW 原始输出（左右对比） -->
-        <div v-if="rawOutput" style="margin-bottom:12px">
-          <a-button size="small" type="link" @click="showRaw = !showRaw" style="padding:0">
-            {{ showRaw ? '收起对比' : '📄 查看清理前后对比' }}
+        <!-- RAW 原始输出对比（弹窗） -->
+        <div v-if="rawOutput" style="margin-bottom:8px">
+          <a-button size="small" type="link" @click="showRaw = true" style="padding:0">
+            📄 查看清理前后对比
           </a-button>
-          <div v-if="showRaw" class="diff-split">
-            <div class="diff-side diff-side-left">
-              <div class="diff-side-title">原始输出（清理前）</div>
-              <div class="diff-side-content">
-                <template v-for="(part, idx) in rawDiff" :key="idx">
-                  <span v-if="part.removed" class="diff-removed">{{ part.value }}</span>
-                  <span v-else-if="!part.added">{{ part.value }}</span>
-                </template>
-              </div>
-            </div>
-            <div class="diff-divider"></div>
-            <div class="diff-side diff-side-right">
-              <div class="diff-side-title">清理后（当前正文）</div>
-              <div class="diff-side-content">
-                <template v-for="(part, idx) in rawDiff" :key="idx">
-                  <span v-if="part.added" class="diff-added">{{ part.value }}</span>
-                  <span v-else-if="!part.removed">{{ part.value }}</span>
-                </template>
-              </div>
-            </div>
-          </div>
         </div>
+        <ContentComparisonModal
+          v-model:visible="showRaw"
+          title="清理前后对比"
+          :original-content="rawOutput"
+          :new-content="editingContent"
+        />
 
         <!-- 内容编辑区 -->
         <div class="ch-editor">
@@ -1071,6 +1108,16 @@ async function onPlanSaved() {
         </div>
       </div>
     </a-modal>
+
+    <!-- ===== 重写对比弹窗（分析建议 → 重写 → 对比） ===== -->
+    <ContentComparisonModal
+      v-model:visible="rewriteCompareOpen"
+      title="重写前后对比"
+      :original-content="rewriteOriginal"
+      :new-content="rewriteNew"
+      show-actions
+      @apply="onApplyRewriteCompare"
+    />
 
     <!-- ===== 修改弹窗 ===== -->
     <a-modal v-model:open="modifyOpen" title="修改章节信息" width="480px">
@@ -1207,6 +1254,7 @@ async function onPlanSaved() {
       :chapter-id="analysisPanelChapter.id"
       :chapter-number="analysisPanelChapter.chapter_number"
       :quality-score="analysisPanelChapter.quality_score"
+      @rewrite-with-suggestions="onRewriteWithSuggestions"
     />
 
     <!-- ===== 章节规划编辑器 ===== -->

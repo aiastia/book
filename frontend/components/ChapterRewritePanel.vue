@@ -7,7 +7,7 @@ const props = defineProps<{
   chapterId: number | null
   chapterContent: string
 }>()
-const emit = defineEmits<{ (e: 'applied'): void }>()
+const emit = defineEmits<{ (e: 'applied'): void; (e: 'regenerated', content: string): void }>()
 
 const api = useProjectApi()
 const msg = useMessage()
@@ -89,6 +89,10 @@ async function onRewrite() {
     rewriteResult.value = r
     msg.success('重写完成')
     await loadHistory()
+    // emit regenerated 事件，让父组件打开对比弹窗
+    if (r?.regenerated_content) {
+      emit('regenerated', r.regenerated_content)
+    }
   } catch (e: any) {
     msg.error('重写失败：' + formatError(e))
   } finally {

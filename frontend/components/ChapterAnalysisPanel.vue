@@ -8,7 +8,7 @@ const props = defineProps<{
   qualityScore?: number | null
 }>()
 
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'rewriteWithSuggestions', suggestions: string[]): void }>()
 
 const { currentProjectId } = useProject()
 const msg = useMessage()
@@ -490,7 +490,18 @@ defineExpose({ open })
             <a-tag v-for="t in analysis.conflict_types" :key="t" color="red">{{ t }}</a-tag>
           </div>
           <div v-if="parseSuggestions(analysis.suggestions).length" class="section-block">
-            <div class="section-title">💡 改进建议</div>
+            <a-alert type="info" show-icon :closable="false" style="margin-bottom:12px">
+              <template #message>
+                <span>💡 发现 {{ parseSuggestions(analysis.suggestions).length }} 条改进建议</span>
+              </template>
+              <template #description>
+                <div style="display:flex;align-items:center;gap:12px">
+                  <span>AI 已分析出改进建议，可根据这些建议重新生成章节内容。</span>
+                  <a-button type="primary" size="small" @click="emit('rewriteWithSuggestions', parseSuggestions(analysis.suggestions))">✏️ 根据建议重新生成</a-button>
+                </div>
+              </template>
+            </a-alert>
+            <div class="section-title">改进建议详情</div>
             <div class="suggestion-list">
               <div v-for="(s, i) in parseSuggestions(analysis.suggestions)" :key="i" class="suggestion-item">
                 <span class="suggestion-badge">{{ i + 1 }}</span>
