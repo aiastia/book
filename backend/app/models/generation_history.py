@@ -1,6 +1,9 @@
 """生成历史模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Float
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 

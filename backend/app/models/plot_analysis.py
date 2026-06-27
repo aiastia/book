@@ -1,6 +1,9 @@
 """剧情分析模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Float
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -13,7 +16,9 @@ class PlotAnalysis(Base):
     chapter_number = Column(Integer, nullable=False)
     # 分析结果
     hooks = Column(JSON, default=dict)  # 剧情钩子 {suspense, emotional, conflict, cognitive}
-    foreshadows = Column(JSON, default=list)  # 伏笔分析 [{type, title, detail, reference_foreshadow_id}]
+    foreshadows = Column(
+        JSON, default=list
+    )  # 伏笔分析 [{type, title, detail, reference_foreshadow_id}]
     conflicts = Column(JSON, default=list)  # 冲突分析 [{type, parties, intensity, progress}]
     conflict_types = Column(JSON, default=list)  # 冲突类型汇总 [人vs人,人vs社会,内心,环境]
     emotion_curve = Column(JSON, default=list)  # 情感曲线 [{point, emotion, intensity}]
@@ -27,7 +32,9 @@ class PlotAnalysis(Base):
     dialogue_ratio = Column(Float, default=0)  # 对话占比 0-1
     description_ratio = Column(Float, default=0)  # 描写占比 0-1
     pacing = Column(String(20), default="")  # 节奏 fast/medium/slow
-    quality_scores = Column(JSON, default=dict)  # {overall, pacing, engagement, coherence, writing_quality, character_depth, dialogue_quality, world_consistency, plot_logic, attraction, retention, bookmark_ratio, score_justification}
+    quality_scores = Column(
+        JSON, default=dict
+    )  # {overall, pacing, engagement, coherence, writing_quality, character_depth, dialogue_quality, world_consistency, plot_logic, attraction, retention, bookmark_ratio, score_justification}
     analysis_report = Column(Text, default="")  # 标准格式分析报告文本（=== 章节分析报告 ===）
     consistency_issues = Column(JSON, default=list)  # 一致性问题列表
     suggestions = Column(JSON, default=list)  # 改进建议

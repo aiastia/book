@@ -6,12 +6,14 @@
 - 应用重写结果（覆盖章节）
 - 局部重写（选中片段重写）+ 应用
 """
-import logging
+
 import difflib
+import logging
+
 from app.api.routes.projects_pkg.base import *
 from app.models.chapter import Chapter
-from app.models.regeneration_task import RegenerationTask
 from app.models.outline import Outline
+from app.models.regeneration_task import RegenerationTask
 
 logger = logging.getLogger(__name__)
 router = make_router()
@@ -51,8 +53,14 @@ def _build_rewrite_prompt(chapter: Chapter, outline: Outline, req: RegenerateReq
     """组装重写提示词。"""
     orig_count = len(chapter.content or "")
     min_words, max_words = _calc_word_range(orig_count, req.length_mode, req.target_word_count)
-    focus_text = "、".join(FOCUS_DESC.get(f, f) for f in req.focus_areas) if req.focus_areas else "整体提升"
-    preserve_text = "\n".join(f"- {p}" for p in req.preserve_elements) if req.preserve_elements else "无特殊要求"
+    focus_text = (
+        "、".join(FOCUS_DESC.get(f, f) for f in req.focus_areas) if req.focus_areas else "整体提升"
+    )
+    preserve_text = (
+        "\n".join(f"- {p}" for p in req.preserve_elements)
+        if req.preserve_elements
+        else "无特殊要求"
+    )
 
     return f"""你是资深网文编辑。请重写以下章节内容。
 
@@ -63,13 +71,13 @@ def _build_rewrite_prompt(chapter: Chapter, outline: Outline, req: RegenerateReq
 4. 必须保留的元素：
 {preserve_text}
 5. 保持原有剧情走向、人设、关键事件不变
-6. {('扩写：增加细节、心理、环境描写，丰富层次' if req.length_mode == 'expand' else '')}
-   {('精简：删除冗余，加快节奏，保留核心' if req.length_mode == 'condense' else '')}
-   {('保持相似长度，优化质量' if req.length_mode == 'similar' else '')}
+6. {("扩写：增加细节、心理、环境描写，丰富层次" if req.length_mode == "expand" else "")}
+   {("精简：删除冗余，加快节奏，保留核心" if req.length_mode == "condense" else "")}
+   {("保持相似长度，优化质量" if req.length_mode == "similar" else "")}
 
-小说：《{project.title}》（{project.genre or '网文'}）
+小说：《{project.title}》（{project.genre or "网文"}）
 章节：第{chapter.chapter_number}章 {chapter.title}
-大纲：{outline.summary if outline else '（无）'}
+大纲：{outline.summary if outline else "（无）"}
 
 原始内容（{orig_count}字）：
 {chapter.content}
@@ -79,14 +87,19 @@ def _build_rewrite_prompt(chapter: Chapter, outline: Outline, req: RegenerateReq
 
 @router.post("/{project_id}/chapters/{chapter_id}/regenerate")
 async def regenerate_chapter(
-    project_id: int, chapter_id: int, req: RegenerateReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    chapter_id: int,
+    req: RegenerateReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """整章重写（#11 #13）。保存版本快照，返回重写结果。"""
     project = await get_user_project(db, project_id, user)
-    chapter = (await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
-    )).scalar_one_or_none()
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not chapter:
         raise HTTPException(404, "章节不存在")
     if not chapter.content or len(chapter.content.strip()) < 50:
@@ -94,12 +107,20 @@ async def regenerate_chapter(
 
     outline = None
     if chapter.outline_id:
-        outline = (await db.execute(select(Outline).where(Outline.id == chapter.outline_id))).scalar_one_or_none()
+        outline = (
+            await db.execute(select(Outline).where(Outline.id == chapter.outline_id))
+        ).scalar_one_or_none()
 
     # 计算下一版本号
-    existing_count = (await db.execute(
-        select(RegenerationTask).where(RegenerationTask.chapter_id == chapter_id)
-    )).scalars().all()
+    existing_count = (
+        (
+            await db.execute(
+                select(RegenerationTask).where(RegenerationTask.chapter_id == chapter_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     next_version = len(existing_count) + 1
 
     # 原文快照
@@ -129,9 +150,13 @@ async def regenerate_chapter(
     # 调 AI 重写（使用公用 skill 的 system prompt，user_prompt 携带具体指令）
     engine, ai_client = await make_engine_and_client(db, user.id)
     prompt = _build_rewrite_prompt(chapter, outline, req, project)
-    result = await engine.execute_skill("chapter_full_rewrite", ai_client, {
-        "user_prompt": prompt,
-    })
+    result = await engine.execute_skill(
+        "chapter_full_rewrite",
+        ai_client,
+        {
+            "user_prompt": prompt,
+        },
+    )
     if result.get("error"):
         task.status = "failed"
         task.error = result["error"]
@@ -142,7 +167,7 @@ async def regenerate_chapter(
     # 清理 AI 常见前缀
     for prefix in ["重写后：", "以下是重写后的内容：", "```", "重写内容："]:
         if new_content.startswith(prefix):
-            new_content = new_content[len(prefix):].strip()
+            new_content = new_content[len(prefix) :].strip()
     if new_content.startswith("```"):
         new_content = new_content.split("\n", 1)[-1] if "\n" in new_content else new_content
     if new_content.endswith("```"):
@@ -159,33 +184,50 @@ async def regenerate_chapter(
 
 @router.get("/{project_id}/chapters/{chapter_id}/regeneration/tasks")
 async def list_regen_tasks(
-    project_id: int, chapter_id: int, limit: int = 20,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    chapter_id: int,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """重写历史列表（#11）。"""
     await get_user_project(db, project_id, user)
-    tasks = (await db.execute(
-        select(RegenerationTask).where(
-            RegenerationTask.chapter_id == chapter_id,
-            RegenerationTask.project_id == project_id,
-        ).order_by(RegenerationTask.id.desc()).limit(limit)
-    )).scalars().all()
+    tasks = (
+        (
+            await db.execute(
+                select(RegenerationTask)
+                .where(
+                    RegenerationTask.chapter_id == chapter_id,
+                    RegenerationTask.project_id == project_id,
+                )
+                .order_by(RegenerationTask.id.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [t.to_dict() for t in tasks]
 
 
 @router.get("/{project_id}/chapters/{chapter_id}/regeneration/{task_id}")
 async def get_regen_task(
-    project_id: int, chapter_id: int, task_id: int,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    chapter_id: int,
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """获取重写任务详情（含原文/重写文，用于对比）。"""
     await get_user_project(db, project_id, user)
-    task = (await db.execute(
-        select(RegenerationTask).where(
-            RegenerationTask.id == task_id,
-            RegenerationTask.chapter_id == chapter_id,
+    task = (
+        await db.execute(
+            select(RegenerationTask).where(
+                RegenerationTask.id == task_id,
+                RegenerationTask.chapter_id == chapter_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not task:
         raise HTTPException(404, "重写任务不存在")
     return {
@@ -205,24 +247,29 @@ def _calc_diff(original: str, new: str) -> float:
 
 @router.post("/{project_id}/chapters/{chapter_id}/regeneration/{task_id}/apply")
 async def apply_regen(
-    project_id: int, chapter_id: int, task_id: int,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    chapter_id: int,
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """应用重写结果（覆盖章节内容）。"""
     await get_user_project(db, project_id, user)
-    task = (await db.execute(
-        select(RegenerationTask).where(
-            RegenerationTask.id == task_id,
-            RegenerationTask.chapter_id == chapter_id,
+    task = (
+        await db.execute(
+            select(RegenerationTask).where(
+                RegenerationTask.id == task_id,
+                RegenerationTask.chapter_id == chapter_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not task:
         raise HTTPException(404, "重写任务不存在")
     if task.status != "completed":
         raise HTTPException(400, "重写任务未完成")
-    chapter = (await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id)
-    )).scalar_one_or_none()
+    chapter = (
+        await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    ).scalar_one_or_none()
     if not chapter:
         raise HTTPException(404, "章节不存在")
     chapter.content = task.regenerated_content
@@ -243,14 +290,19 @@ class PartialRegenReq(BaseModel):
 
 @router.post("/{project_id}/chapters/{chapter_id}/partial-regenerate")
 async def partial_regenerate(
-    project_id: int, chapter_id: int, req: PartialRegenReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    chapter_id: int,
+    req: PartialRegenReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """局部重写：只重写选中的片段（#13）。"""
     project = await get_user_project(db, project_id, user)
-    chapter = (await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
-    )).scalar_one_or_none()
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not chapter:
         raise HTTPException(404, "章节不存在")
     if not req.selected_text.strip():
@@ -262,11 +314,17 @@ async def partial_regenerate(
     min_w, max_w = _calc_word_range(orig_count, req.length_mode, None)
 
     # 取上下文（前后各 300 字）
-    start = max(0, req.start_position - 300) if req.start_position else max(0, content.find(sel) - 300)
-    ctx_before = content[start:req.start_position] if req.start_position else content[max(0, content.find(sel) - 300):content.find(sel)]
+    start = (
+        max(0, req.start_position - 300) if req.start_position else max(0, content.find(sel) - 300)
+    )
+    ctx_before = (
+        content[start : req.start_position]
+        if req.start_position
+        else content[max(0, content.find(sel) - 300) : content.find(sel)]
+    )
     sel_pos = content.find(sel)
     end_pos = sel_pos + len(sel) if sel_pos >= 0 else len(content)
-    ctx_after = content[end_pos:min(len(content), end_pos + 300)]
+    ctx_after = content[end_pos : min(len(content), end_pos + 300)]
 
     engine, ai_client = await make_engine_and_client(db, user.id)
     prompt = f"""你是网文编辑。请只重写以下选中的片段，保持与上下文衔接自然。
@@ -281,21 +339,25 @@ async def partial_regenerate(
 {ctx_after}
 
 重写要求：
-1. {req.instructions or '优化表达，提升质量'}
+1. {req.instructions or "优化表达，提升质量"}
 2. 长度模式：{req.length_mode}（目标 {min_w}-{max_w} 字）
 3. 必须与前后文衔接自然，语气风格一致
 4. 只输出重写后的片段内容（不要包含前文后文，不要说明，不要 markdown）
 
 请直接输出："""
-    result = await engine.execute_skill("partial_regenerate", ai_client, {
-        "user_prompt": prompt,
-    })
+    result = await engine.execute_skill(
+        "partial_regenerate",
+        ai_client,
+        {
+            "user_prompt": prompt,
+        },
+    )
     if result.get("error"):
         raise HTTPException(500, f"局部重写失败: {result['error']}")
     new_text = (result.get("content") or "").strip()
     for prefix in ["重写后：", "以下是重写：", "```"]:
         if new_text.startswith(prefix):
-            new_text = new_text[len(prefix):].strip()
+            new_text = new_text[len(prefix) :].strip()
     if new_text.endswith("```"):
         new_text = new_text[:-3].strip()
 
@@ -317,18 +379,23 @@ class ApplyPartialReq(BaseModel):
 
 @router.post("/{project_id}/chapters/{chapter_id}/apply-partial-regenerate")
 async def apply_partial(
-    project_id: int, chapter_id: int, req: ApplyPartialReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    chapter_id: int,
+    req: ApplyPartialReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """应用局部重写（替换原文片段）。"""
     await get_user_project(db, project_id, user)
-    chapter = (await db.execute(
-        select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
-    )).scalar_one_or_none()
+    chapter = (
+        await db.execute(
+            select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not chapter:
         raise HTTPException(404, "章节不存在")
     content = chapter.content or ""
-    new_content = content[:req.start_position] + req.new_text + content[req.end_position:]
+    new_content = content[: req.start_position] + req.new_text + content[req.end_position :]
     chapter.content = new_content
     chapter.word_count = len(new_content)
     await db.commit()

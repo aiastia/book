@@ -13,19 +13,28 @@
 7. 物品道具
 8. 大纲（默认3章，用户可选）
 """
+
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # 角色英文 role → 中文映射
 ROLE_MAP = {
-    "protagonist": "主角", "main": "主角", "主角": "主角",
-    "antagonist": "反派", "villain": "反派", "反派": "反派",
-    "supporting": "配角", "side": "配角", "配角": "配角",
-    "minor": "路人", "passby": "路人", "路人": "路人",
+    "protagonist": "主角",
+    "main": "主角",
+    "主角": "主角",
+    "antagonist": "反派",
+    "villain": "反派",
+    "反派": "反派",
+    "supporting": "配角",
+    "side": "配角",
+    "配角": "配角",
+    "minor": "路人",
+    "passby": "路人",
+    "路人": "路人",
 }
 
 # 初始化步骤定义（名称, 进度, done 字段名）
@@ -48,29 +57,41 @@ INIT_STEPS = [
 STEP_ORDER = [s[0] for s in INIT_STEPS]
 
 
-async def _safe_skill_call(engine, ai_client, skill_name, context, label="步骤", max_retries=1, tools=None, tool_executor=None):
+async def _safe_skill_call(
+    engine,
+    ai_client,
+    skill_name,
+    context,
+    label="步骤",
+    max_retries=1,
+    tools=None,
+    tool_executor=None,
+):
     """带重试的 skill 调用。
-    
+
     每次调用内部含 execute_skill 的 JSON 重试（AI_MAX_RETRIES=1 次），
     这里额外重试 max_retries 次，处理连接级错误。
     支持透传 tools 和 tool_executor 给 execute_skill。
     """
     import logging
+
     logger = logging.getLogger(__name__)
     last_err = None
     for attempt in range(max_retries):
         try:
-            result = await engine.execute_skill(skill_name, ai_client, context, tools=tools, tool_executor=tool_executor)
+            result = await engine.execute_skill(
+                skill_name, ai_client, context, tools=tools, tool_executor=tool_executor
+            )
             if not result.get("error"):
                 return result, None
             last_err = result.get("error")
-            logger.warning(f"[init] {label} 第{attempt+1}次失败: {last_err[:200]}")
+            logger.warning(f"[init] {label} 第{attempt + 1}次失败: {last_err[:200]}")
         except Exception as e:
             last_err = str(e)
-            logger.warning(f"[init] {label} 第{attempt+1}次异常: {last_err[:200]}")
+            logger.warning(f"[init] {label} 第{attempt + 1}次异常: {last_err[:200]}")
         if attempt < max_retries - 1:
             delay = min(2 * (attempt + 1), 10)
-            logger.info(f"[init] {label}第{attempt+1}次重试，等待{delay}秒...")
+            logger.info(f"[init] {label}第{attempt + 1}次重试，等待{delay}秒...")
             await asyncio.sleep(delay)
     logger.error(f"[init] {label} 全部{max_retries}次尝试失败，最后错误: {last_err[:300]}")
     return None, f"{label}失败（已重试{max_retries}次）: {last_err}"
@@ -90,14 +111,14 @@ def _build_world_info(proj) -> str:
     return "\n".join(parts) if parts else "暂无世界观信息"
 
 
-from app.core.database import get_db, async_session
+from app.api.routes.projects_pkg.outlines import _build_outline
+from app.core.ai_client import AIClient
 from app.core.auth import get_current_user
+from app.core.database import async_session, get_db
 from app.models.project import Project
 from app.models.project_init_task import ProjectInitTask
-from app.skills.engine import SkillEngine
-from app.core.ai_client import AIClient
 from app.services.chapter_tools import get_chapter_tools, make_tool_executor
-from app.api.routes.projects_pkg.outlines import _build_outline
+from app.skills.engine import SkillEngine
 
 router = APIRouter(prefix="/api/projects", tags=["项目初始化"])
 
@@ -115,7 +136,9 @@ def _join_sub_occupations(item: dict) -> str:
     raw = item.get("sub_careers") or item.get("secondary_occupations") or []
     if isinstance(raw, str):
         # 已是字符串，按分号/逗号归一
-        parts = [p.strip() for p in raw.replace("，", ";").replace(",", ";").split(";") if p.strip()]
+        parts = [
+            p.strip() for p in raw.replace("，", ";").replace(",", ";").split(";") if p.strip()
+        ]
         return ";".join(parts)[:500]
     if isinstance(raw, list):
         parts = []
@@ -138,10 +161,18 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
     task.progress = 5
     await db.commit()
 
-    result, werr = await _safe_skill_call(engine, ai_client, "world_core_generate", {
-        "genre": proj.genre or "网文", "title": proj.title, "synopsis": proj.synopsis or "暂无",
-        "user_prompt": f"请为《{proj.title}》生成核心世界观。",
-    }, "世界观")
+    result, werr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "world_core_generate",
+        {
+            "genre": proj.genre or "网文",
+            "title": proj.title,
+            "synopsis": proj.synopsis or "暂无",
+            "user_prompt": f"请为《{proj.title}》生成核心世界观。",
+        },
+        "世界观",
+    )
     if werr:
         return werr
     data = result.get("json") or {}
@@ -156,21 +187,33 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
     await db.commit()
 
     # 详细世界设定
-    detail_result, derr = await _safe_skill_call(engine, ai_client, "world_detail_generate", {
-        "genre": proj.genre or "网文", "title": proj.title,
-        "synopsis": proj.synopsis or "暂无",
-        "world_info": _build_world_info(proj),
-        "user_prompt": "请生成 6-8 个详细世界设定条目。",
-    }, "详细设定", max_retries=2)
+    detail_result, derr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "world_detail_generate",
+        {
+            "genre": proj.genre or "网文",
+            "title": proj.title,
+            "synopsis": proj.synopsis or "暂无",
+            "world_info": _build_world_info(proj),
+            "user_prompt": "请生成 6-8 个详细世界设定条目。",
+        },
+        "详细设定",
+        max_retries=2,
+    )
     if not derr and detail_result:
         items = detail_result.get("json") or []
         if isinstance(items, list):
             for item in items[:10]:
                 if isinstance(item, dict) and item.get("name"):
-                    db.add(WorldSetting(project_id=pid,
-                        name=str(item.get("name", ""))[:100],
-                        category=str(item.get("category", "其他"))[:50],
-                        content=str(item.get("content", ""))[:2000]))
+                    db.add(
+                        WorldSetting(
+                            project_id=pid,
+                            name=str(item.get("name", ""))[:100],
+                            category=str(item.get("category", "其他"))[:50],
+                            content=str(item.get("content", ""))[:2000],
+                        )
+                    )
             await db.commit()
 
     task.world_done = 1
@@ -190,15 +233,22 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
     # 第一次：生成主职业（5 个，带完整境界体系）
     task.status_message = "生成主职业..."
     await db.commit()
-    main_result, cerr = await _safe_skill_call(engine, ai_client, "career_system_generation", {
-        "title": proj.title, "genre": proj.genre or "网文",
-        "world_info": world_info,
-        "user_prompt": (
-            f"请为《{proj.title}》设计主职业（career_type=\"main\"）。"
-            f"如果本作题材需要完整职业体系（修真/玄幻/游戏等），设计 5 个主职业，每个有 5-9 个阶段。"
-            f"如果本作题材不需要职业体系（如快穿甜宠/纯言情等），返回空数组即可。"
-        ),
-    }, "主职业")
+    main_result, cerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "career_system_generation",
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "world_info": world_info,
+            "user_prompt": (
+                f'请为《{proj.title}》设计主职业（career_type="main"）。'
+                f"如果本作题材需要完整职业体系（修真/玄幻/游戏等），设计 5 个主职业，每个有 5-9 个阶段。"
+                f"如果本作题材不需要职业体系（如快穿甜宠/纯言情等），返回空数组即可。"
+            ),
+        },
+        "主职业",
+    )
     if cerr:
         return cerr
     main_data = main_result.get("json")
@@ -217,21 +267,29 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
         task.status_message = "AI 判断本作不需要职业体系，已跳过"
         await db.commit()
         import logging
-        logging.getLogger(__name__).info(f"[init] 职业体系：AI 判断不需要（主职业返回空数组），跳过")
+
+        logging.getLogger(__name__).info("[init] 职业体系：AI 判断不需要（主职业返回空数组），跳过")
         return None  # 正常完成，不是错误
 
     # 第二次：生成副职业（8 个，进阶阶段精简）
     task.status_message = "生成副职业..."
     await db.commit()
-    sub_result, cerr = await _safe_skill_call(engine, ai_client, "career_system_generation", {
-        "title": proj.title, "genre": proj.genre or "网文",
-        "world_info": world_info,
-        "user_prompt": (
-            f"请为《{proj.title}》设计副职业（career_type=\"sub\"）。"
-            f"如果主职业已生成，副职业作为补充和变体，有 3-5 个精简阶段。"
-            f"如果主职业返回了空数组（题材不需要职业体系），副职业也返回空数组。"
-        ),
-    }, "副职业")
+    sub_result, cerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "career_system_generation",
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "world_info": world_info,
+            "user_prompt": (
+                f'请为《{proj.title}》设计副职业（career_type="sub"）。'
+                f"如果主职业已生成，副职业作为补充和变体，有 3-5 个精简阶段。"
+                f"如果主职业返回了空数组（题材不需要职业体系），副职业也返回空数组。"
+            ),
+        },
+        "副职业",
+    )
     if cerr:
         return cerr
     sub_data = sub_result.get("json")
@@ -247,14 +305,19 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
 
     for item in all_careers[:15]:
         if isinstance(item, dict) and item.get("name"):
-            db.add(Career(project_id=pid,
-                name=str(item.get("name", ""))[:100],
-                career_type=str(item.get("career_type", item.get("type", "main")))[:20],
-                category=str(item.get("category", ""))[:50],
-                description=str(item.get("description", ""))[:2000],
-                stages=item.get("stages", item.get("requirements", [])),
-                abilities=item.get("abilities", item.get("special_abilities", item.get("abilities_list", []))),
-            ))
+            db.add(
+                Career(
+                    project_id=pid,
+                    name=str(item.get("name", ""))[:100],
+                    career_type=str(item.get("career_type", item.get("type", "main")))[:20],
+                    category=str(item.get("category", ""))[:50],
+                    description=str(item.get("description", ""))[:2000],
+                    stages=item.get("stages", item.get("requirements", [])),
+                    abilities=item.get(
+                        "abilities", item.get("special_abilities", item.get("abilities_list", []))
+                    ),
+                )
+            )
     await db.commit()
     task.career_done = 1
     return None
@@ -266,12 +329,13 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
     组织在后续步骤生成，角色暂不关联组织。
     """
     import logging
+
     logger = logging.getLogger(__name__)
     from app.models.character import Character
 
-    existing_count = (await db.execute(
-        select(func.count(Character.id)).where(Character.project_id == pid)
-    )).scalar() or 0
+    existing_count = (
+        await db.execute(select(func.count(Character.id)).where(Character.project_id == pid))
+    ).scalar() or 0
     if existing_count >= 3:
         logger.info(f"[init] 已有{existing_count}个角色，跳过生成")
         task.characters_done = 1
@@ -283,20 +347,31 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
     await db.commit()
 
     from app.models.career import Career
-    careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
-    career_info = "、".join(f"{c.name}({c.career_type})" for c in careers[:8]) if careers else "暂无"
 
-    result, cerr = await _safe_skill_call(engine, ai_client, "characters_batch_generation", {
-        "genre": proj.genre or "网文", "title": proj.title,
-        "synopsis": proj.synopsis or "暂无简介", "count": "5",
-        "existing_characters": "暂无",
-        "world_info": _build_world_info(proj),
-        "user_prompt": (
-            f"请生成5个角色（必须包含1个主角、1个反派、其余配角）。\n"
-            f"已有职业体系：{career_info}\n"
-            f"组织将在后续步骤生成，角色的 organization_memberships 暂返回空数组 []。"
-        ),
-    }, "角色")
+    careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
+    career_info = (
+        "、".join(f"{c.name}({c.career_type})" for c in careers[:8]) if careers else "暂无"
+    )
+
+    result, cerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "characters_batch_generation",
+        {
+            "genre": proj.genre or "网文",
+            "title": proj.title,
+            "synopsis": proj.synopsis or "暂无简介",
+            "count": "5",
+            "existing_characters": "暂无",
+            "world_info": _build_world_info(proj),
+            "user_prompt": (
+                f"请生成5个角色（必须包含1个主角、1个反派、其余配角）。\n"
+                f"已有职业体系：{career_info}\n"
+                f"组织将在后续步骤生成，角色的 organization_memberships 暂返回空数组 []。"
+            ),
+        },
+        "角色",
+    )
     if cerr:
         return cerr
 
@@ -322,13 +397,14 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
 async def _save_characters(db, pid, chars_data, existing_names: set):
     """保存角色到数据库，含职业体系匹配。"""
     import logging
+
     logger = logging.getLogger(__name__)
-    from app.models.character import Character
     from app.models.career import Career
+    from app.models.character import Character
 
     all_careers = (await db.execute(select(Career).where(Career.project_id == pid))).scalars().all()
-    main_career_map = {c.name: c.id for c in all_careers if c.career_type == 'main'}
-    sub_career_map = {c.name: c.id for c in all_careers if c.career_type == 'sub'}
+    main_career_map = {c.name: c.id for c in all_careers if c.career_type == "main"}
+    sub_career_map = {c.name: c.id for c in all_careers if c.career_type == "sub"}
     all_career_map = {c.name: c.id for c in all_careers}
     career_by_id = {c.id: c for c in all_careers}
 
@@ -361,38 +437,80 @@ async def _save_characters(db, pid, chars_data, existing_names: set):
             appearance=str(item.get("appearance", item.get("look", "")))[:2000],
             personality=str(item.get("personality", item.get("character_traits", "")))[:2000],
             background=str(item.get("background", item.get("history", "")))[:2000],
-            growth_experience=str(item.get("growth_experience", item.get("growth", item.get("backstory", item.get("origin", "")))))[:2000],
-            ability=str(item.get("ability", item.get("abilities", item.get("skills", ability_text))))[:2000],
-            story_goal=str(item.get("story_goal", item.get("goal", item.get("core_goal", ""))))[:2000],
-            motivation=str(item.get("motivation", item.get("internal_motivation", item.get("driving_force", item.get("inner_drive", "")))))[:2000],
-            weakness=str(item.get("weakness", item.get("pressure_point", item.get("vulnerability", ""))))[:2000],
-            identity=str(item.get("identity", item.get("social_role", item.get("identity_role", ""))))[:200],
-            speech_style=str(item.get("speech_style", item.get("dialogue_style", item.get("speech_pattern", ""))))[:200],
+            growth_experience=str(
+                item.get(
+                    "growth_experience",
+                    item.get("growth", item.get("backstory", item.get("origin", ""))),
+                )
+            )[:2000],
+            ability=str(
+                item.get("ability", item.get("abilities", item.get("skills", ability_text)))
+            )[:2000],
+            story_goal=str(item.get("story_goal", item.get("goal", item.get("core_goal", ""))))[
+                :2000
+            ],
+            motivation=str(
+                item.get(
+                    "motivation",
+                    item.get(
+                        "internal_motivation",
+                        item.get("driving_force", item.get("inner_drive", "")),
+                    ),
+                )
+            )[:2000],
+            weakness=str(
+                item.get("weakness", item.get("pressure_point", item.get("vulnerability", "")))
+            )[:2000],
+            identity=str(
+                item.get("identity", item.get("social_role", item.get("identity_role", "")))
+            )[:200],
+            speech_style=str(
+                item.get("speech_style", item.get("dialogue_style", item.get("speech_pattern", "")))
+            )[:200],
             arc_type=str(item.get("arc_type", item.get("character_arc", "")))[:200],
-            character_change=str(item.get("character_change", item.get("transformation", "")))[:2000],
+            character_change=str(item.get("character_change", item.get("transformation", "")))[
+                :2000
+            ],
         )
         db.add(char)
 
         # 主职业匹配（在 flush 前先存到 char 上，flush 后再设 id 会失败）
-        occ_parts = [p.strip() for p in occ_raw.replace("/", ",").replace("、", ",").split(",") if p.strip()]
+        occ_raw = str(
+            item.get(
+                "main_career",
+                item.get("occupation", item.get("career", item.get("profession", ""))),
+            )
+            or ""
+        )
+        occ_parts = [
+            p.strip() for p in occ_raw.replace("/", ",").replace("、", ",").split(",") if p.strip()
+        ]
         for occ in occ_parts:
             if occ in main_career_map:
                 char.main_career_id = main_career_map[occ]
                 ai_stage = str(item.get("main_career_stage", "")).strip()
-                char.main_career_stage_desc = ai_stage if ai_stage else _default_stage(career_by_id.get(char.main_career_id))
+                char.main_career_stage_desc = (
+                    ai_stage if ai_stage else _default_stage(career_by_id.get(char.main_career_id))
+                )
                 break
             for cname, cid in main_career_map.items():
                 if occ in cname or cname in occ:
                     char.main_career_id = cid
                     ai_stage = str(item.get("main_career_stage", "")).strip()
-                    char.main_career_stage_desc = ai_stage if ai_stage else _default_stage(career_by_id.get(cid))
+                    char.main_career_stage_desc = (
+                        ai_stage if ai_stage else _default_stage(career_by_id.get(cid))
+                    )
                     break
 
         # 副职业匹配
         sub_names = set()
         subs_raw = item.get("sub_careers") or item.get("sub_careers") or []
         if isinstance(subs_raw, str):
-            subs_raw = [s.strip() for s in subs_raw.replace("，", ",").replace("/", ",").split(",") if s.strip()]
+            subs_raw = [
+                s.strip()
+                for s in subs_raw.replace("，", ",").replace("/", ",").split(",")
+                if s.strip()
+            ]
         for sn in subs_raw:
             sub_names.add(str(sn).strip())
         for occ in occ_parts:
@@ -435,11 +553,16 @@ async def _link_org_memberships(db, pid, raw_chars):
     修复：去掉 break，一个角色所属的所有组织都写入 OrganizationMember；
     organization_id 记录主组织（第一个匹配的）。
     """
-    from app.models.organization import Organization
-    from app.models.organization_member import OrganizationMember
     from sqlalchemy import func
 
-    orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
+
+    orgs = (
+        (await db.execute(select(Organization).where(Organization.project_id == pid)))
+        .scalars()
+        .all()
+    )
     if not orgs:
         return
     org_name_to_id = {o.name: o.id for o in orgs}
@@ -475,13 +598,17 @@ async def _link_org_memberships(db, pid, raw_chars):
                     )
                 )
                 if not existing:
-                    db.add(OrganizationMember(
-                        project_id=pid,
-                        organization_id=org_id,
-                        character_id=char.id,
-                        position=item.get("org_role", "成员")[:50] if isinstance(item.get("org_role"), str) else "成员",
-                        status="active",
-                    ))
+                    db.add(
+                        OrganizationMember(
+                            project_id=pid,
+                            organization_id=org_id,
+                            character_id=char.id,
+                            position=item.get("org_role", "成员")[:50]
+                            if isinstance(item.get("org_role"), str)
+                            else "成员",
+                            status="active",
+                        )
+                    )
 
 
 async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
@@ -489,8 +616,8 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
 
     改进：传递完整的角色/职业/世界观上下文，让 AI 有足够信息做出精准匹配。
     """
-    from app.models.character import Character
     from app.models.career import Career
+    from app.models.character import Character
     from app.models.character_career import CharacterCareer
 
     task.status_message = "分配角色职业..."
@@ -508,7 +635,9 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
         if c.stages and isinstance(c.stages, list):
             stage_names = [s.get("name", "") for s in c.stages[:5] if isinstance(s, dict)]
         stage_preview = " → ".join(stage_names) if stage_names else "无境界数据"
-        abilities = "、".join(c.abilities[:3]) if isinstance(c.abilities, list) and c.abilities else "无"
+        abilities = (
+            "、".join(c.abilities[:3]) if isinstance(c.abilities, list) and c.abilities else "无"
+        )
         career_parts.append(
             f"- ID:{c.id} {c.name}（{c.career_type or 'main'}，{c.category or '通用'}）\n"
             f"  描述：{(c.description or '')[:200]}\n"
@@ -518,16 +647,33 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
     career_list = "\n".join(career_parts)
 
     # 已有主职业的角色 ID（已通过 _step_characters 的 occupation 匹配过的）
-    assigned_ids = [cc.character_id for cc in (await db.execute(
-        select(CharacterCareer).where(CharacterCareer.project_id == pid, CharacterCareer.career_type == "main")
-    )).scalars().all()]
+    assigned_ids = [
+        cc.character_id
+        for cc in (
+            await db.execute(
+                select(CharacterCareer).where(
+                    CharacterCareer.project_id == pid, CharacterCareer.career_type == "main"
+                )
+            )
+        )
+        .scalars()
+        .all()
+    ]
 
-    chars = (await db.execute(
-        select(Character).where(
-            Character.project_id == pid,
-            ~Character.id.in_(assigned_ids) if assigned_ids else True,
-        ).limit(20)
-    )).scalars().all()
+    chars = (
+        (
+            await db.execute(
+                select(Character)
+                .where(
+                    Character.project_id == pid,
+                    ~Character.id.in_(assigned_ids) if assigned_ids else True,
+                )
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     if not chars:
         task.assign_careers_done = 1
@@ -558,10 +704,10 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
 
     world_info = _build_world_info(proj)
 
-    system_prompt = f"""你是资深网文角色设计顾问。为小说《{proj.title}》（题材：{proj.genre or '网文'}）中的角色匹配最合适的主职业。
+    system_prompt = f"""你是资深网文角色设计顾问。为小说《{proj.title}》（题材：{proj.genre or "网文"}）中的角色匹配最合适的主职业。
 
 【小说简介】
-{proj.synopsis or '暂无'}
+{proj.synopsis or "暂无"}
 
 【世界观】
 {world_info}
@@ -606,15 +752,17 @@ async def _step_assign_careers(db, task, pid, proj, engine, ai_client):
         if a.get("character_id") not in char_id_set or a.get("career_id") not in career_id_set:
             continue
         try:
-            db.add(CharacterCareer(
-                project_id=pid,
-                character_id=int(a["character_id"]),
-                career_id=int(a["career_id"]),
-                career_type="main",
-                current_stage=max(1, int(a.get("current_stage", 1))),
-                started_at=str(a.get("started_at", ""))[:100],
-                source="ai",
-            ))
+            db.add(
+                CharacterCareer(
+                    project_id=pid,
+                    character_id=int(a["character_id"]),
+                    career_id=int(a["career_id"]),
+                    career_type="main",
+                    current_stage=max(1, int(a.get("current_stage", 1))),
+                    started_at=str(a.get("started_at", ""))[:100],
+                    source="ai",
+                )
+            )
             created += 1
         except Exception:
             continue
@@ -632,9 +780,11 @@ def _extract_rel_endpoint(rel, is_from):
     以及 from_id/to_id 数字ID。返回 (id_or_None, name_or_None)。
     """
     id_keys = ["from_id", "to_id"] if is_from else ["to_id", "from_id"]
-    name_keys = (["from", "from_character", "character_a", "source", "name_a", "char_a", "a"]
-                 if is_from else
-                 ["to", "to_character", "character_b", "target", "name_b", "char_b", "b"])
+    name_keys = (
+        ["from", "from_character", "character_a", "source", "name_a", "char_a", "a"]
+        if is_from
+        else ["to", "to_character", "character_b", "target", "name_b", "char_b", "b"]
+    )
     # 优先数字ID
     for k in id_keys:
         v = rel.get(k)
@@ -648,7 +798,11 @@ def _extract_rel_endpoint(rel, is_from):
         if isinstance(v, dict):  # 嵌套 {name:...}
             inner = v.get("name") or v.get("character") or v.get("id")
             if inner:
-                return (None, str(inner).strip()) if not (isinstance(inner, int) or str(inner).strip().isdigit()) else (int(inner), None)
+                return (
+                    (None, str(inner).strip())
+                    if not (isinstance(inner, int) or str(inner).strip().isdigit())
+                    else (int(inner), None)
+                )
     return None, None
 
 
@@ -684,6 +838,7 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
     现在对齐 relations.py:auto_rebuild_relations 的健壮字段处理。
     """
     import logging
+
     logger = logging.getLogger(__name__)
     from app.models.character import Character, CharacterRelation
 
@@ -720,11 +875,17 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
         char_parts.append("\n".join(info))
     char_list = "\n".join(char_parts)
 
-    rel_result, rerr = await _safe_skill_call(engine, ai_client, "character_relations_generate", {
-        "title": proj.title,
-        "characters_info": char_list,
-        "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
-    }, "关系图谱")
+    rel_result, rerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "character_relations_generate",
+        {
+            "title": proj.title,
+            "characters_info": char_list,
+            "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
+        },
+        "关系图谱",
+    )
     if rerr:
         return rerr
 
@@ -757,23 +918,31 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
             if key in seen:
                 continue
             seen.add(key)
-            db.add(CharacterRelation(
-                project_id=pid,
-                from_character_id=fid,
-                to_character_id=tid,
-                relation_type=rtype,
-                category=str(rel.get("category", "social"))[:50],
-                intimacy=int(rel.get("intimacy", 50)) if str(rel.get("intimacy", "50")).lstrip("-").isdigit() else 50,
-                description=str(rel.get("description", ""))[:500],
-            ))
+            db.add(
+                CharacterRelation(
+                    project_id=pid,
+                    from_character_id=fid,
+                    to_character_id=tid,
+                    relation_type=rtype,
+                    category=str(rel.get("category", "social"))[:50],
+                    intimacy=int(rel.get("intimacy", 50))
+                    if str(rel.get("intimacy", "50")).lstrip("-").isdigit()
+                    else 50,
+                    description=str(rel.get("description", ""))[:500],
+                )
+            )
             added_rels += 1
         if added_rels:
             await db.commit()
 
     # 不再静默成功：0 条关系要明确告知
     if added_rels == 0:
-        logger.warning(f"[init] 项目{pid} 角色关系生成0条（AI返回{len(rels)}条，{skipped}条无法匹配）")
-        task.status_message = f"角色关系：AI返回{len(rels)}条但均无法匹配到角色，请到「关系图谱」页手动重建"
+        logger.warning(
+            f"[init] 项目{pid} 角色关系生成0条（AI返回{len(rels)}条，{skipped}条无法匹配）"
+        )
+        task.status_message = (
+            f"角色关系：AI返回{len(rels)}条但均无法匹配到角色，请到「关系图谱」页手动重建"
+        )
     else:
         task.status_message = f"已生成 {added_rels} 条角色关系"
         task.relations_done = 1
@@ -788,30 +957,34 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
     成员数为 0 的问题。
     """
     import logging
+
     logger = logging.getLogger(__name__)
+    from sqlalchemy import func
+
     from app.models.character import Character
     from app.models.organization import Organization
     from app.models.organization_member import OrganizationMember
-    from sqlalchemy import func
 
     task.status_message = "分配角色到组织..."
     await db.commit()
 
     # 检查是否已有成员关联（可能 _link_org_memberships 已部分成功）
-    existing_members = (await db.execute(
-        select(func.count(OrganizationMember.id)).where(
-            OrganizationMember.organization_id.in_(
-                select(Organization.id).where(Organization.project_id == pid)
+    existing_members = (
+        await db.execute(
+            select(func.count(OrganizationMember.id)).where(
+                OrganizationMember.organization_id.in_(
+                    select(Organization.id).where(Organization.project_id == pid)
+                )
             )
         )
-    )).scalar() or 0
+    ).scalar() or 0
 
-    chars = (await db.execute(
-        select(Character).where(Character.project_id == pid)
-    )).scalars().all()
-    orgs = (await db.execute(
-        select(Organization).where(Organization.project_id == pid)
-    )).scalars().all()
+    chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
+    orgs = (
+        (await db.execute(select(Organization).where(Organization.project_id == pid)))
+        .scalars()
+        .all()
+    )
 
     if not chars or not orgs:
         task.assign_org_members_done = 1
@@ -825,18 +998,24 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
         if c.organization_id:
             chars_with_org.add(c.id)
     # 也查 OrganizationMember 表
-    member_rows = (await db.execute(
-        select(OrganizationMember.character_id).where(
-            OrganizationMember.organization_id.in_([o.id for o in orgs])
+    member_rows = (
+        (
+            await db.execute(
+                select(OrganizationMember.character_id).where(
+                    OrganizationMember.organization_id.in_([o.id for o in orgs])
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     chars_with_org.update(member_rows)
 
     unassigned = [c for c in chars if c.id not in chars_with_org]
     if not unassigned:
         logger.info(f"[init] 所有{len(chars)}个角色已有组织归属，跳过分配")
         task.assign_org_members_done = 1
-        task.status_message = f"所有角色已有组织归属"
+        task.status_message = "所有角色已有组织归属"
         await db.commit()
         return None
 
@@ -865,7 +1044,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
 
     world_info = _build_world_info(proj)
 
-    system_prompt = f"""你是网文势力策划师。为小说《{proj.title}》（题材：{proj.genre or '网文'}）中的角色分配到最合适的组织。
+    system_prompt = f"""你是网文势力策划师。为小说《{proj.title}》（题材：{proj.genre or "网文"}）中的角色分配到最合适的组织。
 
 【世界观】
 {world_info}
@@ -895,7 +1074,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
     if result.get("error"):
         logger.warning(f"[init] 组织成员分配 AI 调用失败: {result['error']}")
         task.assign_org_members_done = 1
-        task.status_message = f"组织成员分配跳过（AI 调用失败）"
+        task.status_message = "组织成员分配跳过（AI 调用失败）"
         await db.commit()
         return None
 
@@ -930,14 +1109,16 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
                     )
                 )
                 if not existing:
-                    db.add(OrganizationMember(
-                        project_id=pid,
-                        organization_id=oid,
-                        character_id=cid,
-                        position=role,
-                        status="active",
-                        source="ai",
-                    ))
+                    db.add(
+                        OrganizationMember(
+                            project_id=pid,
+                            organization_id=oid,
+                            character_id=cid,
+                            position=role,
+                            status="active",
+                            source="ai",
+                        )
+                    )
                     assigned += 1
         except Exception as e:
             logger.warning(f"[init] 分配角色 {cid} 到组织 {oid} 失败: {e}")
@@ -952,24 +1133,32 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
 
 async def _step_org(db, task, pid, proj, engine, ai_client):
     """步骤5：组织势力生成"""
-    from app.models.organization import Organization
     from sqlalchemy import func
 
-    existing_orgs = (await db.execute(
-        select(func.count(Organization.id)).where(Organization.project_id == pid)
-    )).scalar() or 0
+    from app.models.organization import Organization
+
+    existing_orgs = (
+        await db.execute(select(func.count(Organization.id)).where(Organization.project_id == pid))
+    ).scalar() or 0
     if existing_orgs >= 3:
         task.org_done = 1
         task.status_message = f"已有 {existing_orgs} 个组织，跳过生成"
         await db.commit()
         return None
 
-    org_result, oerr = await _safe_skill_call(engine, ai_client, "organization_generate", {
-        "title": proj.title, "genre": proj.genre or "网文",
-        "synopsis": proj.synopsis or "暂无简介",
-        "world_info": _build_world_info(proj),
-        "user_prompt": f"请为《{proj.title}》生成3-5个组织势力。",
-    }, "组织")
+    org_result, oerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "organization_generate",
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "synopsis": proj.synopsis or "暂无简介",
+            "world_info": _build_world_info(proj),
+            "user_prompt": f"请为《{proj.title}》生成3-5个组织势力。",
+        },
+        "组织",
+    )
     if oerr:
         return oerr
 
@@ -990,18 +1179,27 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
                 v = item.get(k, "")
                 if v:
                     extra_fields[k] = v
-            db.add(Organization(project_id=pid,
-                name=str(item.get("name", ""))[:100],
-                org_type=str(item.get("org_type", item.get("organization_type", item.get("type", ""))))[:50],
-                description=str(item.get("description", item.get("background", "")))[:2000],
-                power_value=pv,
-                location=str(item.get("location", ""))[:200],
-                motto=str(item.get("motto", ""))[:200],
-                color=str(item.get("color", ""))[:20],
-                members=item.get("members", []) if isinstance(item.get("members"), list) else [],
-                relations=item.get("relationships", []) if isinstance(item.get("relationships"), list) else [],
-                structure=extra_fields if extra_fields else None,
-            ))
+            db.add(
+                Organization(
+                    project_id=pid,
+                    name=str(item.get("name", ""))[:100],
+                    org_type=str(
+                        item.get("org_type", item.get("organization_type", item.get("type", "")))
+                    )[:50],
+                    description=str(item.get("description", item.get("background", "")))[:2000],
+                    power_value=pv,
+                    location=str(item.get("location", ""))[:200],
+                    motto=str(item.get("motto", ""))[:200],
+                    color=str(item.get("color", ""))[:20],
+                    members=item.get("members", [])
+                    if isinstance(item.get("members"), list)
+                    else [],
+                    relations=item.get("relationships", [])
+                    if isinstance(item.get("relationships"), list)
+                    else [],
+                    structure=extra_fields if extra_fields else None,
+                )
+            )
     await db.commit()
 
     # ===== 角色-组织关联 =====
@@ -1010,6 +1208,7 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
         await _link_characters_to_orgs(db, pid, proj, engine, ai_client)
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).error(f"[init] 角色-组织关联异常: {e}")
 
     task.org_done = 1
@@ -1019,14 +1218,20 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
 async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     """将已有角色自动分配到已有组织中（AI 辅助匹配）。"""
     import logging
+
     logger = logging.getLogger(__name__)
+    from sqlalchemy import func
+
     from app.models.character import Character
     from app.models.organization import Organization
     from app.models.organization_member import OrganizationMember
-    from sqlalchemy import func
 
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
-    orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
+    orgs = (
+        (await db.execute(select(Organization).where(Organization.project_id == pid)))
+        .scalars()
+        .all()
+    )
 
     if not chars or not orgs:
         return
@@ -1036,11 +1241,17 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     for c in chars:
         if c.organization_id:
             chars_with_org.add(c.id)
-    member_rows = (await db.execute(
-        select(OrganizationMember.character_id).where(
-            OrganizationMember.organization_id.in_([o.id for o in orgs])
+    member_rows = (
+        (
+            await db.execute(
+                select(OrganizationMember.character_id).where(
+                    OrganizationMember.organization_id.in_([o.id for o in orgs])
+                )
+            )
         )
-    )).scalars().all()
+        .scalars()
+        .all()
+    )
     chars_with_org.update(member_rows)
     unassigned = [c for c in chars if c.id not in chars_with_org]
     if not unassigned:
@@ -1055,18 +1266,29 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     char_parts = []
     for c in unassigned[:20]:
         info = [f"- ID:{c.id} {c.name}（{c.role or '角色'}，{c.gender}，{c.age or '?'}岁）"]
-        if c.identity: info.append(f"  身份：{c.identity[:100]}")
-        if c.main_career_stage_desc: info.append(f"  职业：{c.main_career_stage_desc[:80]}")
-        if c.personality: info.append(f"  性格：{c.personality[:120]}")
-        if c.background: info.append(f"  背景：{c.background[:120]}")
-        if c.story_goal: info.append(f"  目标：{c.story_goal[:80]}")
+        if c.identity:
+            info.append(f"  身份：{c.identity[:100]}")
+        if c.main_career_stage_desc:
+            info.append(f"  职业：{c.main_career_stage_desc[:80]}")
+        if c.personality:
+            info.append(f"  性格：{c.personality[:120]}")
+        if c.background:
+            info.append(f"  背景：{c.background[:120]}")
+        if c.story_goal:
+            info.append(f"  目标：{c.story_goal[:80]}")
         char_parts.append("\n".join(info))
     char_list = "\n\n".join(char_parts)
 
     result = await ai_client.chat_json(
         messages=[
-            {"role": "system", "content": "你是网文势力策划师。根据角色信息和已有组织，将每个角色分配到最合适的组织中。只返回纯JSON数组：[{\"character_id\":0,\"organization_id\":0,\"role\":\"成员\"}]"},
-            {"role": "user", "content": f"请为小说《{proj.title}（{proj.genre or '网文'}）》的角色分配组织。\n\n已有组织：\n{org_list}\n\n待分配角色：\n{char_list}"},
+            {
+                "role": "system",
+                "content": '你是网文势力策划师。根据角色信息和已有组织，将每个角色分配到最合适的组织中。只返回纯JSON数组：[{"character_id":0,"organization_id":0,"role":"成员"}]',
+            },
+            {
+                "role": "user",
+                "content": f"请为小说《{proj.title}（{proj.genre or '网文'}）》的角色分配组织。\n\n已有组织：\n{org_list}\n\n待分配角色：\n{char_list}",
+            },
         ],
         model=ai_client.model,
     )
@@ -1082,10 +1304,12 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     org_ids = {o.id for o in orgs}
     assigned = 0
     for a in data:
-        if not isinstance(a, dict): continue
+        if not isinstance(a, dict):
+            continue
         cid = a.get("character_id")
         oid = a.get("organization_id")
-        if cid not in char_ids or (oid and oid not in org_ids): continue
+        if cid not in char_ids or (oid and oid not in org_ids):
+            continue
         role = str(a.get("role", "成员"))[:50]
         char = next((c for c in chars if c.id == cid), None)
         if char and oid:
@@ -1098,7 +1322,16 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
                 )
             )
             if not existing:
-                db.add(OrganizationMember(project_id=pid, organization_id=oid, character_id=cid, position=role, status="active", source="ai"))
+                db.add(
+                    OrganizationMember(
+                        project_id=pid,
+                        organization_id=oid,
+                        character_id=cid,
+                        position=role,
+                        status="active",
+                        source="ai",
+                    )
+                )
                 assigned += 1
     await db.commit()
     logger.info(f"[init] 角色-组织关联完成：{assigned}/{len(unassigned)} 个角色已分配")
@@ -1113,14 +1346,21 @@ async def _step_locations(db, task, pid, proj, engine, ai_client):
 
     # 获取已有角色信息（地点生成在角色之后，可参考角色设定）
     from app.models.character import Character
+
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
     char_hint = "、".join(f"{c.name}({c.role})" for c in chars[:8]) if chars else "暂无"
 
-    loc_result, lerr = await _safe_skill_call(engine, ai_client, "locations_generate", {
-        "title": proj.title,
-        "world_info": _build_world_info(proj),
-        "user_prompt": f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。已有角色：{char_hint}。地点应形成关联网：至少一对地点在描述中互相引用（如'从A出发前往B''在C遇到D'），而非各自孤立。",
-    }, "地点")
+    loc_result, lerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "locations_generate",
+        {
+            "title": proj.title,
+            "world_info": _build_world_info(proj),
+            "user_prompt": f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。已有角色：{char_hint}。地点应形成关联网：至少一对地点在描述中互相引用（如'从A出发前往B''在C遇到D'），而非各自孤立。",
+        },
+        "地点",
+    )
     if lerr:
         return lerr
 
@@ -1128,15 +1368,17 @@ async def _step_locations(db, task, pid, proj, engine, ai_client):
     if isinstance(locs, list):
         for loc in locs[:10]:
             if isinstance(loc, dict) and loc.get("name"):
-                db.add(Location(
-                    project_id=pid,
-                    name=str(loc.get("name", ""))[:100],
-                    location_type=str(loc.get("location_type", "城市"))[:50],
-                    description=str(loc.get("description", ""))[:2000],
-                    atmosphere=str(loc.get("atmosphere", ""))[:500],
-                    importance=str(loc.get("importance", "normal"))[:20],
-                    source="ai",
-                ))
+                db.add(
+                    Location(
+                        project_id=pid,
+                        name=str(loc.get("name", ""))[:100],
+                        location_type=str(loc.get("location_type", "城市"))[:50],
+                        description=str(loc.get("description", ""))[:2000],
+                        atmosphere=str(loc.get("atmosphere", ""))[:500],
+                        importance=str(loc.get("importance", "normal"))[:20],
+                        source="ai",
+                    )
+                )
         await db.commit()
     task.locations_done = 1
     return None
@@ -1152,16 +1394,23 @@ async def _step_items(db, task, pid, proj, engine, ai_client):
     # 获取已有角色和地点信息（物品生成在它们之后，可参考）
     from app.models.character import Character
     from app.models.location import Location
+
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
     locs = (await db.execute(select(Location).where(Location.project_id == pid))).scalars().all()
     char_hint = "、".join(f"{c.name}({c.role})" for c in chars[:8]) if chars else "暂无"
     loc_hint = "、".join(l.name for l in locs[:5]) if locs else "暂无"
 
-    item_result, ierr = await _safe_skill_call(engine, ai_client, "items_generate", {
-        "title": proj.title,
-        "world_info": _build_world_info(proj),
-        "user_prompt": f"请为《{proj.title}》生成5-8个物品，至少1个关键剧情道具。已有角色：{char_hint}。已有地点：{loc_hint}。物品应与角色身份、能力以及地点环境相匹配。",
-    }, "物品")
+    item_result, ierr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "items_generate",
+        {
+            "title": proj.title,
+            "world_info": _build_world_info(proj),
+            "user_prompt": f"请为《{proj.title}》生成5-8个物品，至少1个关键剧情道具。已有角色：{char_hint}。已有地点：{loc_hint}。物品应与角色身份、能力以及地点环境相匹配。",
+        },
+        "物品",
+    )
     if ierr:
         return ierr
 
@@ -1169,17 +1418,19 @@ async def _step_items(db, task, pid, proj, engine, ai_client):
     if isinstance(items, list):
         for it in items[:10]:
             if isinstance(it, dict) and it.get("name"):
-                db.add(Item(
-                    project_id=pid,
-                    name=str(it.get("name", ""))[:100],
-                    category=str(it.get("category", "装备"))[:50],
-                    rarity=str(it.get("rarity", "common"))[:20],
-                    item_type=str(it.get("item_type", ""))[:50],
-                    description=str(it.get("description", ""))[:2000],
-                    is_key_item=1 if it.get("is_key_item") else 0,
-                    status="stored",
-                    source="ai",
-                ))
+                db.add(
+                    Item(
+                        project_id=pid,
+                        name=str(it.get("name", ""))[:100],
+                        category=str(it.get("category", "装备"))[:50],
+                        rarity=str(it.get("rarity", "common"))[:20],
+                        item_type=str(it.get("item_type", ""))[:50],
+                        description=str(it.get("description", ""))[:2000],
+                        is_key_item=1 if it.get("is_key_item") else 0,
+                        status="stored",
+                        source="ai",
+                    )
+                )
         await db.commit()
     task.items_done = 1
     return None
@@ -1193,16 +1444,17 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
     - 用户自定义变量：time_period, location, atmosphere, rules, theme,
       narrative_perspective, title, genre, mcp_references, requirements
     """
-    from app.models.outline import Outline
-    from app.models.chapter import Chapter
-    from app.models.world import WorldSetting
-    from app.models.character import Character
-    from app.models.organization import Organization
     from sqlalchemy import func
 
-    existing_outlines = (await db.execute(
-        select(func.count(Outline.id)).where(Outline.project_id == pid)
-    )).scalar() or 0
+    from app.models.chapter import Chapter
+    from app.models.character import Character
+    from app.models.organization import Organization
+    from app.models.outline import Outline
+    from app.models.world import WorldSetting
+
+    existing_outlines = (
+        await db.execute(select(func.count(Outline.id)).where(Outline.project_id == pid))
+    ).scalar() or 0
     if existing_outlines >= 3:
         task.outline_done = 1
         task.status_message = f"已有 {existing_outlines} 章大纲，跳过生成"
@@ -1213,13 +1465,19 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
     await db.commit()
 
     chapter_count = str(task.chapter_count or 3)
-    worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == pid))).scalars().all()
+    worlds = (
+        (await db.execute(select(WorldSetting).where(WorldSetting.project_id == pid)))
+        .scalars()
+        .all()
+    )
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
 
     # 世界信息：完整四维度 + 最近10条详细设定
     world_info_complete = _build_world_info(proj)
     if worlds:
-        detail_text = "\n".join([f"- {w.name}({w.category or '其他'})：{w.content[:150]}" for w in worlds[:10]])
+        detail_text = "\n".join(
+            [f"- {w.name}({w.category or '其他'})：{w.content[:150]}" for w in worlds[:10]]
+        )
         world_info_complete += f"\n\n【详细设定】\n{detail_text}"
 
     # 角色信息：分层策略（核心角色全量、配角中等、远处仅名字）
@@ -1228,21 +1486,32 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
         is_core = c.role in ("主角", "反派")
         if is_core:
             lines = [f"- {c.name}（{c.role or '角色'}，{c.gender or ''}，{c.age or '?'}岁）"]
-            if c.identity: lines.append(f"  身份：{c.identity}")
-            if c.personality: lines.append(f"  性格：{c.personality}")
-            if c.background: lines.append(f"  背景：{c.background}")
-            if c.story_goal: lines.append(f"  目标：{c.story_goal}")
-            if c.motivation: lines.append(f"  动机：{c.motivation}")
-            if c.weakness: lines.append(f"  弱点：{c.weakness}")
-            if c.main_career_stage_desc: lines.append(f"  职业：{c.main_career_stage_desc}")
-            if c.ability: lines.append(f"  能力：{c.ability}")
+            if c.identity:
+                lines.append(f"  身份：{c.identity}")
+            if c.personality:
+                lines.append(f"  性格：{c.personality}")
+            if c.background:
+                lines.append(f"  背景：{c.background}")
+            if c.story_goal:
+                lines.append(f"  目标：{c.story_goal}")
+            if c.motivation:
+                lines.append(f"  动机：{c.motivation}")
+            if c.weakness:
+                lines.append(f"  弱点：{c.weakness}")
+            if c.main_career_stage_desc:
+                lines.append(f"  职业：{c.main_career_stage_desc}")
+            if c.ability:
+                lines.append(f"  能力：{c.ability}")
             char_parts.append("\n".join(lines))
         else:
             # 配角：中等信息
             lines = [f"- {c.name}（{c.role or '配角'}，{c.gender or ''}）"]
-            if c.personality: lines.append(f"  性格：{c.personality[:120]}")
-            if c.main_career_stage_desc: lines.append(f"  职业：{c.main_career_stage_desc}")
-            if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
+            if c.personality:
+                lines.append(f"  性格：{c.personality[:120]}")
+            if c.main_career_stage_desc:
+                lines.append(f"  职业：{c.main_career_stage_desc}")
+            if c.story_goal:
+                lines.append(f"  目标：{c.story_goal[:80]}")
             char_parts.append("\n".join(lines))
     if len(chars) > 15:
         char_parts.append(f"... 还有 {len(chars) - 15} 个角色（可用工具查询详情）")
@@ -1250,28 +1519,37 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
 
     # 用于大纲清洗：区分角色名和组织名
     char_names = {c.name for c in chars}
-    orgs = (await db.execute(select(Organization).where(Organization.project_id == pid))).scalars().all()
+    orgs = (
+        (await db.execute(select(Organization).where(Organization.project_id == pid)))
+        .scalars()
+        .all()
+    )
     org_names = {o.name for o in orgs}
 
-    result, oerr = await _safe_skill_call(engine, ai_client, "outline_create", {
-        # 标准变量（文件模板用）
-        "world_info": world_info_complete,
-        "characters_info": chars_info,
-        "synopsis": proj.synopsis or "暂无简介",
-        "chapter_count": chapter_count,
-        "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲。如需确认角色关系、组织详情、伏笔状态，可使用工具查询。",
-        # 用户自定义模板可能用的变量
-        "title": proj.title,
-        "genre": proj.genre or "网文",
-        "theme": proj.genre or "网文",
-        "narrative_perspective": proj.narrative_pov or "第三人称",
-        "time_period": proj.world_time_period or "",
-        "location": proj.world_location or "",
-        "atmosphere": proj.world_atmosphere or "",
-        "rules": proj.world_rules or "",
-        "mcp_references": "",
-        "requirements": "",
-    }, "大纲",
+    result, oerr = await _safe_skill_call(
+        engine,
+        ai_client,
+        "outline_create",
+        {
+            # 标准变量（文件模板用）
+            "world_info": world_info_complete,
+            "characters_info": chars_info,
+            "synopsis": proj.synopsis or "暂无简介",
+            "chapter_count": chapter_count,
+            "user_prompt": f"请为《{proj.title}》生成{chapter_count}章大纲。如需确认角色关系、组织详情、伏笔状态，可使用工具查询。",
+            # 用户自定义模板可能用的变量
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "theme": proj.genre or "网文",
+            "narrative_perspective": proj.narrative_pov or "第三人称",
+            "time_period": proj.world_time_period or "",
+            "location": proj.world_location or "",
+            "atmosphere": proj.world_atmosphere or "",
+            "rules": proj.world_rules or "",
+            "mcp_references": "",
+            "requirements": "",
+        },
+        "大纲",
         tools=get_chapter_tools(),
         tool_executor=make_tool_executor(db, pid, int(chapter_count) + 1),
     )
@@ -1287,8 +1565,9 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
                 ch_num = item.get("chapter_number")
                 if not isinstance(ch_num, int) or ch_num < 1:
                     ch_num = idx + 1
-                o = _build_outline(pid, item, offset=0, index=idx,
-                                   char_names=char_names, org_names=org_names)
+                o = _build_outline(
+                    pid, item, offset=0, index=idx, char_names=char_names, org_names=org_names
+                )
                 o.chapter_number = ch_num  # 以 AI 返回章号为准
                 db.add(o)
                 created_outline_objs.append(o)
@@ -1299,12 +1578,18 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
             # 1对1模式：自动为每条大纲创建对应章节
             if (proj.outline_mode or "one_to_one") == "one_to_one":
                 for o in created_outline_objs:
-                    existing_ch = (await db.execute(
-                        select(Chapter).where(
-                            Chapter.project_id == pid,
-                            Chapter.chapter_number == o.chapter_number,
+                    existing_ch = (
+                        (
+                            await db.execute(
+                                select(Chapter).where(
+                                    Chapter.project_id == pid,
+                                    Chapter.chapter_number == o.chapter_number,
+                                )
+                            )
                         )
-                    )).scalars().first()
+                        .scalars()
+                        .first()
+                    )
                     if existing_ch:
                         continue
                     ch = Chapter(
@@ -1329,9 +1614,15 @@ async def _step_validate_outline(db, task, pid, proj, engine, ai_client):
     task.status_message = "验证大纲完整性..."
     await db.commit()
 
-    from app.services.outline_validation_service import validate_outline_entities, build_world_context
+    from app.services.outline_validation_service import (
+        build_world_context,
+        validate_outline_entities,
+    )
+
     world_ctx = build_world_context(proj)
-    count = await validate_outline_entities(db, pid, proj.title, proj.genre or "网文", world_ctx, engine, ai_client)
+    count = await validate_outline_entities(
+        db, pid, proj.title, proj.genre or "网文", world_ctx, engine, ai_client
+    )
 
     task.status_message = f"大纲验证完成（补全 {count} 个实体）" if count else "大纲验证通过"
     await db.commit()
@@ -1359,7 +1650,9 @@ async def _run_init_task(task_id: int, resume_from: str = None):
     标记 status=failed + failed_step，用户可通过 resume API 从失败步骤继续。
     """
     async with async_session() as db:
-        task = (await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))).scalar_one_or_none()
+        task = (
+            await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))
+        ).scalar_one_or_none()
         if not task:
             return
         pid = task.project_id
@@ -1433,17 +1726,26 @@ async def _run_init_task(task_id: int, resume_from: str = None):
 
 
 @router.post("/{project_id}/init-task")
-async def create_init_task(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_init_task(
+    project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """提交项目初始化后台任务，立即返回任务ID。"""
-    proj = (await db.execute(select(Project).where(Project.id == project_id, Project.user_id == user.id))).scalar_one_or_none()
+    proj = (
+        await db.execute(
+            select(Project).where(Project.id == project_id, Project.user_id == user.id)
+        )
+    ).scalar_one_or_none()
     if not proj:
         raise HTTPException(404, "项目不存在")
     chapter_count = int(req.get("chapter_count", 3))
     if chapter_count not in (3, 5, 10):
         chapter_count = 3
     task = ProjectInitTask(
-        project_id=project_id, user_id=user.id, task_type="init",
-        status="pending", status_message="排队中...",
+        project_id=project_id,
+        user_id=user.id,
+        task_type="init",
+        status="pending",
+        status_message="排队中...",
         chapter_count=chapter_count,
     )
     db.add(task)
@@ -1467,28 +1769,39 @@ async def get_failed_init_tasks(db: AsyncSession = Depends(get_db), user=Depends
 
 
 @router.get("/init-task/{task_id}/status")
-async def get_init_task_status(task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_init_task_status(
+    task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """查询初始化任务进度。"""
-    task = (await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))).scalar_one_or_none()
+    task = (
+        await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))
+    ).scalar_one_or_none()
     if not task:
         raise HTTPException(404, "任务不存在")
     return task.to_dict()
 
 
 @router.post("/init-task/{task_id}/resume")
-async def resume_init_task(task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def resume_init_task(
+    task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """从失败的步骤继续执行初始化任务。"""
     import logging
+
     logger = logging.getLogger(__name__)
 
     logger.info(f"[resume] 收到恢复请求: task_id={task_id}, user_id={user.id}")
 
-    task = (await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))).scalar_one_or_none()
+    task = (
+        await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))
+    ).scalar_one_or_none()
     if not task:
         logger.warning(f"[resume] 任务不存在: task_id={task_id}")
         raise HTTPException(404, "任务不存在")
 
-    logger.info(f"[resume] 任务状态: status={task.status}, failed_step={task.failed_step}, project_id={task.project_id}")
+    logger.info(
+        f"[resume] 任务状态: status={task.status}, failed_step={task.failed_step}, project_id={task.project_id}"
+    )
 
     if task.status not in ("failed", "completed"):
         logger.warning(f"[resume] 任务状态不允许恢复: status={task.status}")
@@ -1507,9 +1820,13 @@ async def resume_init_task(task_id: int, db: AsyncSession = Depends(get_db), use
 
 
 @router.post("/init-task/{task_id}/cancel")
-async def cancel_init_task(task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def cancel_init_task(
+    task_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """取消初始化任务。"""
-    task = (await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))).scalar_one_or_none()
+    task = (
+        await db.execute(select(ProjectInitTask).where(ProjectInitTask.id == task_id))
+    ).scalar_one_or_none()
     if not task:
         raise HTTPException(404, "任务不存在")
     if task.status in ("pending", "running"):

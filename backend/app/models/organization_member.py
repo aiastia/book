@@ -3,22 +3,28 @@
 对标 MuMuAINovel OrganizationMember。承载角色在组织中的职位/等级/忠诚度/贡献度。
 组织本身的层级字段（parent_org_id/level/power_level）加在 Organization 模型上。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, UniqueConstraint
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+
 from app.core.database import Base
 
 
 class OrganizationMember(Base):
     """组织成员（角色在某组织的任职记录）。"""
+
     __tablename__ = "organization_members"
-    __table_args__ = (
-        UniqueConstraint("organization_id", "character_id", name="uq_org_member"),
-    )
+    __table_args__ = (UniqueConstraint("organization_id", "character_id", name="uq_org_member"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    character_id = Column(Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    character_id = Column(
+        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # 职位（宗主/长老/弟子/护法...）
     position = Column(String(100), default="")
     # 等级（数字，越大越高）

@@ -3,14 +3,15 @@
 对标 MuMuAINovel CareerUpdateService。从剧情分析的 character_states[].career_changes
 自动更新角色的职业阶段进度。接入 chapter_service._auto_analyze 链路。
 """
+
 import logging
-from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.character_career import CharacterCareer
 from app.models.career import Career
 from app.models.character import Character
+from app.models.character_career import CharacterCareer
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,8 @@ class CareerUpdateService:
     async def update_from_analysis(
         self,
         character_states: list,
-        chapter_id: Optional[int] = None,
-        chapter_number: Optional[int] = None,
+        chapter_id: int | None = None,
+        chapter_number: int | None = None,
     ):
         """从 PlotAnalysis.character_states 更新职业阶段。
 
@@ -38,9 +39,15 @@ class CareerUpdateService:
             return {"updated": 0, "added": 0}
 
         # 预加载项目角色与职业
-        chars = (await self.db.execute(
-            select(Character).where(Character.project_id == self.project_id)
-        )).scalars().all()
+        chars = (
+            (
+                await self.db.execute(
+                    select(Character).where(Character.project_id == self.project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         char_by_name = {c.name: c for c in chars}
 
         updated = 0
@@ -59,13 +66,15 @@ class CareerUpdateService:
             # 1. 主职业阶段变化
             stage_delta = changes.get("main_career_stage_change") or changes.get("stage_change")
             if stage_delta and char.main_career_id:
-                cc = (await self.db.execute(
-                    select(CharacterCareer).where(
-                        CharacterCareer.character_id == char.id,
-                        CharacterCareer.career_id == char.main_career_id,
-                        CharacterCareer.career_type == "main",
+                cc = (
+                    await self.db.execute(
+                        select(CharacterCareer).where(
+                            CharacterCareer.character_id == char.id,
+                            CharacterCareer.career_id == char.main_career_id,
+                            CharacterCareer.career_type == "main",
+                        )
                     )
-                )).scalar_one_or_none()
+                ).scalar_one_or_none()
                 if cc:
                     new_stage = max(1, cc.current_stage + int(stage_delta))
                     cc.current_stage = new_stage
@@ -84,21 +93,25 @@ class CareerUpdateService:
                     career_name = nc.get("name") or nc.get("career")
                     if not career_name:
                         continue
-                    career = (await self.db.execute(
-                        select(Career).where(
-                            Career.project_id == self.project_id,
-                            Career.name.like(f"%{career_name}%"),
+                    career = (
+                        await self.db.execute(
+                            select(Career).where(
+                                Career.project_id == self.project_id,
+                                Career.name.like(f"%{career_name}%"),
+                            )
                         )
-                    )).scalar_one_or_none()
+                    ).scalar_one_or_none()
                     if not career:
                         continue
                     # 检查是否已存在
-                    existing = (await self.db.execute(
-                        select(CharacterCareer).where(
-                            CharacterCareer.character_id == char.id,
-                            CharacterCareer.career_id == career.id,
+                    existing = (
+                        await self.db.execute(
+                            select(CharacterCareer).where(
+                                CharacterCareer.character_id == char.id,
+                                CharacterCareer.career_id == career.id,
+                            )
                         )
-                    )).scalar_one_or_none()
+                    ).scalar_one_or_none()
                     if existing:
                         continue
                     c_type = nc.get("type", "sub")

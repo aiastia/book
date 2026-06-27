@@ -3,8 +3,8 @@
 AI 设置页「灵感模式参数」开关：
   关（默认）→ 使用模型全局参数
   开 → 递减温度表控制不同阶段（title 0.8 → genre 0.45），可用滑块覆盖"""
-from app.api.routes.projects_pkg.base import *
 
+from app.api.routes.projects_pkg.base import *
 
 router = make_router()
 
@@ -28,9 +28,9 @@ def _validate_options(data: dict, step_name: str) -> tuple[bool, str]:
         return False, f"选项数量应在 3-10 个之间，当前 {len(options)} 个"
     for i, opt in enumerate(options):
         if not isinstance(opt, str) or not opt.strip():
-            return False, f"第 {i+1} 个选项为空或非字符串"
+            return False, f"第 {i + 1} 个选项为空或非字符串"
         if len(opt) > 500:
-            return False, f"第 {i+1} 个选项过长（>{500} 字）"
+            return False, f"第 {i + 1} 个选项过长（>{500} 字）"
     if step_name == "genre":
         for opt in options:
             if len(opt) > 10:
@@ -52,18 +52,24 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
     # 灵感参数开关：关=不传参（走全局模型配置），开=递减温度表+自定义
     insp_kwargs = {}
     try:
-        from app.models.ai_model import AIModelConfig
         from sqlalchemy import select
-        cfg = (await engine.db.execute(
-            select(AIModelConfig).where(
-                AIModelConfig.user_id == engine.user_id,
-                AIModelConfig.is_default == True,
+
+        from app.models.ai_model import AIModelConfig
+
+        cfg = (
+            await engine.db.execute(
+                select(AIModelConfig).where(
+                    AIModelConfig.user_id == engine.user_id,
+                    AIModelConfig.is_default == True,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if cfg and cfg.inspiration_custom:
             # temperature：滑块以 title (0.8) 为基准，按比例缩放所有阶段
             if cfg.inspiration_temperature is not None:
-                ratio = (cfg.inspiration_temperature / 100) / INSPIRATION_TEMPERATURES.get("title", 0.8)
+                ratio = (cfg.inspiration_temperature / 100) / INSPIRATION_TEMPERATURES.get(
+                    "title", 0.8
+                )
                 insp_kwargs["temperature"] = INSPIRATION_TEMPERATURES.get(step_name, 0.7) * ratio
             elif step_name in INSPIRATION_TEMPERATURES:
                 insp_kwargs["temperature"] = INSPIRATION_TEMPERATURES[step_name]
@@ -101,52 +107,96 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
 
 
 @router.post("/{project_id}/inspiration/step/{step_name}")
-async def inspiration_step(project_id: int, step_name: str, req: InspirationStepRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def inspiration_step(
+    project_id: int,
+    step_name: str,
+    req: InspirationStepRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """灵感步骤向导：title / description / theme / genre"""
     if step_name not in ("title", "description", "theme", "genre"):
         raise HTTPException(400, f"无效步骤: {step_name}")
     await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    ctx = {"initial_idea": req.initial_idea, "title": req.title, "description": req.description, "theme": req.theme}
+    ctx = {
+        "initial_idea": req.initial_idea,
+        "title": req.title,
+        "description": req.description,
+        "theme": req.theme,
+    }
     return await _run_step(engine, ai_client, step_name, ctx)
 
 
 @router.post("/{project_id}/inspiration/quick-complete")
-async def inspiration_quick_complete(project_id: int, req: InspirationStepRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def inspiration_quick_complete(
+    project_id: int,
+    req: InspirationStepRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """灵感快速补全"""
     await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
     existing = f"想法:{req.initial_idea}"
-    if req.title: existing += f" 书名:{req.title}"
-    if req.description: existing += f" 简介:{req.description}"
-    if req.theme: existing += f" 主题:{req.theme}"
-    result = await engine.execute_skill("inspiration_quick_complete", ai_client, {
-        "existing": existing, "user_prompt": "请先审视以上创作片段——逻辑是否自洽？核心机制是否清晰？角色动机是否合理？然后基于你的批判性分析，生成有深度的书名、简介、主题和类型标签。",
-    })
+    if req.title:
+        existing += f" 书名:{req.title}"
+    if req.description:
+        existing += f" 简介:{req.description}"
+    if req.theme:
+        existing += f" 主题:{req.theme}"
+    result = await engine.execute_skill(
+        "inspiration_quick_complete",
+        ai_client,
+        {
+            "existing": existing,
+            "user_prompt": "请先审视以上创作片段——逻辑是否自洽？核心机制是否清晰？角色动机是否合理？然后基于你的批判性分析，生成有深度的书名、简介、主题和类型标签。",
+        },
+    )
     check_skill_error(result)
     return result.get("json") or {}
 
 
 @router.post("/global-inspiration/step/{step_name}")
-async def global_inspiration_step(step_name: str, req: InspirationStepRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def global_inspiration_step(
+    step_name: str,
+    req: InspirationStepRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """全局灵感步骤向导（无需先建项目）"""
     if step_name not in ("title", "description", "theme", "genre"):
         raise HTTPException(400, f"无效步骤: {step_name}")
     engine, ai_client = await make_engine_and_client(db, user.id)
-    ctx = {"initial_idea": req.initial_idea, "title": req.title, "description": req.description, "theme": req.theme}
+    ctx = {
+        "initial_idea": req.initial_idea,
+        "title": req.title,
+        "description": req.description,
+        "theme": req.theme,
+    }
     return await _run_step(engine, ai_client, step_name, ctx)
 
 
 @router.post("/global-inspiration/quick-complete")
-async def global_inspiration_quick_complete(req: InspirationStepRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def global_inspiration_quick_complete(
+    req: InspirationStepRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """全局灵感快速补全"""
     engine, ai_client = await make_engine_and_client(db, user.id)
     existing = f"想法:{req.initial_idea}"
-    if req.title: existing += f" 书名:{req.title}"
-    if req.description: existing += f" 简介:{req.description}"
-    if req.theme: existing += f" 主题:{req.theme}"
-    result = await engine.execute_skill("inspiration_quick_complete", ai_client, {
-        "existing": existing, "user_prompt": "请先审视以上创作片段——逻辑是否自洽？核心机制是否清晰？角色动机是否合理？然后基于你的批判性分析，生成有深度的书名、简介、主题和类型标签。",
-    })
+    if req.title:
+        existing += f" 书名:{req.title}"
+    if req.description:
+        existing += f" 简介:{req.description}"
+    if req.theme:
+        existing += f" 主题:{req.theme}"
+    result = await engine.execute_skill(
+        "inspiration_quick_complete",
+        ai_client,
+        {
+            "existing": existing,
+            "user_prompt": "请先审视以上创作片段——逻辑是否自洽？核心机制是否清晰？角色动机是否合理？然后基于你的批判性分析，生成有深度的书名、简介、主题和类型标签。",
+        },
+    )
     check_skill_error(result)
     return result.get("json") or {}

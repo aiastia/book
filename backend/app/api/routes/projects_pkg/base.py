@@ -2,29 +2,15 @@
 
 所有子模块从此导入，避免重复。保持本文件只放"共享"内容，不放业务路由。
 """
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from pydantic import BaseModel, field_validator
-from typing import Optional
 
-from app.core.database import get_db
-from app.core.auth import get_current_user
-from app.models.project import Project
-from app.models.chapter import Chapter
-from app.models.outline import Outline
-from app.models.character import Character
-from app.models.organization import Organization
-from app.models.world import WorldSetting
-from app.models.foreshadow import Foreshadow
-from app.models.plot_analysis import PlotAnalysis
-from app.models.item import Item
-from app.models.location import Location
-from app.services.chapter_service import ChapterService
-from app.services.foreshadow_service import ForeshadowService
-from app.skills.engine import SkillEngine
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, field_validator
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.ai_client import AIClient
+from app.models.project import Project
+from app.skills.engine import SkillEngine
 
 
 def make_router() -> APIRouter:
@@ -61,30 +47,32 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    title: Optional[str] = None
-    genre: Optional[str] = None
-    synopsis: Optional[str] = None
-    narrative_pov: Optional[str] = None
-    writing_style: Optional[dict] = None
-    status: Optional[str] = None
-    target_word_count: Optional[int] = None
+    title: str | None = None
+    genre: str | None = None
+    synopsis: str | None = None
+    narrative_pov: str | None = None
+    writing_style: dict | None = None
+    status: str | None = None
+    target_word_count: int | None = None
 
 
 class ChapterCreate(BaseModel):
     chapter_number: int
     title: str = ""
     content: str = ""
-    outline_id: Optional[int] = None  # 关联的大纲（1对多模式）
+    outline_id: int | None = None  # 关联的大纲（1对多模式）
     sub_index: int = 1  # 大纲下的子章节序号
-    expansion_plan: Optional[dict] = None  # 1对多模式的展开计划
+    expansion_plan: dict | None = None  # 1对多模式的展开计划
     generation_mode: str = "one_to_one"
 
 
 class ChapterUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    status: Optional[str] = None
-    expansion_plan: Optional[dict] = None  # 章节规划（情节概要/关键事件/涉及角色/情感基调/冲突类型/叙事目标/预估字数）
+    title: str | None = None
+    content: str | None = None
+    status: str | None = None
+    expansion_plan: dict | None = (
+        None  # 章节规划（情节概要/关键事件/涉及角色/情感基调/冲突类型/叙事目标/预估字数）
+    )
 
 
 class OutlineCreate(BaseModel):
@@ -118,11 +106,11 @@ class CharacterCreate(BaseModel):
     speech_style: str = ""
     status: str = "alive"
     mental_state: str = ""
-    main_career_id: Optional[int] = None
+    main_career_id: int | None = None
     main_career_stage: int = 0  # 旧，保留兼容
     main_career_stage_desc: str = ""  # 主职业境界描述
     sub_careers: list = []
-    organization_id: Optional[int] = None
+    organization_id: int | None = None
 
 
 class ForeshadowCreate(BaseModel):
@@ -131,8 +119,8 @@ class ForeshadowCreate(BaseModel):
     foreshadow_type: str = ""
     status: str = "pending"
     source_type: str = "manual"
-    plant_chapter_number: Optional[int] = None
-    target_resolve_chapter_number: Optional[int] = None
+    plant_chapter_number: int | None = None
+    target_resolve_chapter_number: int | None = None
     priority: int = 5
     structure: dict = {}  # 扩展字段（重要性0-1/强度/隐藏度/暗示文本/关联角色等）
 
@@ -156,11 +144,11 @@ class OutlineGenerateRequest(BaseModel):
 
 class OutlineContinueRequest(BaseModel):
     chapter_count: int = 10
-    story_direction: str = ""        # 故事发展方向（可选）
-    plot_stage: str = ""             # 情节阶段：开端/发展/高潮/转折/结局（可选）
-    narrative_pov: str = ""          # 叙事视角（空=按小说设定）
-    other_requirements: str = ""     # 其他要求（可选）
-    ai_model: str = ""               # 指定模型id（空=使用默认模型）
+    story_direction: str = ""  # 故事发展方向（可选）
+    plot_stage: str = ""  # 情节阶段：开端/发展/高潮/转折/结局（可选）
+    narrative_pov: str = ""  # 叙事视角（空=按小说设定）
+    other_requirements: str = ""  # 其他要求（可选）
+    ai_model: str = ""  # 指定模型id（空=使用默认模型）
 
 
 class OutlineExpandRequest(BaseModel):
@@ -236,6 +224,7 @@ class BookImportOutlinesRequest(BaseModel):
 
 class BookImportUploadRequest(BaseModel):
     """拆书上传：text 或 base64 二选一，filename 可选（用于推断书名）。"""
+
     filename: str = ""
     title: str = ""
     text: str = ""
@@ -244,8 +233,9 @@ class BookImportUploadRequest(BaseModel):
 
 class BookImportDeconstructRequest(BaseModel):
     """一键拆解：采样方向 + 采样章数 + 大纲拆解章数。"""
-    sample_side: str = "head"   # head(前N章) / tail(后N章)
-    sample_count: int = 5       # 立项采样章数
+
+    sample_side: str = "head"  # head(前N章) / tail(后N章)
+    sample_count: int = 5  # 立项采样章数
     outline_chapters: int = 20  # 大纲拆解章数（连续前N章，按5章/批）
 
 
@@ -287,6 +277,7 @@ async def make_engine_and_client(db: AsyncSession, user_id: int, model_override:
         # 用默认配置的连接信息 + 指定模型
         try:
             from app.models.ai_model import AIModelConfig
+
             result = await db.execute(
                 select(AIModelConfig).where(
                     AIModelConfig.user_id == user_id,

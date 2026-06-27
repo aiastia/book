@@ -3,8 +3,11 @@
 对标 MuMuAINovel BatchGenerationTask。
 承载批量顺序生成多个章节的后台任务，逐章生成 + 跨章上下文传递 + 取消。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Boolean
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
+
 from app.core.database import Base
 
 
@@ -32,10 +35,10 @@ class BatchGenerationTask(Base):
     target_word_count = Column(Integer, default=4000)
     # 批量生成覆盖项（连续模式 + 风格/模型/视角可选覆盖）
     start_chapter_number = Column(Integer, nullable=True)  # 连续模式起始章号
-    batch_count = Column(Integer, nullable=True)           # 连续模式生成数量
-    model_override = Column(String(100), default="")        # 指定模型id（空=默认）
-    style_id = Column(Integer, nullable=True)              # 写作风格id（空=项目默认）
-    narrative_perspective = Column(String(50), default="") # 叙事视角（空=按小说设定）
+    batch_count = Column(Integer, nullable=True)  # 连续模式生成数量
+    model_override = Column(String(100), default="")  # 指定模型id（空=默认）
+    style_id = Column(Integer, nullable=True)  # 写作风格id（空=项目默认）
+    narrative_perspective = Column(String(50), default="")  # 叙事视角（空=按小说设定）
     # 状态：pending/running/completed/failed/cancelled
     status = Column(String(20), default="pending", index=True)
     progress = Column(Integer, default=0)  # 0-100

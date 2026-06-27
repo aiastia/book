@@ -3,13 +3,17 @@
 对标 MuMuAINovel 的 WritingStyle + ProjectDefaultStyle。
 功能等价版：用户可创建多个风格预设，每个项目选一个作为默认。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, JSON
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
 class WritingStyle(Base):
     """写作风格预设：节奏/语气/句式/描写侧重等，可被多个项目复用。"""
+
     __tablename__ = "writing_styles"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -44,12 +48,17 @@ class WritingStyle(Base):
 
     def to_dict(self):
         return {
-            "id": self.id, "name": self.name, "description": self.description,
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
             "author_name": self.author_name or "",
-            "config": self.config, "custom_prompt": self.custom_prompt or "",
+            "config": self.config,
+            "custom_prompt": self.custom_prompt or "",
             "reference_text": self.reference_text or "",
             "style_traits": self.style_traits or {},
-            "traits_updated_at": self.traits_updated_at.isoformat() if self.traits_updated_at else None,
+            "traits_updated_at": self.traits_updated_at.isoformat()
+            if self.traits_updated_at
+            else None,
             "is_preset": self.is_preset,
             "is_default": bool(self.is_default),
             "created_at": self.created_at.isoformat() if self.created_at else None,

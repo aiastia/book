@@ -1,11 +1,15 @@
 """MCP 服务器配置模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
+
 from app.core.database import Base
 
 
 class McpServer(Base):
     """MCP 服务器配置"""
+
     __tablename__ = "mcp_servers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -21,8 +25,12 @@ class McpServer(Base):
 
     def to_dict(self):
         return {
-            "id": self.id, "name": self.name, "url": self.url,
-            "transport": self.transport, "enabled": self.enabled,
-            "config": self.config, "description": self.description,
+            "id": self.id,
+            "name": self.name,
+            "url": self.url,
+            "transport": self.transport,
+            "enabled": self.enabled,
+            "config": self.config,
+            "description": self.description,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

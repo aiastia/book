@@ -1,12 +1,14 @@
 """PromptTemplate 版本管理路由"""
+
 import json
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from pydantic import BaseModel
-from typing import Optional
-from app.core.database import get_db
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.auth import get_current_user
+from app.core.database import get_db
 from app.models.prompt_template import PromptTemplate, PromptVersion
 
 router = APIRouter(prefix="/api/prompt-templates", tags=["提示词模板"])
@@ -15,6 +17,7 @@ router = APIRouter(prefix="/api/prompt-templates", tags=["提示词模板"])
 async def _sync_version_to_skill(db: AsyncSession, template_name: str, system_prompt: str):
     """将激活版本的 system_prompt 同步到 skills 表，使运行时生效。"""
     from app.models.skill import Skill
+
     skill_name = template_name.lower()
     result = await db.execute(select(Skill).where(Skill.name == skill_name))
     skill = result.scalar_one_or_none()
@@ -35,9 +38,9 @@ class PromptTemplateCreate(BaseModel):
 
 
 class PromptTemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    category: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    category: str | None = None
+    description: str | None = None
 
 
 class PromptVersionCreate(BaseModel):
@@ -118,17 +121,21 @@ async def list_templates(
         # 兜底：若没有激活版本或 system_prompt 为空，从 Skill 表回填（系统模板可能未同步 PromptVersion）
         if not active_version or not (active_version.system_prompt or "").strip():
             from app.models.skill import Skill
-            skill = (await db.execute(
-                select(Skill).where(Skill.name == t.name)
-            )).scalar_one_or_none()
+
+            skill = (
+                await db.execute(select(Skill).where(Skill.name == t.name))
+            ).scalar_one_or_none()
             if skill and (skill.system_prompt or "").strip():
                 # 用一个轻量占位 version 对象回填，不改库
                 if not active_version:
                     active_version = PromptVersion(
-                        template_id=t.id, version=1,
+                        template_id=t.id,
+                        version=1,
                         system_prompt=skill.system_prompt,
-                        user_prompt="", variables=skill.parameters or {},
-                        config={}, is_active=True,
+                        user_prompt="",
+                        variables=skill.parameters or {},
+                        config={},
+                        is_active=True,
                     )
                 else:
                     if not (active_version.system_prompt or "").strip():
@@ -184,9 +191,7 @@ async def delete_template(
     user=Depends(get_current_user),
 ):
     """删除模板（仅非系统模板可删）"""
-    result = await db.execute(
-        select(PromptTemplate).where(PromptTemplate.id == template_id)
-    )
+    result = await db.execute(select(PromptTemplate).where(PromptTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(404, "模板不存在")
@@ -213,9 +218,7 @@ async def list_versions(
     user=Depends(get_current_user),
 ):
     """列出某模板的所有版本"""
-    result = await db.execute(
-        select(PromptTemplate).where(PromptTemplate.id == template_id)
-    )
+    result = await db.execute(select(PromptTemplate).where(PromptTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(404, "模板不存在")
@@ -231,16 +234,20 @@ async def list_versions(
     # 导致「提示词模板」页面点开后右侧空白。这里从 Skill 表回填一个临时版本，不改库。
     if not versions:
         from app.models.skill import Skill
+
         skill_name = (template.name or "").lower()
-        skill = (await db.execute(
-            select(Skill).where(Skill.name == skill_name)
-        )).scalar_one_or_none()
+        skill = (
+            await db.execute(select(Skill).where(Skill.name == skill_name))
+        ).scalar_one_or_none()
         if skill and (skill.system_prompt or "").strip():
             placeholder = PromptVersion(
-                template_id=template_id, version=1,
+                template_id=template_id,
+                version=1,
                 system_prompt=skill.system_prompt,
-                user_prompt="", variables=skill.parameters or {},
-                config={}, is_active=True,
+                user_prompt="",
+                variables=skill.parameters or {},
+                config={},
+                is_active=True,
                 created_at=template.created_at,
             )
             versions = [placeholder]
@@ -256,18 +263,14 @@ async def create_version(
     user=Depends(get_current_user),
 ):
     """创建新版本（自增 version 号）"""
-    result = await db.execute(
-        select(PromptTemplate).where(PromptTemplate.id == template_id)
-    )
+    result = await db.execute(select(PromptTemplate).where(PromptTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(404, "模板不存在")
 
     # 获取当前最大版本号
     max_result = await db.execute(
-        select(func.max(PromptVersion.version)).where(
-            PromptVersion.template_id == template_id
-        )
+        select(func.max(PromptVersion.version)).where(PromptVersion.template_id == template_id)
     )
     max_version = max_result.scalar() or 0
     new_version_num = max_version + 1
@@ -313,9 +316,7 @@ async def activate_version(
     user=Depends(get_current_user),
 ):
     """激活指定版本"""
-    result = await db.execute(
-        select(PromptTemplate).where(PromptTemplate.id == template_id)
-    )
+    result = await db.execute(select(PromptTemplate).where(PromptTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(404, "模板不存在")
@@ -394,9 +395,7 @@ async def batch_import(
             # 更新当前激活版本的内容
             if existing.current_version_id:
                 ver_result = await db.execute(
-                    select(PromptVersion).where(
-                        PromptVersion.id == existing.current_version_id
-                    )
+                    select(PromptVersion).where(PromptVersion.id == existing.current_version_id)
                 )
                 active_ver = ver_result.scalar_one_or_none()
                 if active_ver:

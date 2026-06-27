@@ -2,8 +2,11 @@
 
 记录角色在每个章节后的属性/状态变化，同时保存完整快照供章节生成时回溯。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
+
 from app.core.database import Base
 
 
@@ -12,7 +15,9 @@ class CharacterChangeLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    character_id = Column(Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    character_id = Column(
+        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # 发生在第几章
     chapter_number = Column(Integer, nullable=False)
     # 变更了哪些字段：{"status": "injured", "personality": "变得阴郁"}

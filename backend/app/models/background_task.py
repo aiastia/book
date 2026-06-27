@@ -9,13 +9,17 @@
 设计：fire-and-forget + 独立 session + 逐步更新 progress。
 前端通过 /api/tasks 轮询进度，可取消。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Boolean, Text
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
 class BackgroundTask(Base):
     """通用后台任务记录。"""
+
     __tablename__ = "background_tasks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

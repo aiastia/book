@@ -1,34 +1,53 @@
 """AI 工具：灵感激发 / 去味 / 封面提示词 / 拆书导入 / MCP"""
-import json
-from app.api.routes.projects_pkg.base import *
 
+import json
+
+from app.api.routes.projects_pkg.base import *
 
 router = make_router()
 
 
 # ============ 灵感激发（旧版单次） ============
 @router.post("/{project_id}/inspire")
-async def inspire(project_id: int, req: InspireRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def inspire(
+    project_id: int,
+    req: InspireRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("inspire", ai_client, {
-        "idea": req.idea,
-        "user_prompt": f"我的想法是：{req.idea}，请帮我拓展成创作方案。",
-    })
+    result = await engine.execute_skill(
+        "inspire",
+        ai_client,
+        {
+            "idea": req.idea,
+            "user_prompt": f"我的想法是：{req.idea}，请帮我拓展成创作方案。",
+        },
+    )
     check_skill_error(result)
     return result.get("json") or {}
 
 
 # ============ AI 去味/润色 ============
 @router.post("/{project_id}/ai-denoising")
-async def ai_denoising(project_id: int, req: AiDenoisingRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def ai_denoising(
+    project_id: int,
+    req: AiDenoisingRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """让文本更自然，去除 AI 味"""
     await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("ai_denoising", ai_client, {
-        "original_text": req.text,
-        "user_prompt": f"请对以下文本进行去AI味润色，让文字更加自然：\n\n{req.text}",
-    })
+    result = await engine.execute_skill(
+        "ai_denoising",
+        ai_client,
+        {
+            "original_text": req.text,
+            "user_prompt": f"请对以下文本进行去AI味润色，让文字更加自然：\n\n{req.text}",
+        },
+    )
     check_skill_error(result)
     processed = (result.get("json") or {}).get("processed_text", "") or result.get("content", "")
     return {"processed_text": processed}
@@ -36,30 +55,41 @@ async def ai_denoising(project_id: int, req: AiDenoisingRequest, db: AsyncSessio
 
 # ============ 封面提示词 ============
 @router.post("/{project_id}/cover/generate-prompt")
-async def generate_cover_prompt(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def generate_cover_prompt(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """生成小说封面设计提示词"""
     proj = await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("novel_cover_prompt_template", ai_client, {
-        "title": proj.title, "genre": proj.genre or "网文", "theme": "",
-        "description": proj.synopsis or "暂无简介",
-        "user_prompt": f"请为小说「{proj.title}」生成封面设计提示词。题材：{proj.genre}，简介：{proj.synopsis}",
-    })
+    result = await engine.execute_skill(
+        "novel_cover_prompt_template",
+        ai_client,
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "theme": "",
+            "description": proj.synopsis or "暂无简介",
+            "user_prompt": f"请为小说「{proj.title}」生成封面设计提示词。题材：{proj.genre}，简介：{proj.synopsis}",
+        },
+    )
     check_skill_error(result)
     cover_prompt = result.get("content", "") or result.get("json") or ""
     return {"cover_prompt": cover_prompt}
 
 
 @router.post("/{project_id}/cover/generate-image")
-async def generate_cover_image(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def generate_cover_image(
+    project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """真实出图：调用图像生成 API 生成封面图片并保存到项目。
 
     复用用户配置的 base_url + api_key，调用 /v1/images/generations（OpenAI 兼容）。
     req: { prompt: 提示词, size?: "1024x1024", model?: "dall-e-3" }
     """
-    import httpx
     import base64
     import os
+
+    import httpx
 
     proj = await get_user_project(db, project_id, user)
     prompt = req.get("prompt", "")
@@ -102,7 +132,7 @@ async def generate_cover_image(project_id: int, req: dict, db: AsyncSession = De
             return {"cover_url": img_url, "cover_prompt": prompt}
         raise HTTPException(500, "出图 API 未返回有效图片数据")
 
-    cover_dir = f"data/covers"
+    cover_dir = "data/covers"
     os.makedirs(cover_dir, exist_ok=True)
     filename = f"{cover_dir}/project_{project_id}.png"
     with open(filename, "wb") as f:
@@ -115,42 +145,66 @@ async def generate_cover_image(project_id: int, req: dict, db: AsyncSession = De
 
 # ============ 拆书导入反向解析 ============
 @router.post("/book-import/reverse-suggest")
-async def book_import_reverse_suggest(req: BookImportSuggestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def book_import_reverse_suggest(
+    req: BookImportSuggestRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """从小说文本反向提取项目信息"""
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("book_import_reverse_project_suggestion", ai_client, {
-        "title": req.title or "未知书名", "sampled_text": req.sampled_text,
-        "user_prompt": f"请从以下小说文本中提取项目信息（书名：{req.title}）。",
-    })
+    result = await engine.execute_skill(
+        "book_import_reverse_project_suggestion",
+        ai_client,
+        {
+            "title": req.title or "未知书名",
+            "sampled_text": req.sampled_text,
+            "user_prompt": f"请从以下小说文本中提取项目信息（书名：{req.title}）。",
+        },
+    )
     check_skill_error(result)
     return result.get("json") or {}
 
 
 @router.post("/book-import/reverse-outlines")
-async def book_import_reverse_outlines(req: BookImportOutlinesRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def book_import_reverse_outlines(
+    req: BookImportOutlinesRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """从章节文本反向生成大纲并存库"""
     proj = await get_user_project(db, req.project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("book_import_reverse_outlines", ai_client, {
-        "title": proj.title, "genre": proj.genre or "网文",
-        "start_chapter": str(req.start_chapter), "end_chapter": str(req.end_chapter),
-        "expected_count": str(req.end_chapter - req.start_chapter + 1),
-        "chapters_text": req.chapters_text,
-        "user_prompt": f"请从以下章节文本中反向生成第{req.start_chapter}到{req.end_chapter}章的大纲。",
-    })
+    result = await engine.execute_skill(
+        "book_import_reverse_outlines",
+        ai_client,
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "start_chapter": str(req.start_chapter),
+            "end_chapter": str(req.end_chapter),
+            "expected_count": str(req.end_chapter - req.start_chapter + 1),
+            "chapters_text": req.chapters_text,
+            "user_prompt": f"请从以下章节文本中反向生成第{req.start_chapter}到{req.end_chapter}章的大纲。",
+        },
+    )
     check_skill_error(result)
     outlines_data = result.get("json") or []
     if not isinstance(outlines_data, list):
         raise HTTPException(500, "AI 返回的大纲格式不正确")
     created = []
     for item in outlines_data:
-        db.add(Outline(
-            project_id=req.project_id,
-            chapter_number=item.get("chapter_number", 0),
-            title=item.get("title", ""), summary=item.get("summary", ""),
-            key_points=item.get("key_points", []), emotion=item.get("emotion", ""),
-            goal=item.get("goal", ""), structure=item,
-        ))
+        db.add(
+            Outline(
+                project_id=req.project_id,
+                chapter_number=item.get("chapter_number", 0),
+                title=item.get("title", ""),
+                summary=item.get("summary", ""),
+                key_points=item.get("key_points", []),
+                emotion=item.get("emotion", ""),
+                goal=item.get("goal", ""),
+                structure=item,
+            )
+        )
         created.append(item)
     await db.commit()
     return {"outlines": created, "count": len(created)}
@@ -167,6 +221,7 @@ async def parse_txt(
     req: { text?: str, base64?: str }
     """
     import base64
+
     from app.services.txt_parser_service import parse_txt_file
 
     raw = None
@@ -198,7 +253,8 @@ class FullImportReq(BaseModel):
 @router.post("/book-import/full-import")
 async def full_import(
     req: FullImportReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """完整拆书导入：创建项目 + 批量导入章节（不走 AI 反向解析，直接落库）。
 
@@ -220,7 +276,7 @@ async def full_import(
     created = 0
     total_words = 0
     for idx, ch in enumerate(req.chapters):
-        title = ch.get("title", f"第{idx+1}章")
+        title = ch.get("title", f"第{idx + 1}章")
         content = ch.get("content", "")
         word_count = len(content)
         total_words += word_count
@@ -277,7 +333,9 @@ def _sample_chapters_text(chapters: list[dict], side: str, count: int) -> str:
 
 
 @router.post("/book-import/upload")
-async def book_import_upload(req: BookImportUploadRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def book_import_upload(
+    req: BookImportUploadRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """上传 TXT 并解析入库。
 
     req: { filename?, title?, text?, base64? }（text / base64 二选一）
@@ -285,8 +343,9 @@ async def book_import_upload(req: BookImportUploadRequest, db: AsyncSession = De
     """
     import base64 as _b64
     import os
-    from app.services.txt_parser_service import parse_txt_file
+
     from app.models.imported_book import ImportedBook
+    from app.services.txt_parser_service import parse_txt_file
 
     raw: bytes | None = None
     if req.base64:
@@ -329,10 +388,12 @@ async def book_import_upload(req: BookImportUploadRequest, db: AsyncSession = De
 
 
 @router.get("/book-import/{book_id}")
-async def book_import_detail(book_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def book_import_detail(
+    book_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """书籍详情 + 前 10 章预览（标题/字数，不含正文）。"""
-    from app.services.txt_parser_service import parse_txt_file
     from app.models.imported_book import ImportedBook
+    from app.services.txt_parser_service import parse_txt_file
 
     result = await db.execute(
         select(ImportedBook).where(ImportedBook.id == book_id, ImportedBook.user_id == user.id)
@@ -346,18 +407,22 @@ async def book_import_detail(book_id: int, db: AsyncSession = Depends(get_db), u
     if book.raw_text:
         parsed = parse_txt_file(book.raw_text.encode("utf-8"))
         for c in parsed.get("chapters", [])[:10]:
-            preview.append({
-                "chapter_number": c.get("chapter_number", 0),
-                "title": c.get("title", ""),
-                "word_count": len(c.get("content", "")),
-            })
+            preview.append(
+                {
+                    "chapter_number": c.get("chapter_number", 0),
+                    "title": c.get("title", ""),
+                    "word_count": len(c.get("content", "")),
+                }
+            )
     info = book.to_dict()
     info["preview"] = preview
     return info
 
 
 @router.delete("/book-import/{book_id}")
-async def book_import_delete(book_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def book_import_delete(
+    book_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """删除导入书籍记录。"""
     from app.models.imported_book import ImportedBook
 
@@ -387,9 +452,10 @@ async def book_import_deconstruct(
     返回 { project_id, project_info, outline_count, batches_done }
     """
     import logging
+
     logger = logging.getLogger(__name__)
-    from app.services.txt_parser_service import parse_txt_file
     from app.models.imported_book import ImportedBook
+    from app.services.txt_parser_service import parse_txt_file
 
     # 1. 取书
     result = await db.execute(
@@ -410,10 +476,15 @@ async def book_import_deconstruct(
     # 2. 立项采样 → 反向项目建议
     sample_count = max(1, req.sample_count or 5)
     sampled_text = _sample_chapters_text(chapters, req.sample_side, sample_count)
-    sug_result = await engine.execute_skill("book_import_reverse_project_suggestion", ai_client, {
-        "title": book.title or "未知书名", "sampled_text": sampled_text,
-        "user_prompt": f"请从以下小说文本中提取项目信息（书名：{book.title}）。",
-    })
+    sug_result = await engine.execute_skill(
+        "book_import_reverse_project_suggestion",
+        ai_client,
+        {
+            "title": book.title or "未知书名",
+            "sampled_text": sampled_text,
+            "user_prompt": f"请从以下小说文本中提取项目信息（书名：{book.title}）。",
+        },
+    )
     check_skill_error(sug_result)
     project_info = sug_result.get("json") or {}
 
@@ -447,19 +518,26 @@ async def book_import_deconstruct(
     for start_no in range(1, available + 1, batch_size):
         end_no = min(start_no + batch_size - 1, available)
         # 取对应章节正文（章节号从 1 开始，列表索引从 0 开始）
-        batch_chapters = chapters[start_no - 1: end_no]
+        batch_chapters = chapters[start_no - 1 : end_no]
         batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
         if not batch_text.strip():
             continue
         try:
-            o_result = await engine.execute_skill("book_import_reverse_outlines", ai_client, {
-                "title": new_proj.title, "genre": genre or "网文",
-                "theme": theme, "narrative_perspective": narrative_pov,
-                "start_chapter": str(start_no), "end_chapter": str(end_no),
-                "expected_count": str(end_no - start_no + 1),
-                "chapters_text": batch_text,
-                "user_prompt": f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。",
-            })
+            o_result = await engine.execute_skill(
+                "book_import_reverse_outlines",
+                ai_client,
+                {
+                    "title": new_proj.title,
+                    "genre": genre or "网文",
+                    "theme": theme,
+                    "narrative_perspective": narrative_pov,
+                    "start_chapter": str(start_no),
+                    "end_chapter": str(end_no),
+                    "expected_count": str(end_no - start_no + 1),
+                    "chapters_text": batch_text,
+                    "user_prompt": f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。",
+                },
+            )
             if o_result.get("error"):
                 logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
                 continue
@@ -467,17 +545,19 @@ async def book_import_deconstruct(
             if not isinstance(outlines_data, list):
                 continue
             for item in outlines_data:
-                db.add(Outline(
-                    project_id=new_proj.id,
-                    chapter_number=item.get("chapter_number", start_no),
-                    title=item.get("title", ""),
-                    summary=item.get("summary", ""),
-                    scenes=item.get("scenes", []),
-                    key_points=item.get("key_points", []),
-                    emotion=item.get("emotion", ""),
-                    goal=item.get("goal", ""),
-                    structure=item,
-                ))
+                db.add(
+                    Outline(
+                        project_id=new_proj.id,
+                        chapter_number=item.get("chapter_number", start_no),
+                        title=item.get("title", ""),
+                        summary=item.get("summary", ""),
+                        scenes=item.get("scenes", []),
+                        key_points=item.get("key_points", []),
+                        emotion=item.get("emotion", ""),
+                        goal=item.get("goal", ""),
+                        structure=item,
+                    )
+                )
                 created_outlines += 1
             batches_done += 1
         except Exception as e:
@@ -499,51 +579,90 @@ async def book_import_deconstruct(
 
 # ============ MCP 增强 ============
 @router.post("/{project_id}/mcp/test-tool")
-async def mcp_test_tool(project_id: int, req: McpToolTestRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def mcp_test_tool(
+    project_id: int,
+    req: McpToolTestRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """MCP 工具测试"""
     await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
     sys_skill = await engine.get_skill("mcp_tool_test_system")
     usr_skill = await engine.get_skill("mcp_tool_test")
-    ctx = {"plugin_name": req.plugin_name, "tool_list": json.dumps(req.tool_list, ensure_ascii=False)}
+    ctx = {
+        "plugin_name": req.plugin_name,
+        "tool_list": json.dumps(req.tool_list, ensure_ascii=False),
+    }
     if sys_skill and usr_skill:
         sys_prompt = substitute_vars(sys_skill.system_prompt, ctx)
         usr_prompt = substitute_vars(usr_skill.system_prompt, ctx)
-        result = await ai_client.chat_json_retry(messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": usr_prompt}])
+        result = await ai_client.chat_json_retry(
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": usr_prompt},
+            ]
+        )
     else:
-        result = await engine.execute_skill("mcp_tool_test", ai_client, {
-            "plugin_name": req.plugin_name,
-            "user_prompt": f"请分析 MCP 插件 {req.plugin_name} 的可用工具并推荐测试方案。",
-        })
+        result = await engine.execute_skill(
+            "mcp_tool_test",
+            ai_client,
+            {
+                "plugin_name": req.plugin_name,
+                "user_prompt": f"请分析 MCP 插件 {req.plugin_name} 的可用工具并推荐测试方案。",
+            },
+        )
     check_skill_error(result)
     return result.get("json") or {}
 
 
 @router.post("/{project_id}/mcp/world-planning")
-async def mcp_world_planning(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def mcp_world_planning(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """MCP 世界观规划"""
     proj = await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("mcp_world_building_planning", ai_client, {
-        "title": proj.title, "genre": proj.genre or "网文", "theme": "",
-        "description": proj.synopsis or "暂无简介",
-        "user_prompt": f"请为小说「{proj.title}」进行世界观研究，提供构建建议。",
-    })
+    result = await engine.execute_skill(
+        "mcp_world_building_planning",
+        ai_client,
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "theme": "",
+            "description": proj.synopsis or "暂无简介",
+            "user_prompt": f"请为小说「{proj.title}」进行世界观研究，提供构建建议。",
+        },
+    )
     check_skill_error(result)
     return result.get("json") or {}
 
 
 @router.post("/{project_id}/mcp/character-planning")
-async def mcp_character_planning(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def mcp_character_planning(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """MCP 角色规划"""
     proj = await get_user_project(db, project_id, user)
-    worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
+    worlds = (
+        (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id)))
+        .scalars()
+        .all()
+    )
     world_info = "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds]) or "暂无"
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("mcp_character_planning", ai_client, {
-        "title": proj.title, "genre": proj.genre or "网文", "theme": "",
-        "time_period": "", "location": "", "world_info": world_info,
-        "user_prompt": f"请为小说「{proj.title}」进行角色研究，提供角色设计建议。",
-    })
+    result = await engine.execute_skill(
+        "mcp_character_planning",
+        ai_client,
+        {
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "theme": "",
+            "time_period": "",
+            "location": "",
+            "world_info": world_info,
+            "user_prompt": f"请为小说「{proj.title}」进行角色研究，提供角色设计建议。",
+        },
+    )
     check_skill_error(result)
     return result.get("json") or {}

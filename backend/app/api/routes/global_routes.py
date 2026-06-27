@@ -10,7 +10,6 @@
 2. 避免路由冲突：projects.py 中 /{project_id} 动态路由会捕获
    /api/projects/ai-models 等静态路径（"ai-models" 无法转 int → 422）
 """
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -20,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.ai_client import AIClient
 from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.models.user import User
 from app.skills.engine import SkillEngine
 
 router = APIRouter(prefix="/api", tags=["全局接口"])
@@ -37,13 +35,13 @@ class AIModelCreate(BaseModel):
     temperature: int = 85
     top_p: int = 90
     max_tokens: int = 4096
-    frequency_penalty: Optional[int] = None  # *100，None=不发送
-    presence_penalty: Optional[int] = None   # *100，None=不发送
+    frequency_penalty: int | None = None  # *100，None=不发送
+    presence_penalty: int | None = None  # *100，None=不发送
     # 灵感模式独立参数（None=跟随全局 / 不发送）
-    inspiration_temperature: Optional[int] = None       # *100，None=跟随全局 temperature
-    inspiration_top_p: Optional[int] = None            # *100，None=不发送
-    inspiration_frequency_penalty: Optional[int] = None # *100，None=不发送
-    inspiration_presence_penalty: Optional[int] = None  # *100，None=不发送
+    inspiration_temperature: int | None = None  # *100，None=跟随全局 temperature
+    inspiration_top_p: int | None = None  # *100，None=不发送
+    inspiration_frequency_penalty: int | None = None  # *100，None=不发送
+    inspiration_presence_penalty: int | None = None  # *100，None=不发送
     inspiration_custom: bool = False  # 灵感模式自定义开关：关=全局参数，开=递减温度表+自定义参数
     is_default: bool = False
     reasoning_model: bool = False  # 推理模型：强制 temperature=1，不发 top_p/penalty
@@ -54,27 +52,27 @@ class AIModelCreate(BaseModel):
 
 
 class AIModelUpdate(BaseModel):
-    name: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model: Optional[str] = None
-    temperature: Optional[int] = None
-    top_p: Optional[int] = None
-    max_tokens: Optional[int] = None
-    frequency_penalty: Optional[int] = None  # *100，None=不发送
-    presence_penalty: Optional[int] = None   # *100，None=不发送
+    name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model: str | None = None
+    temperature: int | None = None
+    top_p: int | None = None
+    max_tokens: int | None = None
+    frequency_penalty: int | None = None  # *100，None=不发送
+    presence_penalty: int | None = None  # *100，None=不发送
     # 灵感模式独立参数
-    inspiration_temperature: Optional[int] = None
-    inspiration_top_p: Optional[int] = None
-    inspiration_frequency_penalty: Optional[int] = None
-    inspiration_presence_penalty: Optional[int] = None
-    inspiration_custom: Optional[bool] = None
-    is_default: Optional[bool] = None
-    reasoning_model: Optional[bool] = None
-    reasoning_effort: Optional[str] = None  # low/medium/high
-    backend_type: Optional[str] = None
-    provider: Optional[str] = None
-    embedding_model: Optional[str] = None
+    inspiration_temperature: int | None = None
+    inspiration_top_p: int | None = None
+    inspiration_frequency_penalty: int | None = None
+    inspiration_presence_penalty: int | None = None
+    inspiration_custom: bool | None = None
+    is_default: bool | None = None
+    reasoning_model: bool | None = None
+    reasoning_effort: str | None = None  # low/medium/high
+    backend_type: str | None = None
+    provider: str | None = None
+    embedding_model: str | None = None
 
 
 @router.get("/ai-models")
@@ -84,32 +82,46 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
 
     result = await db.execute(select(AIModelConfig).where(AIModelConfig.user_id == user.id))
     models = result.scalars().all()
-    return [{
-        "id": m.id, "name": m.name, "base_url": m.base_url, "model": m.model,
-        "temperature": m.temperature, "top_p": m.top_p, "max_tokens": m.max_tokens,
-        "frequency_penalty": m.frequency_penalty, "presence_penalty": m.presence_penalty,
-        "is_default": m.is_default, "reasoning_model": m.reasoning_model or False,
-        "reasoning_effort": m.reasoning_effort or "low",
-        "inspiration_temperature": m.inspiration_temperature,
-        "inspiration_top_p": m.inspiration_top_p,
-        "inspiration_custom": m.inspiration_custom or False,
-        "inspiration_frequency_penalty": m.inspiration_frequency_penalty,
-        "inspiration_presence_penalty": m.inspiration_presence_penalty,
-        "backend_type": m.backend_type or "openai",
-        "provider": m.provider or m.backend_type or "openai",
-        "embedding_model": m.embedding_model or "",
-        "created_at": m.created_at.isoformat() if m.created_at else "",
-    } for m in models]
+    return [
+        {
+            "id": m.id,
+            "name": m.name,
+            "base_url": m.base_url,
+            "model": m.model,
+            "temperature": m.temperature,
+            "top_p": m.top_p,
+            "max_tokens": m.max_tokens,
+            "frequency_penalty": m.frequency_penalty,
+            "presence_penalty": m.presence_penalty,
+            "is_default": m.is_default,
+            "reasoning_model": m.reasoning_model or False,
+            "reasoning_effort": m.reasoning_effort or "low",
+            "inspiration_temperature": m.inspiration_temperature,
+            "inspiration_top_p": m.inspiration_top_p,
+            "inspiration_custom": m.inspiration_custom or False,
+            "inspiration_frequency_penalty": m.inspiration_frequency_penalty,
+            "inspiration_presence_penalty": m.inspiration_presence_penalty,
+            "backend_type": m.backend_type or "openai",
+            "provider": m.provider or m.backend_type or "openai",
+            "embedding_model": m.embedding_model or "",
+            "created_at": m.created_at.isoformat() if m.created_at else "",
+        }
+        for m in models
+    ]
 
 
 @router.post("/ai-models")
-async def create_ai_model(req: AIModelCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_ai_model(
+    req: AIModelCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """新建 AI 模型配置。"""
     from app.models.ai_model import AIModelConfig
 
     if req.is_default:
         result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.user_id == user.id, AIModelConfig.is_default == True)
+            select(AIModelConfig).where(
+                AIModelConfig.user_id == user.id, AIModelConfig.is_default == True
+            )
         )
         for m in result.scalars().all():
             m.is_default = False
@@ -121,7 +133,12 @@ async def create_ai_model(req: AIModelCreate, db: AsyncSession = Depends(get_db)
 
 
 @router.put("/ai-models/{model_id}")
-async def update_ai_model(model_id: int, req: AIModelUpdate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def update_ai_model(
+    model_id: int,
+    req: AIModelUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """更新 AI 模型配置。"""
     from app.models.ai_model import AIModelConfig
 
@@ -158,7 +175,9 @@ async def update_ai_model(model_id: int, req: AIModelUpdate, db: AsyncSession = 
 
 
 @router.delete("/ai-models/{model_id}")
-async def delete_ai_model(model_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def delete_ai_model(
+    model_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """删除 AI 模型配置。"""
     from app.models.ai_model import AIModelConfig
 
@@ -174,7 +193,9 @@ async def delete_ai_model(model_id: int, db: AsyncSession = Depends(get_db), use
 
 
 @router.post("/ai-models/{model_id}/test")
-async def test_ai_model(model_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def test_ai_model(
+    model_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """测试 AI 模型连通性。"""
     from app.models.ai_model import AIModelConfig
 
@@ -187,7 +208,9 @@ async def test_ai_model(model_id: int, db: AsyncSession = Depends(get_db), user=
     # 测试连接：用该条配置构造客户端，必须带上 reasoning_model 标记，
     # 否则推理模型（Kimi/R1）测试时仍会发 temperature/top_p 导致 400。
     client = AIClient(
-        base_url=m.base_url, api_key=m.api_key, model=m.model,
+        base_url=m.base_url,
+        api_key=m.api_key,
+        model=m.model,
         reasoning_model=m.reasoning_model or False,
         reasoning_effort=m.reasoning_effort or "low",
         **AIClient._defaults_from_cfg(m),
@@ -232,7 +255,11 @@ async def _fetch_remote_model_list(base_url: str, api_key: str, provider: str = 
     urls_to_try = [url]
     # openai 兼容做兜底
     if provider == "openai":
-        alt = url.replace("/v1/models", "/models") if "/v1/models" in url else url.replace("/models", "/v1/models")
+        alt = (
+            url.replace("/v1/models", "/models")
+            if "/v1/models" in url
+            else url.replace("/models", "/v1/models")
+        )
         if alt not in urls_to_try:
             urls_to_try.append(alt)
 
@@ -248,14 +275,19 @@ async def _fetch_remote_model_list(base_url: str, api_key: str, provider: str = 
                 # Gemini 格式：{models:[{name:"models/gemini-1.5-flash",...}]}
                 if provider == "gemini":
                     raw = data.get("models", [])
-                    models = [{
-                        "id": m.get("name", "").replace("models/", ""),
-                        "owned_by": "google",
-                        "supported": m.get("supportedGenerationMethods", []),
-                    } for m in raw]
+                    models = [
+                        {
+                            "id": m.get("name", "").replace("models/", ""),
+                            "owned_by": "google",
+                            "supported": m.get("supportedGenerationMethods", []),
+                        }
+                        for m in raw
+                    ]
                 else:
                     raw = data.get("data", [])
-                    models = [{"id": m.get("id", ""), "owned_by": m.get("owned_by", "")} for m in raw]
+                    models = [
+                        {"id": m.get("id", ""), "owned_by": m.get("owned_by", "")} for m in raw
+                    ]
                 models.sort(key=lambda m: m.get("id", ""))
                 return {"models": models}
             except httpx.ConnectError:
@@ -279,7 +311,9 @@ async def fetch_remote_models(req: FetchModelsReq, user=Depends(get_current_user
 
 
 @router.get("/ai-models/default/remote-models")
-async def get_default_remote_models(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_default_remote_models(
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """用当前用户【默认 AI 模型配置】的凭据实时拉取远端可用模型列表。
 
     供续写/批量生成等弹窗动态填充「AI 模型」下拉，无需用户重复填 key。
@@ -316,14 +350,17 @@ async def get_default_remote_models(db: AsyncSession = Depends(get_db), user=Dep
 
 @router.get("/ai-models/{model_id}/remote-models")
 async def get_model_remote_models(
-    model_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    model_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """用指定 AI 模型配置的已存凭据拉取远端可用模型列表（无需用户重复填 Key）。"""
     from app.models.ai_model import AIModelConfig
 
     result = await db.execute(
         select(AIModelConfig).where(
-            AIModelConfig.id == model_id, AIModelConfig.user_id == user.id,
+            AIModelConfig.id == model_id,
+            AIModelConfig.user_id == user.id,
         )
     )
     cfg = result.scalar_one_or_none()
@@ -379,42 +416,52 @@ class SkillCreateReq(BaseModel):
 
 
 class SkillUpdateReq(BaseModel):
-    system_prompt: Optional[str] = None
-    is_enabled: Optional[bool] = None
-    is_customized: Optional[bool] = None
-    config: Optional[dict] = None
-    as_tool: Optional[bool] = None  # 注册自定义 Skill 为 AI Tool
+    system_prompt: str | None = None
+    is_enabled: bool | None = None
+    is_customized: bool | None = None
+    config: dict | None = None
+    as_tool: bool | None = None  # 注册自定义 Skill 为 AI Tool
 
 
 @router.get("/skills/variables")
 async def get_skill_variables(user=Depends(get_current_user)):
     """获取提示词变量参考文档（VARIABLES.md 转 HTML）。"""
-    import os, re
+    import os
+    import re
+
     path = os.path.join(os.path.dirname(__file__), "../../skills/prompts/VARIABLES.md")
     if not os.path.exists(path):
         raise HTTPException(404, "变量参考文档不存在")
     with open(path, encoding="utf-8") as f:
         md = f.read()
-    
+
     # 简单 Markdown → HTML
     html = md
     # 表格
-    html = re.sub(r'\|(.+)\|', lambda m: '<tr>' + ''.join(f'<td>{c.strip()}</td>' for c in m.group(1).split('|')) + '</tr>', html)
-    html = re.sub(r'(<tr>.*?</tr>\n)+', lambda m: f'<table>{m.group(0)}</table>', html)
-    html = re.sub(r'<tr><td>-+</td></tr>', '', html)  # 去掉分隔行
+    html = re.sub(
+        r"\|(.+)\|",
+        lambda m: (
+            "<tr>" + "".join(f"<td>{c.strip()}</td>" for c in m.group(1).split("|")) + "</tr>"
+        ),
+        html,
+    )
+    html = re.sub(r"(<tr>.*?</tr>\n)+", lambda m: f"<table>{m.group(0)}</table>", html)
+    html = re.sub(r"<tr><td>-+</td></tr>", "", html)  # 去掉分隔行
     # 标题
-    html = re.sub(r'^## (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
-    html = re.sub(r'^# (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    html = re.sub(r"^## (.+)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
+    html = re.sub(r"^# (.+)$", r"<h2>\1</h2>", html, flags=re.MULTILINE)
     # 代码
-    html = re.sub(r'`([^`]+)`', r'<code>\1</code>', html)
+    html = re.sub(r"`([^`]+)`", r"<code>\1</code>", html)
     # 换行
-    html = re.sub(r'\n\n', '<br><br>', html)
-    
+    html = re.sub(r"\n\n", "<br><br>", html)
+
     return {"content": html, "raw": md}
 
 
 @router.get("/skills")
-async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def list_skills(
+    category: str = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """列出所有 Skill（含用户级配置覆盖）。"""
     from app.models.skill import Skill
 
@@ -434,31 +481,41 @@ async def list_skills(category: str = None, db: AsyncSession = Depends(get_db), 
         system_updated = bool(is_customized and snapshot and snapshot != s.system_prompt)
         # 解析 @include 引用列表
         import re
+
         includes = re.findall(r"@include:(\S+\.md)", s.system_prompt or "")
-        out.append({
-            "id": s.id,
-            "name": s.name,
-            "display_name": s.display_name,
-            "description": s.description,
-            "category": s.category,
-            "skill_type": s.skill_type,
-            "is_enabled": user_cfg["is_enabled"] if user_cfg else s.is_enabled,
-            "is_customized": is_customized,
-            "system_updated": system_updated,
-            "system_prompt": s.system_prompt,  # 原始内容（编辑用，保留 @include 结构）
-            "has_includes": len(includes) > 0,
-            "includes": includes,  # @include 引用列表
-            "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "") if (user_cfg and user_cfg.get("is_customized")) else "",
-            "parameters": s.parameters,
-            "config": s.config,
-            "as_tool": (s.config or {}).get("as_tool", False),
-        })
+        out.append(
+            {
+                "id": s.id,
+                "name": s.name,
+                "display_name": s.display_name,
+                "description": s.description,
+                "category": s.category,
+                "skill_type": s.skill_type,
+                "is_enabled": user_cfg["is_enabled"] if user_cfg else s.is_enabled,
+                "is_customized": is_customized,
+                "system_updated": system_updated,
+                "system_prompt": s.system_prompt,  # 原始内容（编辑用，保留 @include 结构）
+                "has_includes": len(includes) > 0,
+                "includes": includes,  # @include 引用列表
+                "custom_prompt": (user_cfg.get("config", {}) or {}).get("system_prompt", "")
+                if (user_cfg and user_cfg.get("is_customized"))
+                else "",
+                "parameters": s.parameters,
+                "config": s.config,
+                "as_tool": (s.config or {}).get("as_tool", False),
+            }
+        )
     return out
     return out
 
 
 @router.put("/skills/{skill_id}")
-async def update_skill(skill_id: int, req: SkillUpdateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def update_skill(
+    skill_id: int,
+    req: SkillUpdateReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """更新 Skill 用户级配置。is_customized=True 时保存自定义提示词并记录系统版本快照。"""
     from app.models.skill import Skill, SkillConfig
 
@@ -501,7 +558,9 @@ async def update_skill(skill_id: int, req: SkillUpdateReq, db: AsyncSession = De
 
 
 @router.post("/skills/{skill_id}/reset")
-async def reset_skill(skill_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def reset_skill(
+    skill_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """重置单个 Skill 到系统默认（删除用户级覆盖配置）。"""
     from app.models.skill import SkillConfig
 
@@ -519,33 +578,41 @@ async def reset_skill(skill_id: int, db: AsyncSession = Depends(get_db), user=De
 async def reset_all_skills(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """一键重置所有提示词为系统默认（清除所有用户自定义，重新从文件加载）。"""
     from app.skills.builtin import force_reset_all_skills, init_builtin_skills
+
     await force_reset_all_skills(db)
     await init_builtin_skills(db, force=True)
     return {"ok": True, "message": "所有提示词已重置为系统默认版本"}
 
 
 @router.post("/skills/reload")
-async def reload_skills_from_disk(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def reload_skills_from_disk(
+    db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """从磁盘重新加载提示词模板，智能更新到数据库（不覆盖用户自定义版本）。
-    
+
     与 reset-all 的区别：reset-all 清除所有用户自定义强制覆盖；
     reload 只更新"用户未修改过"的模板，保留用户自定义内容。
     用于提示词文件更新后，无需重启后端即可生效。
     """
     import app.skills.builtin as builtin
     from app.skills.builtin import init_builtin_skills, load_builtin_skills
-    
+
     # 重新从磁盘读取模板（绕过模块级缓存）
     builtin.BUILTIN_SKILLS = load_builtin_skills()
-    
+
     # 智能模式更新 DB（force=False，保留用户自定义）
     await init_builtin_skills(db, force=False)
-    
-    return {"ok": True, "message": f"已从磁盘重新加载 {len(builtin.BUILTIN_SKILLS)} 个模板（用户自定义版本已保留）"}
+
+    return {
+        "ok": True,
+        "message": f"已从磁盘重新加载 {len(builtin.BUILTIN_SKILLS)} 个模板（用户自定义版本已保留）",
+    }
 
 
 @router.post("/skills/create")
-async def create_custom_skill(req: SkillCreateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_custom_skill(
+    req: SkillCreateReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """用户自定义创建 Skill（可通过粘贴 MD 内容安装）。"""
     from app.models.skill import Skill
 
@@ -569,7 +636,9 @@ async def create_custom_skill(req: SkillCreateReq, db: AsyncSession = Depends(ge
 
 
 @router.delete("/skills/{skill_id}/custom")
-async def delete_custom_skill(skill_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def delete_custom_skill(
+    skill_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """删除用户自定义 Skill（仅 skill_type=custom 可删除）。"""
     from app.models.skill import Skill
 
@@ -592,14 +661,20 @@ class InspireRequest(BaseModel):
 
 
 @router.post("/global-inspire")
-async def global_inspire(req: InspireRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def global_inspire(
+    req: InspireRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """全局灵感：从一个想法拓展为完整创作方案，并可选直接建项目。"""
     engine = SkillEngine(db, user.id)
     ai_client = await AIClient.from_user_config(db, user.id)
-    result = await engine.execute_skill("inspire", ai_client, {
-        "idea": req.idea,
-        "user_prompt": f"我的想法是：{req.idea}，请帮我拓展成创作方案。",
-    })
+    result = await engine.execute_skill(
+        "inspire",
+        ai_client,
+        {
+            "idea": req.idea,
+            "user_prompt": f"我的想法是：{req.idea}，请帮我拓展成创作方案。",
+        },
+    )
     if result.get("error"):
         raise HTTPException(500, result["error"])
     return result.get("json") or {}

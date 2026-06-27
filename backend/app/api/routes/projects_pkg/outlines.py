@@ -1,11 +1,13 @@
 """大纲：生成 / CRUD / 续写 / 展开"""
+
 import asyncio
 import json
 import logging
+
 from app.api.routes.projects_pkg.base import *
 from app.core.database import async_session
-from app.services.outline_validation_service import validate_outline_entities, build_world_context
 from app.services.chapter_tools import get_chapter_tools, make_tool_executor
+from app.services.outline_validation_service import validate_outline_entities
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +15,35 @@ logger = logging.getLogger(__name__)
 router = make_router()
 
 # 组织名关键词：用于兜底判断 characters 中的名称是否实为组织
-_ORG_KEYWORDS = ("议会", "帮", "派", "门", "宗", "盟", "阁", "会", "部", "团", "社", "局", "庭", "族", "学院", "教会", "帝国", "王国", "殿", "堂", "塔")
+_ORG_KEYWORDS = (
+    "议会",
+    "帮",
+    "派",
+    "门",
+    "宗",
+    "盟",
+    "阁",
+    "会",
+    "部",
+    "团",
+    "社",
+    "局",
+    "庭",
+    "族",
+    "学院",
+    "教会",
+    "帝国",
+    "王国",
+    "殿",
+    "堂",
+    "塔",
+)
 
 
 def _extract_names(lst: list) -> list:
     """从列表中提取 (名称, 类型) 对，兼容字符串和 {name:...} 两种格式。"""
     result = []
-    for ch in (lst or []):
+    for ch in lst or []:
         if isinstance(ch, dict):
             name = (ch.get("name") or "").strip()
             ctype = (ch.get("type") or "").strip().lower()
@@ -87,8 +111,14 @@ def _separate_chars_orgs(raw_chars: list, raw_orgs: list, char_names: set, org_n
     return _dedup(final_chars), _dedup(final_orgs)
 
 
-def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
-                  char_names: set = None, org_names: set = None) -> Outline:
+def _build_outline(
+    project_id: int,
+    item: dict,
+    offset: int = 0,
+    index: int = 0,
+    char_names: set = None,
+    org_names: set = None,
+) -> Outline:
     """从 AI 返回的 item 构造 Outline 对象（复用）。
 
     index 用于 AI 没返回 chapter_number 时自动编号（1-based）。
@@ -102,11 +132,17 @@ def _build_outline(project_id: int, item: dict, offset: int = 0, index: int = 0,
     # ===== 兜底清洗 =====
     raw_chars = item.get("characters", []) if isinstance(item.get("characters"), list) else []
     raw_orgs = item.get("organizations", []) if isinstance(item.get("organizations"), list) else []
-    final_chars, final_orgs = _separate_chars_orgs(raw_chars, raw_orgs, char_names or set(), org_names or set())
+    final_chars, final_orgs = _separate_chars_orgs(
+        raw_chars, raw_orgs, char_names or set(), org_names or set()
+    )
 
     # 安全网：如果 AI 明确返回了角色但被过滤光了，保留 AI 原始值
     if not final_chars and raw_chars:
-        raw_names = [c if isinstance(c, str) else c.get("name", "") for c in raw_chars if isinstance(c, (str, dict))]
+        raw_names = [
+            c if isinstance(c, str) else c.get("name", "")
+            for c in raw_chars
+            if isinstance(c, (str, dict))
+        ]
         raw_names = [n.strip() for n in raw_names if n.strip()]
         if raw_names:
             logger.warning(f"[outline] 第{ch_num}章角色被过滤为空，保留AI原始值: {raw_names}")
@@ -153,10 +189,10 @@ def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_c
     if not foreshadows:
         return "暂无伏笔"
 
-    must = []       # 本次必须回收
-    overdue = []    # 超期
-    upcoming = []   # 下一批
-    future = []     # 远期
+    must = []  # 本次必须回收
+    overdue = []  # 超期
+    upcoming = []  # 下一批
+    future = []  # 远期
     plant_now = []  # 待埋入
 
     for f in foreshadows:
@@ -185,85 +221,136 @@ def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_c
     if must:
         lines = [f"🎯 【本次必须回收（第{start_chapter}-{end_chapter}章）】"]
         for f in must:
-            lines.append(f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章，优先:{f.priority or 5}）")
+            lines.append(
+                f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章，优先:{f.priority or 5}）"
+            )
         parts.append("\n".join(lines))
 
     if overdue:
         lines = ["⚠️ 【已超期未回收（请尽快安排）】"]
         for f in overdue:
-            lines.append(f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章，已超期）")
+            lines.append(
+                f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章，已超期）"
+            )
         parts.append("\n".join(lines))
 
     if upcoming:
-        lines = ["⏰ 【下一批即将到期（第{}章前）】".format(end_chapter + 10)]
+        lines = [f"⏰ 【下一批即将到期（第{end_chapter + 10}章前）】"]
         for f in upcoming:
-            lines.append(f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章）")
+            lines.append(
+                f"  - {f.title}：{f.content or ''}（目标第{f.target_resolve_chapter_number}章）"
+            )
         parts.append("\n".join(lines))
 
     if plant_now:
         lines = ["🌱 【本次应埋入的伏笔】"]
         for f in plant_now:
-            lines.append(f"  - {f.title}：{f.content or ''}（计划在第{f.plant_chapter_number}章埋入，第{f.target_resolve_chapter_number or '?'}章回收）")
+            lines.append(
+                f"  - {f.title}：{f.content or ''}（计划在第{f.plant_chapter_number}章埋入，第{f.target_resolve_chapter_number or '?'}章回收）"
+            )
         parts.append("\n".join(lines))
 
     if future:
         lines = ["📋 【远期伏笔（可铺垫，不必立即回收）】"]
         for f in future:
-            target_str = f"目标第{f.target_resolve_chapter_number}章" if f.target_resolve_chapter_number else "未指定回收章节"
+            target_str = (
+                f"目标第{f.target_resolve_chapter_number}章"
+                if f.target_resolve_chapter_number
+                else "未指定回收章节"
+            )
             lines.append(f"  - {f.title}：{f.content or ''}（{target_str}）")
         parts.append("\n".join(lines))
 
     return "\n\n".join(parts) if parts else "暂无伏笔"
 
 
-async def _project_context(db: AsyncSession, project_id: int, project: Project, use_tools: bool = False, collect_only: bool = False) -> dict:
+async def _project_context(
+    db: AsyncSession,
+    project_id: int,
+    project: Project,
+    use_tools: bool = False,
+    collect_only: bool = False,
+) -> dict:
     """收集项目的世界观/角色/组织上下文信息。
 
     use_tools=True:  精简上下文（角色仅骨架），AI 用工具查询世界观/组织，但角色信息已提供无需查询。
     collect_only=True: 仅骨架（角色仅姓名+身份），AI 需用工具查询一切（包括角色详情）。用于两阶段收集。"""
-    worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
-    chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
-    orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
+    worlds = (
+        (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    chars = (
+        (await db.execute(select(Character).where(Character.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    orgs = (
+        (await db.execute(select(Organization).where(Organization.project_id == project_id)))
+        .scalars()
+        .all()
+    )
 
     # 世界设定：核心四维度始终发送；详细设定仅非工具/非收集模式发送
     core_parts = []
-    if project.world_time_period: core_parts.append(f"时间背景：{project.world_time_period}")
-    if project.world_location: core_parts.append(f"地理位置：{project.world_location}")
-    if project.world_atmosphere: core_parts.append(f"氛围基调：{project.world_atmosphere}")
-    if project.world_rules: core_parts.append(f"世界规则：{project.world_rules}")
+    if project.world_time_period:
+        core_parts.append(f"时间背景：{project.world_time_period}")
+    if project.world_location:
+        core_parts.append(f"地理位置：{project.world_location}")
+    if project.world_atmosphere:
+        core_parts.append(f"氛围基调：{project.world_atmosphere}")
+    if project.world_rules:
+        core_parts.append(f"世界规则：{project.world_rules}")
     core = "\n".join(core_parts)
 
     if collect_only:
-        world_info = ("【核心世界观】\n" + (core or "暂无"))
+        world_info = "【核心世界观】\n" + (core or "暂无")
     elif use_tools:
         tool_hint = (
             "\n\n💡 世界设定条目（地理/历史/文化等）、组织详情、地点信息等辅助资料可通过工具查询。"
             "角色信息已提供，无需查询。建议先调用 list_available_entities 了解可查内容。"
         )
-        world_info = ("【核心世界观】\n" + (core or "暂无") + tool_hint)
+        world_info = "【核心世界观】\n" + (core or "暂无") + tool_hint
     else:
-        detail_items = "\n".join([f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]])
-        world_info = ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items) if detail_items else (core or "暂无")
+        detail_items = "\n".join(
+            [f"- {w.name}({w.category or ''})：{w.content[:150]}" for w in worlds[:10]]
+        )
+        world_info = (
+            ("【核心世界观】\n" + core + "\n【详细设定】\n" + detail_items)
+            if detail_items
+            else (core or "暂无")
+        )
 
     # 角色：collect_only/工具模式下仅发名字+角色+身份（一行），详细用工具查；非工具模式分层注入
     char_parts = []
     if collect_only or use_tools:
         for c in chars:
             info = f"- {c.name}（{c.role}"
-            if c.identity: info += f"，{c.identity[:60]}"
+            if c.identity:
+                info += f"，{c.identity[:60]}"
             info += "）"
             char_parts.append(info)
     else:
         recent_char_names = set()
         try:
-            recent_outlines = (await db.execute(
-                select(Outline).where(Outline.project_id == project_id)
-                .order_by(Outline.chapter_number.desc()).limit(5)
-            )).scalars().all()
+            recent_outlines = (
+                (
+                    await db.execute(
+                        select(Outline)
+                        .where(Outline.project_id == project_id)
+                        .order_by(Outline.chapter_number.desc())
+                        .limit(5)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             for o in recent_outlines:
                 if o.characters and isinstance(o.characters, list):
                     for c in o.characters:
-                        recent_char_names.add(str(c).strip() if isinstance(c, str) else c.get("name", ""))
+                        recent_char_names.add(
+                            str(c).strip() if isinstance(c, str) else c.get("name", "")
+                        )
         except Exception:
             pass
 
@@ -272,18 +359,27 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
             is_recent = c.name in recent_char_names or not recent_char_names
             if is_core:
                 lines = [f"- {c.name}（{c.role}，{c.gender or ''}，{c.age or '?'}岁）"]
-                if c.identity: lines.append(f"  身份：{c.identity}")
-                if c.personality: lines.append(f"  性格：{c.personality}")
-                if c.background: lines.append(f"  背景：{c.background}")
-                if c.story_goal: lines.append(f"  目标：{c.story_goal}")
-                if c.motivation: lines.append(f"  动机：{c.motivation}")
-                if c.weakness: lines.append(f"  弱点：{c.weakness}")
-                if c.ability: lines.append(f"  能力：{c.ability}")
+                if c.identity:
+                    lines.append(f"  身份：{c.identity}")
+                if c.personality:
+                    lines.append(f"  性格：{c.personality}")
+                if c.background:
+                    lines.append(f"  背景：{c.background}")
+                if c.story_goal:
+                    lines.append(f"  目标：{c.story_goal}")
+                if c.motivation:
+                    lines.append(f"  动机：{c.motivation}")
+                if c.weakness:
+                    lines.append(f"  弱点：{c.weakness}")
+                if c.ability:
+                    lines.append(f"  能力：{c.ability}")
                 char_parts.append("\n".join(lines))
             elif is_recent:
                 lines = [f"- {c.name}（{c.role}，{c.gender or ''}）"]
-                if c.personality: lines.append(f"  性格：{c.personality[:120]}")
-                if c.story_goal: lines.append(f"  目标：{c.story_goal[:80]}")
+                if c.personality:
+                    lines.append(f"  性格：{c.personality[:120]}")
+                if c.story_goal:
+                    lines.append(f"  目标：{c.story_goal[:80]}")
                 char_parts.append("\n".join(lines))
             else:
                 char_parts.append(f"- {c.name}（{c.role}）")
@@ -291,9 +387,15 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
 
     # 组织：非工具模式全量；工具/收集模式仅发送简要列表
     if not use_tools and not collect_only:
-        orgs_info = "\n".join(
-            [f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}" for o in orgs]
-        ) or "暂无"
+        orgs_info = (
+            "\n".join(
+                [
+                    f"- {o.name}（{o.org_type or '组织'}，势力值{o.power_value or 50}）：{o.description or ''}"
+                    for o in orgs
+                ]
+            )
+            or "暂无"
+        )
     else:
         orgs_info = "\n".join([f"- {o.name}" for o in orgs]) or "暂无"
 
@@ -302,31 +404,42 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
     char_roles = {c.name: c.role for c in chars}
 
     # 物品与地点（大纲/章节生成时注入，让 AI 知道有哪些可用道具和场景）
-    items = (await db.execute(
-        select(Item).where(Item.project_id == project_id)
-    )).scalars().all()
+    items = (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
     if collect_only:
-        items_info = "\n".join(
-            [f"- {it.name}（{it.category or '道具'}）" for it in items]
-        ) or "暂无"
+        items_info = (
+            "\n".join([f"- {it.name}（{it.category or '道具'}）" for it in items]) or "暂无"
+        )
     else:
-        items_info = "\n".join(
-            [f"- {it.name}（{it.category or '道具'}，{'⭐关键道具' if it.is_key_item else '普通'}）：{it.description[:120] if it.description else ''}"
-             for it in items]
-        ) or "暂无"
+        items_info = (
+            "\n".join(
+                [
+                    f"- {it.name}（{it.category or '道具'}，{'⭐关键道具' if it.is_key_item else '普通'}）：{it.description[:120] if it.description else ''}"
+                    for it in items
+                ]
+            )
+            or "暂无"
+        )
 
-    locations = (await db.execute(
-        select(Location).where(Location.project_id == project_id)
-    )).scalars().all()
+    locations = (
+        (await db.execute(select(Location).where(Location.project_id == project_id)))
+        .scalars()
+        .all()
+    )
     if collect_only:
-        locations_info = "\n".join(
-            [f"- {loc.name}（{loc.location_type or '地点'}）" for loc in locations]
-        ) or "暂无"
+        locations_info = (
+            "\n".join([f"- {loc.name}（{loc.location_type or '地点'}）" for loc in locations])
+            or "暂无"
+        )
     else:
-        locations_info = "\n".join(
-            [f"- {loc.name}（{loc.location_type or '地点'}，危险等级={loc.danger_level or 'safe'}）：{loc.description[:120] if loc.description else ''}"
-             for loc in locations]
-        ) or "暂无"
+        locations_info = (
+            "\n".join(
+                [
+                    f"- {loc.name}（{loc.location_type or '地点'}，危险等级={loc.danger_level or 'safe'}）：{loc.description[:120] if loc.description else ''}"
+                    for loc in locations
+                ]
+            )
+            or "暂无"
+        )
 
     return {
         "world_info": world_info,
@@ -346,7 +459,7 @@ async def _project_context(db: AsyncSession, project_id: int, project: Project, 
 
 def _validate_collection(tool_call_history: list[dict], ctx: dict) -> dict:
     """校验 Phase 1 信息收集是否覆盖关键维度。
-    
+
     检查项：世界观详情、主角档案、反派档案（如有）、至少一个地点。
     返回 {"complete": bool, "missing": [str], "called_tools": [str], "queried_characters": [str]}
     """
@@ -433,7 +546,12 @@ def _build_collected_data_summary(tool_call_history: list[dict], final_content: 
 
 
 @router.post("/{project_id}/outlines/generate-async")
-async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def generate_outlines_async(
+    project_id: int,
+    req: OutlineGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """异步生成大纲：立即返回 task_id，后台执行。"""
     project = await get_user_project(db, project_id, user)
 
@@ -441,39 +559,56 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
 
     async def _run_outline(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
+
         tracker = bgs.TaskProgressTracker(task_id)
         await tracker.update(stage="preparing", message="准备生成大纲...")
         logger.info(f"[outline:{task_id}] preparing, entering session...")
         async with async_session() as task_db:
             logger.info(f"[outline:{task_id}] session ok, fetching project...")
-            proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
+            proj = await get_user_project(
+                task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})()
+            )
 
             # ======== 首次大纲生成：直接全量注入，跳过两阶段（角色少，无前文/伏笔可查）========
-            existing_outlines = (await task_db.execute(
-                select(func.count(Outline.id)).where(Outline.project_id == payload["project_id"])
-            )).scalar()
+            existing_outlines = (
+                await task_db.execute(
+                    select(func.count(Outline.id)).where(
+                        Outline.project_id == payload["project_id"]
+                    )
+                )
+            ).scalar()
             is_first_outline = (existing_outlines or 0) == 0
 
             if is_first_outline:
-                logger.info(f"[outline:{task_id}] first outline, using full injection (no two-phase)")
-                ctx_full = await _project_context(task_db, payload["project_id"], proj)  # 全量上下文
+                logger.info(
+                    f"[outline:{task_id}] first outline, using full injection (no two-phase)"
+                )
+                ctx_full = await _project_context(
+                    task_db, payload["project_id"], proj
+                )  # 全量上下文
                 engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
-                await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
-                result = await engine.execute_skill("outline_create", ai_client, {
-                    **ctx_full,
-                    "title": proj.title,
-                    "genre": proj.genre or "网文",
-                    "theme": proj.genre or "网文",
-                    "synopsis": proj.synopsis or "暂无简介",
-                    "chapter_count": str(payload["chapter_count"]),
-                    "narrative_perspective": proj.narrative_pov or "第三人称",
-                    "narrative_pov": proj.narrative_pov or "第三人称",
-                    "mcp_references": "",
-                    "requirements": "",
-                    "items_info": ctx_full.get("items_info", ""),
-                    "locations_info": ctx_full.get("locations_info", ""),
-                    "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。这是第一卷，没有前文大纲或伏笔需要参考。",
-                })
+                await tracker.update(
+                    stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲..."
+                )
+                result = await engine.execute_skill(
+                    "outline_create",
+                    ai_client,
+                    {
+                        **ctx_full,
+                        "title": proj.title,
+                        "genre": proj.genre or "网文",
+                        "theme": proj.genre or "网文",
+                        "synopsis": proj.synopsis or "暂无简介",
+                        "chapter_count": str(payload["chapter_count"]),
+                        "narrative_perspective": proj.narrative_pov or "第三人称",
+                        "narrative_pov": proj.narrative_pov or "第三人称",
+                        "mcp_references": "",
+                        "requirements": "",
+                        "items_info": ctx_full.get("items_info", ""),
+                        "locations_info": ctx_full.get("locations_info", ""),
+                        "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。这是第一卷，没有前文大纲或伏笔需要参考。",
+                    },
+                )
                 if result.get("error"):
                     await tracker.fail(result["error"])
                     return
@@ -483,21 +618,41 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
                 if isinstance(outlines_data, list):
                     created_objs = []
                     for idx, item in enumerate(outlines_data):
-                        o = _build_outline(payload["project_id"], item, index=idx, char_names=ctx_full["char_names"], org_names=ctx_full["org_names"])
+                        o = _build_outline(
+                            payload["project_id"],
+                            item,
+                            index=idx,
+                            char_names=ctx_full["char_names"],
+                            org_names=ctx_full["org_names"],
+                        )
                         task_db.add(o)
                         created_objs.append(o)
                     await task_db.flush()
                     if (proj.outline_mode or "one_to_one") == "one_to_one":
                         for o in created_objs:
-                            existing = (await task_db.execute(
-                                select(Chapter).where(Chapter.project_id == payload["project_id"], Chapter.chapter_number == o.chapter_number)
-                            )).scalars().first()
+                            existing = (
+                                (
+                                    await task_db.execute(
+                                        select(Chapter).where(
+                                            Chapter.project_id == payload["project_id"],
+                                            Chapter.chapter_number == o.chapter_number,
+                                        )
+                                    )
+                                )
+                                .scalars()
+                                .first()
+                            )
                             if existing:
                                 continue
                             ch = Chapter(
-                                project_id=payload["project_id"], chapter_number=o.chapter_number,
-                                title=o.title, summary=o.summary[:200] if o.summary else "",
-                                status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                                project_id=payload["project_id"],
+                                chapter_number=o.chapter_number,
+                                title=o.title,
+                                summary=o.summary[:200] if o.summary else "",
+                                status="draft",
+                                outline_id=None,
+                                sub_index=1,
+                                generation_mode="one_to_one",
                             )
                             task_db.add(ch)
                     await task_db.commit()
@@ -506,14 +661,19 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
 
             # ======== 续写大纲：两阶段收集（有前文/伏笔可查）========
             logger.info(f"[outline:{task_id}] Phase 1: building skeleton context...")
-            ctx_skeleton = await _project_context(task_db, payload["project_id"], proj, collect_only=True)
-            logger.info(f"[outline:{task_id}] skeleton ok ({len(str(ctx_skeleton))} chars), creating engine...")
+            ctx_skeleton = await _project_context(
+                task_db, payload["project_id"], proj, collect_only=True
+            )
+            logger.info(
+                f"[outline:{task_id}] skeleton ok ({len(str(ctx_skeleton))} chars), creating engine..."
+            )
             engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
 
             # Load Phase 1 collection prompt
             import os as _os
+
             _prompt_dir = _os.path.join(_os.path.dirname(__file__), "../../../skills/prompts")
-            with open(_os.path.join(_prompt_dir, "outline_collect.md"), "r") as _f:
+            with open(_os.path.join(_prompt_dir, "outline_collect.md")) as _f:
                 collection_system_prompt = _f.read()
 
             # Build Phase 1 messages: minimal context + strict collection instruction
@@ -524,15 +684,36 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
             _novel_info = f"【小说信息】\n书名：{proj.title}\n题材：{proj.genre or '网文'}\n简介：{proj.synopsis or '暂无简介'}\n叙事视角：{proj.narrative_pov or '第三人称'}\n章节数：{payload['chapter_count']}"
             phase1_messages.append({"role": "system", "content": _novel_info})
             if ctx_skeleton.get("world_info"):
-                phase1_messages.append({"role": "system", "content": "【世界观概要】\n" + ctx_skeleton["world_info"]})
+                phase1_messages.append(
+                    {"role": "system", "content": "【世界观概要】\n" + ctx_skeleton["world_info"]}
+                )
             if ctx_skeleton.get("characters_info"):
-                phase1_messages.append({"role": "system", "content": "【角色骨架】\n" + ctx_skeleton["characters_info"] + "\n\n💡 以上仅角色骨架（姓名+身份）。性格、背景、能力、动机、弱点等详细信息需通过 query_character 工具查询。"})
+                phase1_messages.append(
+                    {
+                        "role": "system",
+                        "content": "【角色骨架】\n"
+                        + ctx_skeleton["characters_info"]
+                        + "\n\n💡 以上仅角色骨架（姓名+身份）。性格、背景、能力、动机、弱点等详细信息需通过 query_character 工具查询。",
+                    }
+                )
             if ctx_skeleton.get("organizations_info"):
-                phase1_messages.append({"role": "system", "content": "【组织列表】\n" + ctx_skeleton["organizations_info"]})
-            phase1_messages.append({"role": "user", "content": f"请为《{proj.title}》收集生成{payload['chapter_count']}章大纲所需的信息。"})
+                phase1_messages.append(
+                    {
+                        "role": "system",
+                        "content": "【组织列表】\n" + ctx_skeleton["organizations_info"],
+                    }
+                )
+            phase1_messages.append(
+                {
+                    "role": "user",
+                    "content": f"请为《{proj.title}》收集生成{payload['chapter_count']}章大纲所需的信息。",
+                }
+            )
 
             tools = get_chapter_tools()
-            tool_executor = make_tool_executor(task_db, payload["project_id"], payload["chapter_count"] + 1)
+            tool_executor = make_tool_executor(
+                task_db, payload["project_id"], payload["chapter_count"] + 1
+            )
 
             await tracker.update(stage="collecting", message="AI 正在查询角色和世界观信息...")
             logger.info(f"[outline:{task_id}] Phase 1: calling AI for collection...")
@@ -555,24 +736,42 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
 
                 # Check trigger phrase
                 if "信息收集完毕" not in content:
-                    logger.warning(f"[outline:{task_id}] Phase 1 attempt {attempt+1}: no trigger phrase, forcing retry")
+                    logger.warning(
+                        f"[outline:{task_id}] Phase 1 attempt {attempt + 1}: no trigger phrase, forcing retry"
+                    )
                     phase1_messages.append({"role": "assistant", "content": content[:500]})
-                    phase1_messages.append({"role": "user", "content": "请确认信息是否收集完毕。如已完毕，输出「信息收集完毕，请求进入生成阶段。」"})
+                    phase1_messages.append(
+                        {
+                            "role": "user",
+                            "content": "请确认信息是否收集完毕。如已完毕，输出「信息收集完毕，请求进入生成阶段。」",
+                        }
+                    )
                     continue
 
                 # Validate completeness
                 validation = _validate_collection(tool_history, ctx_skeleton)
-                logger.info(f"[outline:{task_id}] Phase 1 validation: complete={validation['complete']}, missing={validation['missing']}, tools={validation['called_tools']}")
+                logger.info(
+                    f"[outline:{task_id}] Phase 1 validation: complete={validation['complete']}, missing={validation['missing']}, tools={validation['called_tools']}"
+                )
                 if validation["complete"]:
                     break
 
                 if attempt < MAX_COLLECTION_RETRIES:
                     missing_str = "、".join(validation["missing"])
-                    logger.info(f"[outline:{task_id}] Phase 1: missing {missing_str}, retrying ({attempt+1}/{MAX_COLLECTION_RETRIES})")
+                    logger.info(
+                        f"[outline:{task_id}] Phase 1: missing {missing_str}, retrying ({attempt + 1}/{MAX_COLLECTION_RETRIES})"
+                    )
                     phase1_messages.append({"role": "assistant", "content": content[:500]})
-                    phase1_messages.append({"role": "user", "content": f"以下信息尚未收集：{missing_str}。请继续补充查询这些内容。"})
+                    phase1_messages.append(
+                        {
+                            "role": "user",
+                            "content": f"以下信息尚未收集：{missing_str}。请继续补充查询这些内容。",
+                        }
+                    )
                 else:
-                    logger.warning(f"[outline:{task_id}] Phase 1: still missing {validation['missing']} after {MAX_COLLECTION_RETRIES} retries, proceeding anyway")
+                    logger.warning(
+                        f"[outline:{task_id}] Phase 1: still missing {validation['missing']} after {MAX_COLLECTION_RETRIES} retries, proceeding anyway"
+                    )
                     break
 
             # ======== Phase 2: Outline Generation ========
@@ -586,22 +785,30 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
             )
             logger.info(f"[outline:{task_id}] collected summary: {collected_summary[:200]}...")
 
-            await tracker.update(stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲...")
+            await tracker.update(
+                stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲..."
+            )
             logger.info(f"[outline:{task_id}] Phase 2: calling AI for generation (no tools)...")
-            result = await engine.execute_skill("outline_create", ai_client, {
-                **ctx_full,
-                "title": proj.title,
-                "genre": proj.genre or "网文",
-                "theme": proj.genre or "网文",
-                "synopsis": proj.synopsis or "暂无简介",
-                "chapter_count": str(payload["chapter_count"]),
-                "narrative_perspective": proj.narrative_pov or "第三人称",
-                "narrative_pov": proj.narrative_pov or "第三人称",
-                "mcp_references": "",
-                "requirements": "",
-                "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。\n\n【你已查询到的信息概要】\n{collected_summary}\n\n请基于以上信息生成大纲。",
-                "_collected_data": collected_summary,
-            }, tools=None, tool_executor=None)  # Phase 2: no tools
+            result = await engine.execute_skill(
+                "outline_create",
+                ai_client,
+                {
+                    **ctx_full,
+                    "title": proj.title,
+                    "genre": proj.genre or "网文",
+                    "theme": proj.genre or "网文",
+                    "synopsis": proj.synopsis or "暂无简介",
+                    "chapter_count": str(payload["chapter_count"]),
+                    "narrative_perspective": proj.narrative_pov or "第三人称",
+                    "narrative_pov": proj.narrative_pov or "第三人称",
+                    "mcp_references": "",
+                    "requirements": "",
+                    "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。\n\n【你已查询到的信息概要】\n{collected_summary}\n\n请基于以上信息生成大纲。",
+                    "_collected_data": collected_summary,
+                },
+                tools=None,
+                tool_executor=None,
+            )  # Phase 2: no tools
 
             if result.get("error"):
                 await tracker.fail(result["error"])
@@ -612,28 +819,49 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
             if isinstance(outlines_data, list):
                 created_objs = []
                 for idx, item in enumerate(outlines_data):
-                    o = _build_outline(payload["project_id"], item, index=idx, char_names=ctx_full["char_names"], org_names=ctx_full["org_names"])
+                    o = _build_outline(
+                        payload["project_id"],
+                        item,
+                        index=idx,
+                        char_names=ctx_full["char_names"],
+                        org_names=ctx_full["org_names"],
+                    )
                     task_db.add(o)
                     created_objs.append(o)
                 await task_db.flush()
                 if (proj.outline_mode or "one_to_one") == "one_to_one":
                     for o in created_objs:
-                        existing = (await task_db.execute(
-                            select(Chapter).where(Chapter.project_id == payload["project_id"], Chapter.chapter_number == o.chapter_number)
-                        )).scalars().first()
+                        existing = (
+                            (
+                                await task_db.execute(
+                                    select(Chapter).where(
+                                        Chapter.project_id == payload["project_id"],
+                                        Chapter.chapter_number == o.chapter_number,
+                                    )
+                                )
+                            )
+                            .scalars()
+                            .first()
+                        )
                         if existing:
                             continue
                         ch = Chapter(
-                            project_id=payload["project_id"], chapter_number=o.chapter_number,
-                            title=o.title, summary=o.summary[:200] if o.summary else "",
-                            status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                            project_id=payload["project_id"],
+                            chapter_number=o.chapter_number,
+                            title=o.title,
+                            summary=o.summary[:200] if o.summary else "",
+                            status="draft",
+                            outline_id=None,
+                            sub_index=1,
+                            generation_mode="one_to_one",
                         )
                         task_db.add(ch)
                 await task_db.commit()
             await tracker.complete(message=f"大纲生成完成（{len(outlines_data)}章）")
 
     task_id = await submit_async_task(
-        user_id=user.id, project_id=project_id,
+        user_id=user.id,
+        project_id=project_id,
         task_type="outline_new",
         title="生成大纲",
         payload={"chapter_count": req.chapter_count, "project_id": project_id, "user_id": user.id},
@@ -643,31 +871,60 @@ async def generate_outlines_async(project_id: int, req: OutlineGenerateRequest, 
 
 
 @router.get("/{project_id}/outlines")
-async def list_outlines(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def list_outlines(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     await get_user_project(db, project_id, user)  # 权限校验
-    outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
+    outlines = (
+        (
+            await db.execute(
+                select(Outline)
+                .where(Outline.project_id == project_id)
+                .order_by(Outline.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
     # 预查每个大纲关联的章节数（1对多用）
     from sqlalchemy import func
+
     chapter_counts = {}
     if outlines:
-        rows = (await db.execute(
-            select(Chapter.outline_id, func.count(Chapter.id))
-            .where(Chapter.project_id == project_id, Chapter.outline_id.isnot(None))
-            .group_by(Chapter.outline_id)
-        )).all()
+        rows = (
+            await db.execute(
+                select(Chapter.outline_id, func.count(Chapter.id))
+                .where(Chapter.project_id == project_id, Chapter.outline_id.isnot(None))
+                .group_by(Chapter.outline_id)
+            )
+        ).all()
         chapter_counts = {r[0]: r[1] for r in rows}
-    return [{
-        "id": o.id, "chapter_number": o.chapter_number, "title": o.title,
-        "summary": o.summary, "scenes": o.scenes, "characters": o.characters,
-        "key_points": o.key_points, "emotion": o.emotion, "goal": o.goal,
-        "structure": o.structure or {},  # 含 AI 生成的全部额外字段（爽点/钩子/伏笔/组织等）
-        "has_chapters": chapter_counts.get(o.id, 0) > 0,
-        "chapter_count": chapter_counts.get(o.id, 0),
-    } for o in outlines]
+    return [
+        {
+            "id": o.id,
+            "chapter_number": o.chapter_number,
+            "title": o.title,
+            "summary": o.summary,
+            "scenes": o.scenes,
+            "characters": o.characters,
+            "key_points": o.key_points,
+            "emotion": o.emotion,
+            "goal": o.goal,
+            "structure": o.structure or {},  # 含 AI 生成的全部额外字段（爽点/钩子/伏笔/组织等）
+            "has_chapters": chapter_counts.get(o.id, 0) > 0,
+            "chapter_count": chapter_counts.get(o.id, 0),
+        }
+        for o in outlines
+    ]
 
 
 @router.post("/{project_id}/outlines")
-async def create_outline(project_id: int, req: OutlineCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_outline(
+    project_id: int,
+    req: OutlineCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     await get_user_project(db, project_id, user)  # 权限校验
     o = Outline(project_id=project_id, **req.model_dump())
     db.add(o)
@@ -677,8 +934,18 @@ async def create_outline(project_id: int, req: OutlineCreate, db: AsyncSession =
 
 
 @router.put("/{project_id}/outlines/{outline_id}")
-async def update_outline(project_id: int, outline_id: int, req: OutlineCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    o = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
+async def update_outline(
+    project_id: int,
+    outline_id: int,
+    req: OutlineCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    o = (
+        await db.execute(
+            select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not o:
         raise HTTPException(404, "大纲不存在")
     for key, value in req.model_dump().items():
@@ -688,15 +955,33 @@ async def update_outline(project_id: int, outline_id: int, req: OutlineCreate, d
 
 
 @router.delete("/{project_id}/outlines/{outline_id}")
-async def delete_outline(project_id: int, outline_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    o = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
+async def delete_outline(
+    project_id: int,
+    outline_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    o = (
+        await db.execute(
+            select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not o:
         raise HTTPException(404, "大纲不存在")
     # 级联删除该大纲展开的所有章节（1→N 模式）及其关联数据
     from app.services.chapter_service import ChapterService
-    chapters = (await db.execute(
-        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-    )).scalars().all()
+
+    chapters = (
+        (
+            await db.execute(
+                select(Chapter).where(
+                    Chapter.outline_id == outline_id, Chapter.project_id == project_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     deleted_words = sum(c.word_count or 0 for c in chapters)
     chapter_count = len(chapters)
     if chapters:
@@ -715,7 +1000,12 @@ async def delete_outline(project_id: int, outline_id: int, db: AsyncSession = De
 
 
 @router.post("/{project_id}/outlines/continue")
-async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def continue_outlines(
+    project_id: int,
+    req: OutlineContinueRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """大纲续写：在现有大纲基础上继续生成。
 
     上下文优化：
@@ -726,58 +1016,126 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     from app.core.config import settings
 
     proj = await get_user_project(db, project_id, user)
-    outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
-    chapters = (await db.execute(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number))).scalars().all()
-    foreshadows_list = (await db.execute(select(Foreshadow).where(Foreshadow.project_id == project_id, Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
+    outlines = (
+        (
+            await db.execute(
+                select(Outline)
+                .where(Outline.project_id == project_id)
+                .order_by(Outline.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    chapters = (
+        (
+            await db.execute(
+                select(Chapter)
+                .where(Chapter.project_id == project_id)
+                .order_by(Chapter.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    foreshadows_list = (
+        (
+            await db.execute(
+                select(Foreshadow).where(
+                    Foreshadow.project_id == project_id,
+                    Foreshadow.status.in_(["pending", "planted"]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     ctx = await _project_context(db, project_id, proj, use_tools=True)
 
     # ===== 大纲上下文截断优化 =====
     full_limit = settings.OUTLINE_CONTEXT_CHAPTERS  # 默认 20
     if len(outlines) <= full_limit:
         # 章节数不多，全部传完整版
-        recent_outlines_json = json.dumps([
-            {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
-            for o in outlines
-        ], ensure_ascii=False)
+        recent_outlines_json = json.dumps(
+            [
+                {
+                    "chapter_number": o.chapter_number,
+                    "title": o.title,
+                    "summary": o.summary,
+                    "key_points": o.key_points,
+                }
+                for o in outlines
+            ],
+            ensure_ascii=False,
+        )
     else:
         # 最近 N 章：完整版
         recent = outlines[-full_limit:]
         older = outlines[:-full_limit]
         # 更早的章节：精简版（去掉 key_points/scenes）
         older_brief = [
-            {"chapter_number": o.chapter_number, "title": o.title, "summary": (o.summary or "")[:200]}
+            {
+                "chapter_number": o.chapter_number,
+                "title": o.title,
+                "summary": (o.summary or "")[:200],
+            }
             for o in older
         ]
         # 如果精简后仍然超过 30 条，进一步压缩为每 5 章一条
         if len(older_brief) > 30:
             compressed = []
             for i in range(0, len(older_brief), 5):
-                chunk = older_brief[i:i+5]
+                chunk = older_brief[i : i + 5]
                 first, last = chunk[0], chunk[-1]
                 summaries = "；".join(c["summary"][:30] for c in chunk if c["summary"])
-                compressed.append({
-                    "chapter_number": f"{first['chapter_number']}-{last['chapter_number']}",
-                    "title": f"第{first['chapter_number']}-{last['chapter_number']}章概要",
-                    "summary": summaries[:200],
-                })
+                compressed.append(
+                    {
+                        "chapter_number": f"{first['chapter_number']}-{last['chapter_number']}",
+                        "title": f"第{first['chapter_number']}-{last['chapter_number']}章概要",
+                        "summary": summaries[:200],
+                    }
+                )
             older_brief = compressed
         # 合并：精简版 + 完整版
-        recent_outlines_json = json.dumps(older_brief + [
-            {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
-            for o in recent
-        ], ensure_ascii=False)
+        recent_outlines_json = json.dumps(
+            older_brief
+            + [
+                {
+                    "chapter_number": o.chapter_number,
+                    "title": o.title,
+                    "summary": o.summary,
+                    "key_points": o.key_points,
+                }
+                for o in recent
+            ],
+            ensure_ascii=False,
+        )
 
-    existing_chapters = json.dumps([{"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""} for c in chapters], ensure_ascii=False) if chapters else "暂无"
+    existing_chapters = (
+        json.dumps(
+            [
+                {"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""}
+                for c in chapters
+            ],
+            ensure_ascii=False,
+        )
+        if chapters
+        else "暂无"
+    )
 
     current_count = max((o.chapter_number for o in outlines), default=0)
     start_chapter, end_chapter = current_count + 1, current_count + req.chapter_count
 
-    foreshadow_context = _format_foreshadows_for_outline(foreshadows_list, start_chapter, end_chapter)
+    foreshadow_context = _format_foreshadows_for_outline(
+        foreshadows_list, start_chapter, end_chapter
+    )
 
     # 叙事视角：前端留空 = 按小说设定（取项目默认）
     effective_pov = req.narrative_pov or proj.narrative_pov or "第三人称"
 
-    engine, ai_client = await make_engine_and_client(db, user.id, model_override=(req.ai_model or None))
+    engine, ai_client = await make_engine_and_client(
+        db, user.id, model_override=(req.ai_model or None)
+    )
     # 拼装用户额外要求（故事方向/情节阶段/其他要求）
     extra_req_parts = []
     if req.story_direction:
@@ -788,29 +1146,35 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
         extra_req_parts.append(f"其他要求：{req.other_requirements}")
     extra_req_text = ("\n".join(extra_req_parts) + "\n") if extra_req_parts else ""
 
-    result = await engine.execute_skill("outline_continue", ai_client, {
-        **ctx,
-        "title": proj.title,
-        "genre": proj.genre or "网文",
-        "theme": proj.genre or "网文",
-        "synopsis": proj.synopsis or "暂无简介",
-        "chapter_count": str(req.chapter_count),
-        "current_chapter_count": str(current_count),
-        "start_chapter": str(start_chapter),
-        "end_chapter": str(end_chapter),
-        "total_planned_chapters": str(current_count + req.chapter_count),
-        "recent_outlines": recent_outlines_json,
-        "existing_chapters": existing_chapters,
-        "foreshadow_context": foreshadow_context,
-        "foreshadow_reminders": foreshadow_context,
-        "narrative_pov": effective_pov,
-        "narrative_perspective": effective_pov,
-        "plot_stage_instruction": req.plot_stage or "",
-        "story_direction": req.story_direction or "",
-        "requirements": req.other_requirements or "",
-        "mcp_references": "",
-        "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
-    }, tools=get_chapter_tools(), tool_executor=make_tool_executor(db, project_id, start_chapter))
+    result = await engine.execute_skill(
+        "outline_continue",
+        ai_client,
+        {
+            **ctx,
+            "title": proj.title,
+            "genre": proj.genre or "网文",
+            "theme": proj.genre or "网文",
+            "synopsis": proj.synopsis or "暂无简介",
+            "chapter_count": str(req.chapter_count),
+            "current_chapter_count": str(current_count),
+            "start_chapter": str(start_chapter),
+            "end_chapter": str(end_chapter),
+            "total_planned_chapters": str(current_count + req.chapter_count),
+            "recent_outlines": recent_outlines_json,
+            "existing_chapters": existing_chapters,
+            "foreshadow_context": foreshadow_context,
+            "foreshadow_reminders": foreshadow_context,
+            "narrative_pov": effective_pov,
+            "narrative_perspective": effective_pov,
+            "plot_stage_instruction": req.plot_stage or "",
+            "story_direction": req.story_direction or "",
+            "requirements": req.other_requirements or "",
+            "mcp_references": "",
+            "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
+        },
+        tools=get_chapter_tools(),
+        tool_executor=make_tool_executor(db, project_id, start_chapter),
+    )
     check_skill_error(result)
     outlines_data = result.get("json") or []
     if not isinstance(outlines_data, list):
@@ -818,7 +1182,9 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     created = []
     created_objs = []
     for item in outlines_data:
-        o = _build_outline(project_id, item, char_names=ctx["char_names"], org_names=ctx["org_names"])
+        o = _build_outline(
+            project_id, item, char_names=ctx["char_names"], org_names=ctx["org_names"]
+        )
         db.add(o)
         created_objs.append(o)
         created.append(item)
@@ -827,27 +1193,49 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
     # 1对1模式：自动为续写的大纲创建对应章节
     if (proj.outline_mode or "one_to_one") == "one_to_one":
         for o in created_objs:
-            existing = (await db.execute(
-                select(Chapter).where(Chapter.project_id == project_id, Chapter.chapter_number == o.chapter_number)
-            )).scalars().first()
+            existing = (
+                (
+                    await db.execute(
+                        select(Chapter).where(
+                            Chapter.project_id == project_id,
+                            Chapter.chapter_number == o.chapter_number,
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
             if existing:
                 continue
             ch = Chapter(
-                project_id=project_id, chapter_number=o.chapter_number,
-                title=o.title, summary=o.summary[:200] if o.summary else "",
-                status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                project_id=project_id,
+                chapter_number=o.chapter_number,
+                title=o.title,
+                summary=o.summary[:200] if o.summary else "",
+                status="draft",
+                outline_id=None,
+                sub_index=1,
+                generation_mode="one_to_one",
             )
             db.add(ch)
     await db.commit()
 
     # ===== 新角色检测 =====
     # 从新生成的大纲中提取角色名，与已有角色对比，找出未注册的角色
-    existing_chars = {c.name for c in (await db.execute(
-        select(Character).where(Character.project_id == project_id)
-    )).scalars().all()}
-    existing_org_names = {o.name for o in (await db.execute(
-        select(Organization).where(Organization.project_id == project_id)
-    )).scalars().all()}
+    existing_chars = {
+        c.name
+        for c in (await db.execute(select(Character).where(Character.project_id == project_id)))
+        .scalars()
+        .all()
+    }
+    existing_org_names = {
+        o.name
+        for o in (
+            await db.execute(select(Organization).where(Organization.project_id == project_id))
+        )
+        .scalars()
+        .all()
+    }
     new_characters = set()
     for item in outlines_data:
         chars = item.get("characters", [])
@@ -876,13 +1264,22 @@ async def continue_outlines(project_id: int, req: OutlineContinueRequest, db: As
 
     # 验证大纲中涉及的角色/组织是否都已创建
     world_ctx = _build_world_context_for_validate(proj)
-    asyncio.create_task(validate_outline_entities(db, project_id, proj.title, proj.genre or "网文", world_ctx, ai_client))
+    asyncio.create_task(
+        validate_outline_entities(
+            db, project_id, proj.title, proj.genre or "网文", world_ctx, ai_client
+        )
+    )
 
     return response
 
 
 @router.post("/{project_id}/outlines/continue-async")
-async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def continue_outlines_async(
+    project_id: int,
+    req: OutlineContinueRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """异步续写大纲：立即返回 task_id，后台执行。"""
     await get_user_project(db, project_id, user)
 
@@ -890,6 +1287,7 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
 
     async def _run_continue(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
+
         tracker = bgs.TaskProgressTracker(task_id)
         await tracker.update(stage="preparing", message="准备续写大纲...")
         # 复用同步逻辑（在独立 session 中）
@@ -897,53 +1295,131 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             # 构造一个 mock request 对象
             class MockReq:
                 chapter_count = payload["chapter_count"]
+
             # 调用核心逻辑（提取为共享函数会更优雅，但这里直接复用）
-            proj = await get_user_project(task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})())
-            outlines = (await task_db.execute(select(Outline).where(Outline.project_id == payload["project_id"]).order_by(Outline.chapter_number))).scalars().all()
+            proj = await get_user_project(
+                task_db, payload["project_id"], type("U", (), {"id": payload["user_id"]})()
+            )
+            outlines = (
+                (
+                    await task_db.execute(
+                        select(Outline)
+                        .where(Outline.project_id == payload["project_id"])
+                        .order_by(Outline.chapter_number)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             current_count = max((o.chapter_number for o in outlines), default=0)
-            await tracker.update(stage="generating", message=f"AI 续写第{current_count+1}到{current_count+payload['chapter_count']}章...")
+            await tracker.update(
+                stage="generating",
+                message=f"AI 续写第{current_count + 1}到{current_count + payload['chapter_count']}章...",
+            )
             # 调用同步版本的核心逻辑
-            from app.api.routes.projects_pkg.outlines import continue_outlines as _co
             # 直接调用路由函数太复杂，这里内联核心逻辑
             ctx = await _project_context(task_db, payload["project_id"], proj)
             from app.core.config import settings
+
             full_limit = settings.OUTLINE_CONTEXT_CHAPTERS
             if len(outlines) <= full_limit:
-                recent_outlines_json = json.dumps([
-                    {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
-                    for o in outlines
-                ], ensure_ascii=False)
+                recent_outlines_json = json.dumps(
+                    [
+                        {
+                            "chapter_number": o.chapter_number,
+                            "title": o.title,
+                            "summary": o.summary,
+                            "key_points": o.key_points,
+                        }
+                        for o in outlines
+                    ],
+                    ensure_ascii=False,
+                )
             else:
                 recent = outlines[-full_limit:]
                 older = outlines[:-full_limit]
                 older_brief = [
-                    {"chapter_number": o.chapter_number, "title": o.title, "summary": (o.summary or "")[:200]}
+                    {
+                        "chapter_number": o.chapter_number,
+                        "title": o.title,
+                        "summary": (o.summary or "")[:200],
+                    }
                     for o in older
                 ]
                 if len(older_brief) > 30:
                     compressed = []
                     for i in range(0, len(older_brief), 5):
-                        chunk = older_brief[i:i+5]
+                        chunk = older_brief[i : i + 5]
                         first, last = chunk[0], chunk[-1]
                         summaries = "；".join(c["summary"][:30] for c in chunk if c["summary"])
-                        compressed.append({
-                            "chapter_number": f"{first['chapter_number']}-{last['chapter_number']}",
-                            "title": f"第{first['chapter_number']}-{last['chapter_number']}章概要",
-                            "summary": summaries[:200],
-                        })
+                        compressed.append(
+                            {
+                                "chapter_number": f"{first['chapter_number']}-{last['chapter_number']}",
+                                "title": f"第{first['chapter_number']}-{last['chapter_number']}章概要",
+                                "summary": summaries[:200],
+                            }
+                        )
                     older_brief = compressed
-                recent_outlines_json = json.dumps(older_brief + [
-                    {"chapter_number": o.chapter_number, "title": o.title, "summary": o.summary, "key_points": o.key_points}
-                    for o in recent
-                ], ensure_ascii=False)
-            chapters = (await task_db.execute(select(Chapter).where(Chapter.project_id == payload["project_id"]).order_by(Chapter.chapter_number))).scalars().all()
-            existing_chapters = json.dumps([{"chapter_number": c.chapter_number, "title": c.title, "summary": c.summary or ""} for c in chapters], ensure_ascii=False) if chapters else "暂无"
-            foreshadows_list = (await task_db.execute(select(Foreshadow).where(Foreshadow.project_id == payload["project_id"], Foreshadow.status.in_(["pending", "planted"])))).scalars().all()
+                recent_outlines_json = json.dumps(
+                    older_brief
+                    + [
+                        {
+                            "chapter_number": o.chapter_number,
+                            "title": o.title,
+                            "summary": o.summary,
+                            "key_points": o.key_points,
+                        }
+                        for o in recent
+                    ],
+                    ensure_ascii=False,
+                )
+            chapters = (
+                (
+                    await task_db.execute(
+                        select(Chapter)
+                        .where(Chapter.project_id == payload["project_id"])
+                        .order_by(Chapter.chapter_number)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            existing_chapters = (
+                json.dumps(
+                    [
+                        {
+                            "chapter_number": c.chapter_number,
+                            "title": c.title,
+                            "summary": c.summary or "",
+                        }
+                        for c in chapters
+                    ],
+                    ensure_ascii=False,
+                )
+                if chapters
+                else "暂无"
+            )
+            foreshadows_list = (
+                (
+                    await task_db.execute(
+                        select(Foreshadow).where(
+                            Foreshadow.project_id == payload["project_id"],
+                            Foreshadow.status.in_(["pending", "planted"]),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
             start_chapter, end_chapter = current_count + 1, current_count + payload["chapter_count"]
-            foreshadow_context = _format_foreshadows_for_outline(foreshadows_list, start_chapter, end_chapter)
+            foreshadow_context = _format_foreshadows_for_outline(
+                foreshadows_list, start_chapter, end_chapter
+            )
             # 叙事视角：前端留空 = 按小说设定
             effective_pov = payload.get("narrative_pov") or proj.narrative_pov or "第三人称"
-            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"], model_override=(payload.get("ai_model") or None))
+            engine, ai_client = await make_engine_and_client(
+                task_db, payload["user_id"], model_override=(payload.get("ai_model") or None)
+            )
             # 拼装用户额外要求
             extra_req_parts = []
             if payload.get("story_direction"):
@@ -953,29 +1429,35 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             if payload.get("other_requirements"):
                 extra_req_parts.append(f"其他要求：{payload['other_requirements']}")
             extra_req_text = ("\n".join(extra_req_parts) + "\n") if extra_req_parts else ""
-            result = await engine.execute_skill("outline_continue", ai_client, {
-                **ctx,
-                "title": proj.title,
-                "genre": proj.genre or "网文",
-                "theme": proj.genre or "网文",
-                "synopsis": proj.synopsis or "暂无简介",
-                "chapter_count": str(payload["chapter_count"]),
-                "current_chapter_count": str(current_count),
-                "start_chapter": str(start_chapter),
-                "end_chapter": str(end_chapter),
-                "total_planned_chapters": str(current_count + payload["chapter_count"]),
-                "recent_outlines": recent_outlines_json,
-                "existing_chapters": existing_chapters,
-                "foreshadow_context": foreshadow_context,
-                "foreshadow_reminders": foreshadow_context,
-                "narrative_pov": effective_pov,
-                "narrative_perspective": effective_pov,
-                "plot_stage_instruction": payload.get("plot_stage") or "",
-                "story_direction": payload.get("story_direction") or "",
-                "requirements": payload.get("other_requirements") or "",
-                "mcp_references": "",
-                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
-            }, tools=get_chapter_tools(), tool_executor=make_tool_executor(task_db, payload["project_id"], start_chapter))
+            result = await engine.execute_skill(
+                "outline_continue",
+                ai_client,
+                {
+                    **ctx,
+                    "title": proj.title,
+                    "genre": proj.genre or "网文",
+                    "theme": proj.genre or "网文",
+                    "synopsis": proj.synopsis or "暂无简介",
+                    "chapter_count": str(payload["chapter_count"]),
+                    "current_chapter_count": str(current_count),
+                    "start_chapter": str(start_chapter),
+                    "end_chapter": str(end_chapter),
+                    "total_planned_chapters": str(current_count + payload["chapter_count"]),
+                    "recent_outlines": recent_outlines_json,
+                    "existing_chapters": existing_chapters,
+                    "foreshadow_context": foreshadow_context,
+                    "foreshadow_reminders": foreshadow_context,
+                    "narrative_pov": effective_pov,
+                    "narrative_perspective": effective_pov,
+                    "plot_stage_instruction": payload.get("plot_stage") or "",
+                    "story_direction": payload.get("story_direction") or "",
+                    "requirements": payload.get("other_requirements") or "",
+                    "mcp_references": "",
+                    "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
+                },
+                tools=get_chapter_tools(),
+                tool_executor=make_tool_executor(task_db, payload["project_id"], start_chapter),
+            )
             if result.get("error"):
                 await tracker.fail(result["error"])
                 return
@@ -984,29 +1466,49 @@ async def continue_outlines_async(project_id: int, req: OutlineContinueRequest, 
             if isinstance(outlines_data, list):
                 created_objs = []
                 for item in outlines_data:
-                    o = _build_outline(payload["project_id"], item, char_names=ctx["char_names"], org_names=ctx["org_names"])
+                    o = _build_outline(
+                        payload["project_id"],
+                        item,
+                        char_names=ctx["char_names"],
+                        org_names=ctx["org_names"],
+                    )
                     task_db.add(o)
                     created_objs.append(o)
                 await task_db.flush()
                 # 1对1模式：自动为续写的大纲创建对应章节
                 if (proj.outline_mode or "one_to_one") == "one_to_one":
                     for o in created_objs:
-                        existing = (await task_db.execute(
-                            select(Chapter).where(Chapter.project_id == payload["project_id"], Chapter.chapter_number == o.chapter_number)
-                        )).scalars().first()
+                        existing = (
+                            (
+                                await task_db.execute(
+                                    select(Chapter).where(
+                                        Chapter.project_id == payload["project_id"],
+                                        Chapter.chapter_number == o.chapter_number,
+                                    )
+                                )
+                            )
+                            .scalars()
+                            .first()
+                        )
                         if existing:
                             continue
                         ch = Chapter(
-                            project_id=payload["project_id"], chapter_number=o.chapter_number,
-                            title=o.title, summary=o.summary[:200] if o.summary else "",
-                            status="draft", outline_id=None, sub_index=1, generation_mode="one_to_one",
+                            project_id=payload["project_id"],
+                            chapter_number=o.chapter_number,
+                            title=o.title,
+                            summary=o.summary[:200] if o.summary else "",
+                            status="draft",
+                            outline_id=None,
+                            sub_index=1,
+                            generation_mode="one_to_one",
                         )
                         task_db.add(ch)
                 await task_db.commit()
             await tracker.complete(message=f"续写完成（{len(outlines_data)}章）")
 
     task_id = await submit_async_task(
-        user_id=user.id, project_id=project_id,
+        user_id=user.id,
+        project_id=project_id,
         task_type="outline_continue",
         title="续写大纲",
         payload={
@@ -1064,7 +1566,11 @@ async def _expand_outline_core(
         HTTPException: 大纲不存在 / 已展开 / AI 返回格式错误
     """
     proj = await get_user_project(db, project_id, type("U", (), {"id": user_id})())
-    outline = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
+    outline = (
+        await db.execute(
+            select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not outline:
         raise HTTPException(404, "大纲不存在")
 
@@ -1073,10 +1579,17 @@ async def _expand_outline_core(
     append_base_sub_index = 0  # 追加模式：新章节 sub_index 从此值+1 开始
     if replace_existing:
         # 覆盖模式：先删除该大纲已展开的旧章节，新章节从旧起始号开始（保证章号连续，不留空洞）
-        old_chapters = (await db.execute(
-            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-            .order_by(Chapter.chapter_number)
-        )).scalars().all()
+        old_chapters = (
+            (
+                await db.execute(
+                    select(Chapter)
+                    .where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+                    .order_by(Chapter.chapter_number)
+                )
+            )
+            .scalars()
+            .all()
+        )
         if old_chapters:
             old_start_chapter = old_chapters[0].chapter_number  # 删除前记下起始号
             deleted_words = sum(c.word_count or 0 for c in old_chapters)
@@ -1091,34 +1604,64 @@ async def _expand_outline_core(
             # 回收项目字数
             if deleted_words > 0:
                 proj.current_word_count = max(0, (proj.current_word_count or 0) - deleted_words)
-            logger.info(f"[expand] 覆盖模式：删除大纲 {outline_id} 的旧 {replaced_count} 章（{deleted_words}字），新章节将从第{old_start_chapter}章开始")
+            logger.info(
+                f"[expand] 覆盖模式：删除大纲 {outline_id} 的旧 {replaced_count} 章（{deleted_words}字），新章节将从第{old_start_chapter}章开始"
+            )
     elif append_existing:
         # 追加模式：读取已有章节，记下最大 sub_index 供新章节续接，并拼成上下文喂给 AI
-        existing = (await db.execute(
-            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-            .order_by(Chapter.sub_index)
-        )).scalars().all()
+        existing = (
+            (
+                await db.execute(
+                    select(Chapter)
+                    .where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+                    .order_by(Chapter.sub_index)
+                )
+            )
+            .scalars()
+            .all()
+        )
         if existing:
             append_base_sub_index = max(c.sub_index or 0 for c in existing)
-            logger.info(f"[expand] 追加模式：大纲 {outline_id} 已有 {len(existing)} 章（sub_index 最大 {append_base_sub_index}），将追加 {target_chapter_count} 章")
+            logger.info(
+                f"[expand] 追加模式：大纲 {outline_id} 已有 {len(existing)} 章（sub_index 最大 {append_base_sub_index}），将追加 {target_chapter_count} 章"
+            )
     elif not skip_existing_check:
-        existing_chapters = (await db.execute(
-            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-        )).scalars().all()
+        existing_chapters = (
+            (
+                await db.execute(
+                    select(Chapter).where(
+                        Chapter.outline_id == outline_id, Chapter.project_id == project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         if existing_chapters:
-            raise HTTPException(400, f"此大纲已展开为 {len(existing_chapters)} 章，请先删除再重新展开")
+            raise HTTPException(
+                400, f"此大纲已展开为 {len(existing_chapters)} 章，请先删除再重新展开"
+            )
 
     # 追加模式：把已有规划摘要拼进 user_prompt，让 AI 做差异化续写
     existing_context = ""
     if append_existing and append_base_sub_index > 0:
-        existing_list = (await db.execute(
-            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-            .order_by(Chapter.sub_index)
-        )).scalars().all()
+        existing_list = (
+            (
+                await db.execute(
+                    select(Chapter)
+                    .where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+                    .order_by(Chapter.sub_index)
+                )
+            )
+            .scalars()
+            .all()
+        )
         parts = []
         for c in existing_list:
             plan = c.expansion_plan if isinstance(c.expansion_plan, dict) else {}
-            summary = (plan.get("plot_summary") if isinstance(plan, dict) else "") or c.summary or ""
+            summary = (
+                (plan.get("plot_summary") if isinstance(plan, dict) else "") or c.summary or ""
+            )
             events = plan.get("key_events") if isinstance(plan, dict) else []
             events_str = "、".join(events[:3]) if events else ""
             line = f"  第{c.sub_index}节《{c.title}》：{summary[:120]}"
@@ -1156,7 +1699,7 @@ async def _expand_outline_core(
             elif isinstance(sc, str):
                 scene_lines.append(f"  - {sc}")
         if scene_lines:
-            outline_parts.append(f"【场景设定】\n" + "\n".join(scene_lines))
+            outline_parts.append("【场景设定】\n" + "\n".join(scene_lines))
     if outline.characters:
         chars_str = "、".join(str(c) for c in outline.characters)
         outline_parts.append(f"【涉及角色】{chars_str}")
@@ -1175,9 +1718,11 @@ async def _expand_outline_core(
                 ci_lines = []
                 for item in ci:
                     if isinstance(item, dict):
-                        ci_lines.append(f"    {item.get('character','?')}：本章目标={item.get('this_chapter_goal','?')}，当前欲求={item.get('immediate_want','?')}")
+                        ci_lines.append(
+                            f"    {item.get('character', '?')}：本章目标={item.get('this_chapter_goal', '?')}，当前欲求={item.get('immediate_want', '?')}"
+                        )
                 if ci_lines:
-                    struct_parts.append(f"  角色微意图：\n" + "\n".join(ci_lines))
+                    struct_parts.append("  角色微意图：\n" + "\n".join(ci_lines))
             elif isinstance(ci, str):
                 struct_parts.append(f"  角色微意图：{ci}")
         if outline.structure.get("reader_hook"):
@@ -1185,27 +1730,45 @@ async def _expand_outline_core(
         if outline.structure.get("scene_anchor"):
             struct_parts.append(f"  场景锚点：{outline.structure['scene_anchor']}")
         if struct_parts:
-            outline_parts.append(f"【深度设计】\n" + "\n".join(struct_parts))
+            outline_parts.append("【深度设计】\n" + "\n".join(struct_parts))
     outline_content = "\n\n".join(outline_parts) if outline_parts else (outline.summary or "")
 
     # ===== 构建 context_info（相邻大纲）=====
     context_lines = []
     # 前一个大纲
     if outline.chapter_number > 1:
-        prev_outline = (await db.execute(
-            select(Outline).where(Outline.project_id == project_id, Outline.chapter_number == outline.chapter_number - 1)
-        )).scalar_one_or_none()
+        prev_outline = (
+            await db.execute(
+                select(Outline).where(
+                    Outline.project_id == project_id,
+                    Outline.chapter_number == outline.chapter_number - 1,
+                )
+            )
+        ).scalar_one_or_none()
         if prev_outline:
-            context_lines.append(f"← 前一卷（第{prev_outline.chapter_number}卷）《{prev_outline.title}》：{prev_outline.summary[:150] or '暂无概要'}")
+            context_lines.append(
+                f"← 前一卷（第{prev_outline.chapter_number}卷）《{prev_outline.title}》：{prev_outline.summary[:150] or '暂无概要'}"
+            )
     # 后两个大纲
-    next_outlines = (await db.execute(
-        select(Outline).where(
-            Outline.project_id == project_id,
-            Outline.chapter_number > outline.chapter_number,
-        ).order_by(Outline.chapter_number).limit(2)
-    )).scalars().all()
+    next_outlines = (
+        (
+            await db.execute(
+                select(Outline)
+                .where(
+                    Outline.project_id == project_id,
+                    Outline.chapter_number > outline.chapter_number,
+                )
+                .order_by(Outline.chapter_number)
+                .limit(2)
+            )
+        )
+        .scalars()
+        .all()
+    )
     for no in next_outlines:
-        context_lines.append(f"→ 后卷（第{no.chapter_number}卷）《{no.title}》：{no.summary[:150] or '暂无概要'}")
+        context_lines.append(
+            f"→ 后卷（第{no.chapter_number}卷）《{no.title}》：{no.summary[:150] or '暂无概要'}"
+        )
     context_info = "\n".join(context_lines) if context_lines else "（无相邻大纲信息）"
 
     engine, ai_client = await make_engine_and_client(db, user_id)
@@ -1236,15 +1799,23 @@ async def _expand_outline_core(
                 f"第{target_chapter_count}个子章节承担剩余{overflow}个【重点】并收束全卷。"
             )
     else:
-        kp_allocation_rule = f"将卷概览中的核心剧情按自然节奏分配到{target_chapter_count}个子章节中。"
+        kp_allocation_rule = (
+            f"将卷概览中的核心剧情按自然节奏分配到{target_chapter_count}个子章节中。"
+        )
 
     # 无重点时的兜底
     no_focus_fallback = ""
     if not focus_kps:
-        no_focus_fallback = "第1章必须让主角进入核心场景并开始实质性行动，不允许全章仅做环境铺陈或角色出场。"
+        no_focus_fallback = (
+            "第1章必须让主角进入核心场景并开始实质性行动，不允许全章仅做环境铺陈或角色出场。"
+        )
 
     # 【一般】/【弱】规则
-    general_kps_rule = f"【一般】情节点（{len(general_kps)}个）作为子章节的辅助内容，不可喧宾夺主取代【重点】。" if general_kps else ""
+    general_kps_rule = (
+        f"【一般】情节点（{len(general_kps)}个）作为子章节的辅助内容，不可喧宾夺主取代【重点】。"
+        if general_kps
+        else ""
+    )
     weak_kps_rule = f"【弱】情节点（{len(weak_kps)}个）字数不够时可省略。" if weak_kps else ""
 
     # 上下文提示（供模板 <task> 使用）
@@ -1290,29 +1861,38 @@ async def _expand_outline_core(
             "禁止使用「某路人」「围观群众」等抽象占位——必须用具体角色名或组织名。"
         )
 
-    result = await engine.execute_skill("outline_expand_single", ai_client, {
-        "outline_order_index": str(outline.chapter_number), "outline_title": outline.title or "无标题",
-        "outline_content": outline_content, "outline_summary": outline.summary or "",
-        "target_chapter_count": str(target_chapter_count),
-        "project_title": proj.title, "project_genre": proj.genre or "网文", "synopsis": proj.synopsis or "暂无简介",
-        "characters_info": ctx["characters_info"], "world_info": ctx["world_info"],
-        "organizations_info": ctx["organizations_info"],
-        "context_info": context_info,
-        "context_note": context_note,
-        # 节奏变量（由 md 模板中的 <rhythm_rules> 使用）
-        "focus_kps_text": focus_kps_text,
-        "kp_allocation_rule": kp_allocation_rule,
-        "no_focus_fallback": no_focus_fallback,
-        "general_kps_rule": general_kps_rule,
-        "weak_kps_rule": weak_kps_rule,
-        "mode_extra": mode_extra,
-        # 继承/派生指引（由 md 模板中的 <character_intent_rules> 和 <commercial_design_guide> 使用）
-        "char_intent_guidance": char_intent_guidance,
-        "shuang_guidance": shuang_guidance,
-        "user_prompt": (
-            f"请将第{outline.chapter_number}卷《{outline.title}》展开为{target_chapter_count}个子章节，返回JSON数组。{existing_context}"
-        ),
-    })
+    result = await engine.execute_skill(
+        "outline_expand_single",
+        ai_client,
+        {
+            "outline_order_index": str(outline.chapter_number),
+            "outline_title": outline.title or "无标题",
+            "outline_content": outline_content,
+            "outline_summary": outline.summary or "",
+            "target_chapter_count": str(target_chapter_count),
+            "project_title": proj.title,
+            "project_genre": proj.genre or "网文",
+            "synopsis": proj.synopsis or "暂无简介",
+            "characters_info": ctx["characters_info"],
+            "world_info": ctx["world_info"],
+            "organizations_info": ctx["organizations_info"],
+            "context_info": context_info,
+            "context_note": context_note,
+            # 节奏变量（由 md 模板中的 <rhythm_rules> 使用）
+            "focus_kps_text": focus_kps_text,
+            "kp_allocation_rule": kp_allocation_rule,
+            "no_focus_fallback": no_focus_fallback,
+            "general_kps_rule": general_kps_rule,
+            "weak_kps_rule": weak_kps_rule,
+            "mode_extra": mode_extra,
+            # 继承/派生指引（由 md 模板中的 <character_intent_rules> 和 <commercial_design_guide> 使用）
+            "char_intent_guidance": char_intent_guidance,
+            "shuang_guidance": shuang_guidance,
+            "user_prompt": (
+                f"请将第{outline.chapter_number}卷《{outline.title}》展开为{target_chapter_count}个子章节，返回JSON数组。{existing_context}"
+            ),
+        },
+    )
     check_skill_error(result)
     expanded_data = result.get("json") or []
     if not isinstance(expanded_data, list):
@@ -1324,9 +1904,11 @@ async def _expand_outline_core(
         start_chapter = old_start_chapter
     else:
         # 新展开：取当前已存在的最大 chapter_number + 1，前置大纲未展开也不会冲突
-        max_ch = await db.scalar(select(func.max(Chapter.chapter_number)).where(
-            Chapter.project_id == project_id,
-        ))
+        max_ch = await db.scalar(
+            select(func.max(Chapter.chapter_number)).where(
+                Chapter.project_id == project_id,
+            )
+        )
         start_chapter = (max_ch or 0) + 1
 
     # 创建 N 个 Chapter
@@ -1355,19 +1937,33 @@ async def _expand_outline_core(
             expansion_plan=plan_data,
         )
         db.add(ch)
-        created.append({
-            "chapter_number": start_chapter + idx,
-            "sub_index": (append_base_sub_index + idx + 1) if append_existing else (idx + 1),
-            "title": ch.title,
-            "plot_summary": plan_data.get("plot_summary", ""),
-            "key_events": plan_data.get("key_events", []),
-        })
+        created.append(
+            {
+                "chapter_number": start_chapter + idx,
+                "sub_index": (append_base_sub_index + idx + 1) if append_existing else (idx + 1),
+                "title": ch.title,
+                "plot_summary": plan_data.get("plot_summary", ""),
+                "key_events": plan_data.get("key_events", []),
+            }
+        )
     await db.commit()
-    return {"expanded": created, "count": len(created), "start_chapter": start_chapter, "replaced": replaced_count, "appended": append_existing}
+    return {
+        "expanded": created,
+        "count": len(created),
+        "start_chapter": start_chapter,
+        "replaced": replaced_count,
+        "appended": append_existing,
+    }
 
 
 @router.post("/{project_id}/outlines/{outline_id}/expand")
-async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def expand_outline(
+    project_id: int,
+    outline_id: int,
+    req: OutlineExpandRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """大纲展开为多章（1对多模式核心，同步版）：AI 将一条大纲拆成 N 个章节计划，创建 N 个 Chapter。
 
     - 章号分配：取当前已存在最大 chapter_number + 1（避免前置未展开导致冲突）
@@ -1377,7 +1973,13 @@ async def expand_outline(project_id: int, outline_id: int, req: OutlineExpandReq
 
 
 @router.post("/{project_id}/outlines/{outline_id}/expand-async")
-async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def expand_outline_async(
+    project_id: int,
+    outline_id: int,
+    req: OutlineExpandRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """大纲展开为多章（异步队列版）：立即返回 task_id，后台执行。
 
     三种模式（req.mode）：
@@ -1388,7 +1990,11 @@ async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExp
     完成后通过 WebSocket 推送，前端浮窗查看进度。task_type = outline_expand。
     """
     proj = await get_user_project(db, project_id, user)
-    outline = (await db.execute(select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id))).scalar_one_or_none()
+    outline = (
+        await db.execute(
+            select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id)
+        )
+    ).scalar_one_or_none()
     if not outline:
         raise HTTPException(404, "大纲不存在")
     mode = (req.mode or "new").lower()
@@ -1396,9 +2002,17 @@ async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExp
         raise HTTPException(400, "mode 只能是 new / replace / append")
     # new 模式才校验「已展开」；replace/append 允许已存在章节
     if mode == "new":
-        existing = (await db.execute(
-            select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-        )).scalars().all()
+        existing = (
+            (
+                await db.execute(
+                    select(Chapter).where(
+                        Chapter.outline_id == outline_id, Chapter.project_id == project_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         if existing:
             raise HTTPException(400, f"此大纲已展开为 {len(existing)} 章，请先删除再重新展开")
 
@@ -1406,15 +2020,21 @@ async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExp
 
     async def _run_expand(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
+
         tracker = bgs.TaskProgressTracker(task_id)
         m = payload.get("mode", "new")
         tag = {"replace": "（覆盖旧章节）", "append": "（追加新章节）"}.get(m, "")
         await tracker.update(stage="preparing", message=f"准备展开大纲...{tag}")
         async with async_session() as task_db:
-            await tracker.update(stage="generating", message=f"AI 正在展开为 {payload['target_chapter_count']} 章...")
+            await tracker.update(
+                stage="generating", message=f"AI 正在展开为 {payload['target_chapter_count']} 章..."
+            )
             res = await _expand_outline_core(
-                task_db, payload["project_id"], payload["outline_id"],
-                payload["target_chapter_count"], payload["user_id"],
+                task_db,
+                payload["project_id"],
+                payload["outline_id"],
+                payload["target_chapter_count"],
+                payload["user_id"],
                 skip_existing_check=True,  # 提前校验过了
                 replace_existing=(m == "replace"),
                 append_existing=(m == "append"),
@@ -1432,12 +2052,15 @@ async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExp
         await tracker.complete(message=done_msg, result=res)
 
     task_id = await submit_async_task(
-        user_id=user.id, project_id=project_id,
+        user_id=user.id,
+        project_id=project_id,
         task_type="outline_expand",
         title=f"展开第{outline.chapter_number}卷《{outline.title or ''}》",
         payload={
-            "project_id": project_id, "outline_id": outline_id,
-            "target_chapter_count": req.target_chapter_count, "user_id": user.id,
+            "project_id": project_id,
+            "outline_id": outline_id,
+            "target_chapter_count": req.target_chapter_count,
+            "user_id": user.id,
             "mode": mode,
             "strategy": req.strategy,
         },
@@ -1447,7 +2070,12 @@ async def expand_outline_async(project_id: int, outline_id: int, req: OutlineExp
 
 
 @router.post("/{project_id}/outlines/batch-expand-async")
-async def batch_expand_outlines_async(project_id: int, req: BatchExpandRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def batch_expand_outlines_async(
+    project_id: int,
+    req: BatchExpandRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """批量展开所有未展开的大纲（异步队列版）：一个后台任务内按序展开每卷。
 
     - 自动跳过已展开的大纲
@@ -1462,34 +2090,52 @@ async def batch_expand_outlines_async(project_id: int, req: BatchExpandRequest, 
     if (proj.outline_mode or "one_to_one") != "one_to_many":
         raise HTTPException(400, "批量展开仅在「细化模式(1→N)」下可用")
     # 拉取所有大纲（按章号），确认有待展开项，避免建空任务
-    outlines_all = (await db.execute(
-        select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number)
-    )).scalars().all()
+    outlines_all = (
+        (
+            await db.execute(
+                select(Outline)
+                .where(Outline.project_id == project_id)
+                .order_by(Outline.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
     # 查已展开的大纲ID集合（has_chapters 是 list_outlines 拼的虚拟字段，这里用 Chapter 表统计）
     expanded_ids: set = set()
     if outlines_all:
-        rows = (await db.execute(
-            select(Chapter.outline_id).where(
-                Chapter.project_id == project_id, Chapter.outline_id.isnot(None)
-            ).distinct()
-        )).all()
+        rows = (
+            await db.execute(
+                select(Chapter.outline_id)
+                .where(Chapter.project_id == project_id, Chapter.outline_id.isnot(None))
+                .distinct()
+            )
+        ).all()
         expanded_ids = {r[0] for r in rows}
     pending = [o for o in outlines_all if o.id not in expanded_ids]
     if not pending:
         raise HTTPException(400, "没有可展开的大纲（所有大纲都已展开）")
 
     from app.services.async_ai_service import submit_async_task
+
     target_count = req.target_chapter_count
-    pending_snapshot = [{"id": o.id, "chapter_number": o.chapter_number, "title": o.title or ""} for o in pending]
+    pending_snapshot = [
+        {"id": o.id, "chapter_number": o.chapter_number, "title": o.title or ""} for o in pending
+    ]
     project_id_snap = project_id
     user_id_snap = user.id
 
     async def _run_batch_expand(task_id: int, payload: dict):
         from app.services import background_task_service as bgs
+
         tracker = bgs.TaskProgressTracker(task_id)
         items = payload["items"]
         total = len(items)
-        await tracker.update(stage="preparing", message=f"准备批量展开 {total} 卷...", progress_details={"done": 0, "total": total})
+        await tracker.update(
+            stage="preparing",
+            message=f"准备批量展开 {total} 卷...",
+            progress_details={"done": 0, "total": total},
+        )
         done = 0
         failed = []
         total_chapters = 0
@@ -1506,8 +2152,11 @@ async def batch_expand_outlines_async(project_id: int, req: BatchExpandRequest, 
             try:
                 async with async_session() as task_db:
                     res = await _expand_outline_core(
-                        task_db, payload["project_id"], item["id"],
-                        payload["target_chapter_count"], payload["user_id"],
+                        task_db,
+                        payload["project_id"],
+                        item["id"],
+                        payload["target_chapter_count"],
+                        payload["user_id"],
                         skip_existing_check=True,
                     )
                     total_chapters += res["count"]
@@ -1526,45 +2175,88 @@ async def batch_expand_outlines_async(project_id: int, req: BatchExpandRequest, 
                 progress_details={"done": done, "total": total, "current_outline": item},
             )
 
-        summary = f"批量展开完成：{total} 卷 → {total_chapters} 章" + (f"，{len(failed)} 卷失败" if failed else "")
-        await tracker.complete(message=summary, result={"total_outlines": total, "total_chapters": total_chapters, "failed": failed})
+        summary = f"批量展开完成：{total} 卷 → {total_chapters} 章" + (
+            f"，{len(failed)} 卷失败" if failed else ""
+        )
+        await tracker.complete(
+            message=summary,
+            result={"total_outlines": total, "total_chapters": total_chapters, "failed": failed},
+        )
 
     task_id = await submit_async_task(
-        user_id=user.id, project_id=project_id_snap,
+        user_id=user.id,
+        project_id=project_id_snap,
         task_type="outline_expand",
         title=f"批量展开 {len(pending)} 卷大纲",
-        payload={"project_id": project_id_snap, "user_id": user_id_snap, "items": pending_snapshot, "target_chapter_count": target_count},
+        payload={
+            "project_id": project_id_snap,
+            "user_id": user_id_snap,
+            "items": pending_snapshot,
+            "target_chapter_count": target_count,
+        },
         runner=_run_batch_expand,
     )
     return {"task_id": task_id, "pending_count": len(pending)}
 
 
 @router.get("/{project_id}/outlines/{outline_id}/chapters")
-async def get_outline_chapters(project_id: int, outline_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_outline_chapters(
+    project_id: int,
+    outline_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """查询某大纲展开的所有章节（1对多用）。"""
     await get_user_project(db, project_id, user)
-    chapters = (await db.execute(
-        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-        .order_by(Chapter.sub_index)
-    )).scalars().all()
+    chapters = (
+        (
+            await db.execute(
+                select(Chapter)
+                .where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
+                .order_by(Chapter.sub_index)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return {
         "has_chapters": len(chapters) > 0,
         "chapter_count": len(chapters),
-        "chapters": [{
-            "id": c.id, "chapter_number": c.chapter_number, "sub_index": c.sub_index,
-            "title": c.title, "summary": c.summary, "status": c.status,
-            "expansion_plan": c.expansion_plan,
-        } for c in chapters],
+        "chapters": [
+            {
+                "id": c.id,
+                "chapter_number": c.chapter_number,
+                "sub_index": c.sub_index,
+                "title": c.title,
+                "summary": c.summary,
+                "status": c.status,
+                "expansion_plan": c.expansion_plan,
+            }
+            for c in chapters
+        ],
     }
 
 
 @router.delete("/{project_id}/outlines/{outline_id}/chapters")
-async def delete_outline_chapters(project_id: int, outline_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def delete_outline_chapters(
+    project_id: int,
+    outline_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """删除某大纲展开的所有章节（1对多模式下重新展开用）。"""
     await get_user_project(db, project_id, user)
-    chapters = (await db.execute(
-        select(Chapter).where(Chapter.outline_id == outline_id, Chapter.project_id == project_id)
-    )).scalars().all()
+    chapters = (
+        (
+            await db.execute(
+                select(Chapter).where(
+                    Chapter.outline_id == outline_id, Chapter.project_id == project_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     count = len(chapters)
     if chapters:
         # 先清理关联的 PlotAnalysis / StoryMemory / 向量 / 分析伏笔 / GenerationHistory

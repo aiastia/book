@@ -3,13 +3,17 @@
 对标 MuMuAINovel（无独立模型，本系统为自创增强）。
 承载武器/法宝/丹药/材料/关键剧情道具，关联角色与章节。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
 class Item(Base):
     """物品/道具。"""
+
     __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

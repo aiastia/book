@@ -3,8 +3,11 @@
 对标 MuMuAINovel RegenerationTask。承载章节重写的版本快照，
 保留原文/重写文/修改指令/版本号，支持版本对比与回溯。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -14,7 +17,9 @@ class RegenerationTask(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id = Column(
+        Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # 修改指令（综合：分析建议 + 用户自定义 + 聚焦领域）
     modification_instructions = Column(Text, default="")
     focus_areas = Column(JSON, default=list)  # [pacing/emotion/description/dialogue/conflict]

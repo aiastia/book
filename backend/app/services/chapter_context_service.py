@@ -1,15 +1,17 @@
 """章节上下文构建服务"""
+
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func
+
+from app.core.ai_client import AIClient
+from app.core.config import settings
 from app.models.chapter import Chapter
-from app.models.outline import Outline
 from app.models.character import Character
-from app.models.story_memory import StoryMemory
+from app.models.outline import Outline
 from app.models.plot_analysis import PlotAnalysis
 from app.models.project import Project
+from app.models.story_memory import StoryMemory
 from app.services.foreshadow_service import ForeshadowService
-from app.core.config import settings
-from app.core.ai_client import AIClient
 
 
 class ChapterContextService:
@@ -69,69 +71,109 @@ class ChapterContextService:
             chapter_keywords = set()
             outline = None
             if chapter.outline_id:
-                outline = (await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))).scalar_one_or_none()
+                outline = (
+                    await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))
+                ).scalar_one_or_none()
             if not outline:
-                outline = (await self.db.execute(
-                    select(Outline).where(Outline.project_id == self.project_id, Outline.chapter_number == chapter.chapter_number)
-                    .order_by(Outline.id.desc())
-                )).scalars().first()
+                outline = (
+                    (
+                        await self.db.execute(
+                            select(Outline)
+                            .where(
+                                Outline.project_id == self.project_id,
+                                Outline.chapter_number == chapter.chapter_number,
+                            )
+                            .order_by(Outline.id.desc())
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
             if outline:
                 # 大纲标题、梗概、关键点里的词
                 for text in [outline.title or "", outline.summary or ""]:
                     chapter_keywords.update(text.replace("，", " ").replace("。", " ").split())
-                for kp in (outline.key_points or []):
+                for kp in outline.key_points or []:
                     if isinstance(kp, str):
                         chapter_keywords.update(kp.replace("，", " ").split())
             if chapter.expansion_plan and isinstance(chapter.expansion_plan, dict):
-                for ke in (chapter.expansion_plan.get("key_events") or []):
+                for ke in chapter.expansion_plan.get("key_events") or []:
                     if isinstance(ke, str):
                         chapter_keywords.update(ke.replace("，", " ").split())
 
             # 2. 物品：动态优先
-            all_items = (await self.db.execute(
-                select(Item).where(Item.project_id == self.project_id)
-            )).scalars().all()
+            all_items = (
+                (await self.db.execute(select(Item).where(Item.project_id == self.project_id)))
+                .scalars()
+                .all()
+            )
             # 分层：本章涉及的 > 关键道具 > 其他
-            involved_items = [i for i in all_items if any(kw in i.name for kw in chapter_keywords) or i.name in chapter_keywords]
+            involved_items = [
+                i
+                for i in all_items
+                if any(kw in i.name for kw in chapter_keywords) or i.name in chapter_keywords
+            ]
             key_items = [i for i in all_items if i.is_key_item and i not in involved_items]
             other_items = [i for i in all_items if i not in involved_items and i not in key_items]
             # 组合：涉及的（全量）+ 关键道具（补到8个）+ 其他（补到10个）
             selected_items = involved_items[:8]
             for i in key_items:
-                if len(selected_items) >= 8: break
+                if len(selected_items) >= 8:
+                    break
                 selected_items.append(i)
             if len(selected_items) < 10:
                 for i in other_items:
-                    if len(selected_items) >= 10: break
+                    if len(selected_items) >= 10:
+                        break
                     selected_items.append(i)
             if selected_items:
                 lines = []
                 for i in selected_items:
                     tag = "⭐" if i.is_key_item else ""
-                    lines.append(f"- {tag}{i.name}（{i.rarity}，{i.item_type}）：{(i.description or '')[:60]}")
+                    lines.append(
+                        f"- {tag}{i.name}（{i.rarity}，{i.item_type}）：{(i.description or '')[:60]}"
+                    )
                 out["key_items"] = "物品：\n" + "\n".join(lines)
 
             # 3. 地点：动态优先（同策略）
-            all_locs = (await self.db.execute(
-                select(Location).where(Location.project_id == self.project_id)
-            )).scalars().all()
-            involved_locs = [l for l in all_locs if any(kw in l.name for kw in chapter_keywords) or l.name in chapter_keywords]
-            major_locs = [l for l in all_locs if l.importance in ("major", "key") and l not in involved_locs]
+            all_locs = (
+                (
+                    await self.db.execute(
+                        select(Location).where(Location.project_id == self.project_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            involved_locs = [
+                l
+                for l in all_locs
+                if any(kw in l.name for kw in chapter_keywords) or l.name in chapter_keywords
+            ]
+            major_locs = [
+                l for l in all_locs if l.importance in ("major", "key") and l not in involved_locs
+            ]
             other_locs = [l for l in all_locs if l not in involved_locs and l not in major_locs]
             selected_locs = involved_locs[:5]
             for l in major_locs:
-                if len(selected_locs) >= 6: break
+                if len(selected_locs) >= 6:
+                    break
                 selected_locs.append(l)
             if len(selected_locs) < 8:
                 for l in other_locs:
-                    if len(selected_locs) >= 8: break
+                    if len(selected_locs) >= 8:
+                        break
                     selected_locs.append(l)
             if selected_locs:
-                lines = [f"- {l.name}（{l.location_type}）：{(l.atmosphere or l.description or '')[:60]}" for l in selected_locs]
+                lines = [
+                    f"- {l.name}（{l.location_type}）：{(l.atmosphere or l.description or '')[:60]}"
+                    for l in selected_locs
+                ]
                 out["key_locations"] = "地点：\n" + "\n".join(lines)
 
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"[context] 物品/地点注入失败（不影响生成）: {e}")
         return out
 
@@ -145,13 +187,17 @@ class ChapterContextService:
         if not self.user_id:
             return {}
         try:
-            from app.services.memory_vector_service import MemoryVectorService
             from sqlalchemy import select as _sel
+
+            from app.services.memory_vector_service import MemoryVectorService
+
             # 检查项目是否有已向量化的记忆（无则跳过，避免空查询）
-            has_vec = await self.db.scalar(_sel(func.count(StoryMemory.id)).where(
-                StoryMemory.project_id == self.project_id,
-                StoryMemory.vector_id != "",
-            ))
+            has_vec = await self.db.scalar(
+                _sel(func.count(StoryMemory.id)).where(
+                    StoryMemory.project_id == self.project_id,
+                    StoryMemory.vector_id != "",
+                )
+            )
             if not has_vec:
                 return {}
             ai_client = await AIClient.from_user_config(self.db, self.user_id)
@@ -159,7 +205,9 @@ class ChapterContextService:
             # 取本章大纲作为语义 query
             outline_text = ""
             if chapter.outline_id:
-                ol = (await self.db.execute(_sel(Outline).where(Outline.id == chapter.outline_id))).scalar_one_or_none()
+                ol = (
+                    await self.db.execute(_sel(Outline).where(Outline.id == chapter.outline_id))
+                ).scalar_one_or_none()
                 if ol:
                     outline_text = (ol.summary or ol.title or "")[:500]
             # 取本章出场角色名作为角色 query
@@ -171,7 +219,8 @@ class ChapterContextService:
             except Exception:
                 pass
             recalled = await vs.build_context_for_generation(
-                user_id=self.user_id, project_id=self.project_id,
+                user_id=self.user_id,
+                project_id=self.project_id,
                 current_chapter=chapter.chapter_number or 1,
                 chapter_outline=outline_text,
                 character_names=char_names,
@@ -181,6 +230,7 @@ class ChapterContextService:
                 return {"recalled_memories": recalled}
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"[context] 向量记忆召回失败（不影响生成）: {e}")
         return {}
 
@@ -192,13 +242,21 @@ class ChapterContextService:
         卷摘要覆盖 10 章之外的长期连贯性，弥补摘要链滑动窗口的不足。
         """
         try:
-            vol_summaries = (await self.db.execute(
-                select(StoryMemory).where(
-                    StoryMemory.project_id == self.project_id,
-                    StoryMemory.memory_type == "volume_summary",
-                    StoryMemory.chapter_number < chapter.chapter_number,
-                ).order_by(StoryMemory.chapter_number)
-            )).scalars().all()
+            vol_summaries = (
+                (
+                    await self.db.execute(
+                        select(StoryMemory)
+                        .where(
+                            StoryMemory.project_id == self.project_id,
+                            StoryMemory.memory_type == "volume_summary",
+                            StoryMemory.chapter_number < chapter.chapter_number,
+                        )
+                        .order_by(StoryMemory.chapter_number)
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
             if not vol_summaries:
                 return {}
@@ -212,13 +270,15 @@ class ChapterContextService:
             if len(parts) >= 3:
                 # 将所有卷摘要压缩为"全书脉络"提示
                 all_arcs = " → ".join(
-                    vs.content[:50] + "…" for vs in vol_summaries[-5:]  # 最近 5 卷的浓缩
+                    vs.content[:50] + "…"
+                    for vs in vol_summaries[-5:]  # 最近 5 卷的浓缩
                 )
                 parts.append(f"【全书主线脉络（近5卷演进）】{all_arcs}")
 
             return {"volume_summaries": "\n\n".join(parts)}
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"[context] 卷摘要加载失败（不影响生成）: {e}")
         return {}
 
@@ -227,27 +287,44 @@ class ChapterContextService:
 
         让章节生成时 AI 知道故事发生在什么世界，避免设定断层。
         """
-        from app.models.world import WorldSetting
-        import json as _json
 
-        proj = (await self.db.execute(select(Project).where(Project.id == self.project_id))).scalar_one_or_none()
+        from app.models.world import WorldSetting
+
+        proj = (
+            await self.db.execute(select(Project).where(Project.id == self.project_id))
+        ).scalar_one_or_none()
         parts = []
         # 核心世界观
         if proj:
             core = []
-            if proj.world_time_period: core.append(f"时间背景：{proj.world_time_period}")
-            if proj.world_location: core.append(f"地理位置：{proj.world_location}")
-            if proj.world_atmosphere: core.append(f"氛围基调：{proj.world_atmosphere}")
-            if proj.world_rules: core.append(f"世界规则：{proj.world_rules}")
+            if proj.world_time_period:
+                core.append(f"时间背景：{proj.world_time_period}")
+            if proj.world_location:
+                core.append(f"地理位置：{proj.world_location}")
+            if proj.world_atmosphere:
+                core.append(f"氛围基调：{proj.world_atmosphere}")
+            if proj.world_rules:
+                core.append(f"世界规则：{proj.world_rules}")
             if core:
                 parts.append("【核心世界观】\n" + "\n".join(core))
 
         # 详细设定条目
-        worlds = (await self.db.execute(
-            select(WorldSetting).where(WorldSetting.project_id == self.project_id)
-        )).scalars().all()
+        worlds = (
+            (
+                await self.db.execute(
+                    select(WorldSetting).where(WorldSetting.project_id == self.project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         if worlds:
-            detail = "\n".join([f"- {w.name}({w.category or '其他'})：{(w.content or '')[:150]}" for w in worlds[:15]])
+            detail = "\n".join(
+                [
+                    f"- {w.name}({w.category or '其他'})：{(w.content or '')[:150]}"
+                    for w in worlds[:15]
+                ]
+            )
             parts.append("【详细设定】\n" + detail)
 
         return {"world_setting": "\n".join(parts) if parts else "暂无世界设定"}
@@ -268,7 +345,9 @@ class ChapterContextService:
             if plan.get("character_focus"):
                 parts.append(f"角色焦点：{', '.join(plan['character_focus'])}")
             if plan.get("emotional_tone") or plan.get("emotional_arc"):
-                parts.append(f"情感基调：{plan.get('emotional_arc') or plan.get('emotional_tone', '')}")
+                parts.append(
+                    f"情感基调：{plan.get('emotional_arc') or plan.get('emotional_tone', '')}"
+                )
             if plan.get("narrative_goal"):
                 parts.append(f"叙事目标：{plan['narrative_goal']}")
             if plan.get("conflict_type"):
@@ -282,17 +361,28 @@ class ChapterContextService:
                 parts.append(f"结尾钩子（写到此处停住）：{plan['hook']}")
             if plan.get("scene_anchor"):
                 parts.append(f"场景锚点：{plan['scene_anchor']}")
-            if plan.get("emotional_arc") and plan.get("emotional_arc") != plan.get("emotional_tone"):
+            if plan.get("emotional_arc") and plan.get("emotional_arc") != plan.get(
+                "emotional_tone"
+            ):
                 parts.append(f"情绪弧线：{plan['emotional_arc']}")
             if plan.get("shuang_design"):
                 sd = plan["shuang_design"]
                 if isinstance(sd, dict):
                     sd_parts = []
-                    if sd.get("info_asymmetry"): sd_parts.append(f"信息差：{sd['info_asymmetry']}")
-                    if sd.get("shock_level"): sd_parts.append(f"震惊层级：{sd['shock_level']}")
-                    if sd.get("spectator_layers"): sd_parts.append("围观反应：" + "；".join(sd['spectator_layers']) if isinstance(sd['spectator_layers'], list) else str(sd['spectator_layers']))
-                    if sd.get("emotional_rhythm"): sd_parts.append(f"情绪拉扯：{sd['emotional_rhythm']}")
-                    if sd.get("protagonist_style"): sd_parts.append(f"主角逼格：{sd['protagonist_style']}")
+                    if sd.get("info_asymmetry"):
+                        sd_parts.append(f"信息差：{sd['info_asymmetry']}")
+                    if sd.get("shock_level"):
+                        sd_parts.append(f"震惊层级：{sd['shock_level']}")
+                    if sd.get("spectator_layers"):
+                        sd_parts.append(
+                            "围观反应：" + "；".join(sd["spectator_layers"])
+                            if isinstance(sd["spectator_layers"], list)
+                            else str(sd["spectator_layers"])
+                        )
+                    if sd.get("emotional_rhythm"):
+                        sd_parts.append(f"情绪拉扯：{sd['emotional_rhythm']}")
+                    if sd.get("protagonist_style"):
+                        sd_parts.append(f"主角逼格：{sd['protagonist_style']}")
                     if sd_parts:
                         parts.append("爽点设计：\n" + "\n".join(f"  - {p}" for p in sd_parts))
             if plan.get("character_intents"):
@@ -301,7 +391,7 @@ class ChapterContextService:
                     intent_lines = []
                     for it in ci:
                         if isinstance(it, dict):
-                            line = f"  - {it.get('character','?')}：本章目标「{it.get('this_chapter_goal','')}」，此刻想要「{it.get('immediate_want','')}」"
+                            line = f"  - {it.get('character', '?')}：本章目标「{it.get('this_chapter_goal', '')}」，此刻想要「{it.get('immediate_want', '')}」"
                             intent_lines.append(line)
                     if intent_lines:
                         parts.append("角色微意图：\n" + "\n".join(intent_lines))
@@ -313,41 +403,57 @@ class ChapterContextService:
         # 1对多模式：注入所属卷（大纲）的内容，让正文写作有全局视野
         volume_outline = ""
         if chapter.outline_id:
-            vol = (await self.db.execute(
-                select(Outline).where(Outline.id == chapter.outline_id)
-            )).scalar_one_or_none()
+            vol = (
+                await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))
+            ).scalar_one_or_none()
             if vol:
                 vol_parts = [f"第{vol.chapter_number}卷《{vol.title or ''}》"]
-                if vol.summary: vol_parts.append(f"本卷概览：{vol.summary}")
-                if vol.goal: vol_parts.append(f"本卷目标：{vol.goal}")
-                if vol.emotion: vol_parts.append(f"本卷基调：{vol.emotion}")
+                if vol.summary:
+                    vol_parts.append(f"本卷概览：{vol.summary}")
+                if vol.goal:
+                    vol_parts.append(f"本卷目标：{vol.goal}")
+                if vol.emotion:
+                    vol_parts.append(f"本卷基调：{vol.emotion}")
                 volume_outline = "\n".join(vol_parts)
         # 1对1模式：从大纲表取（按 outline_id 或 chapter_number）
         if not chapter_outline:
             outline = None
             if chapter.outline_id:
-                outline = (await self.db.execute(
-                    select(Outline).where(Outline.id == chapter.outline_id)
-                )).scalar_one_or_none()
+                outline = (
+                    await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))
+                ).scalar_one_or_none()
             if not outline:
-                outline = (await self.db.execute(
-                    select(Outline).where(
-                        Outline.project_id == self.project_id,
-                        Outline.chapter_number == chapter.chapter_number,
-                    ).order_by(Outline.id.desc())
-                )).scalars().first()
+                outline = (
+                    (
+                        await self.db.execute(
+                            select(Outline)
+                            .where(
+                                Outline.project_id == self.project_id,
+                                Outline.chapter_number == chapter.chapter_number,
+                            )
+                            .order_by(Outline.id.desc())
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
             if outline:
-                chapter_outline = outline.structure if outline.structure else {
-                    "title": outline.title,
-                    "summary": outline.summary,
-                    "scenes": outline.scenes,
-                    "characters": outline.characters,
-                    "key_points": outline.key_points,
-                    "emotion": outline.emotion,
-                    "goal": outline.goal,
-                }
+                chapter_outline = (
+                    outline.structure
+                    if outline.structure
+                    else {
+                        "title": outline.title,
+                        "summary": outline.summary,
+                        "scenes": outline.scenes,
+                        "characters": outline.characters,
+                        "key_points": outline.key_points,
+                        "emotion": outline.emotion,
+                        "goal": outline.goal,
+                    }
+                )
                 if isinstance(chapter_outline, dict):
                     import json
+
                     chapter_outline = json.dumps(chapter_outline, ensure_ascii=False, indent=2)
 
         # 最近 N 章大纲摘要
@@ -361,19 +467,27 @@ class ChapterContextService:
             .limit(settings.CHAPTER_CONTEXT_CHAPTERS)
         )
         recent_outlines = list(result.scalars().all())
-        outlines_summary = "\n".join([
-            f"第{o.chapter_number}章 {o.title}: {o.summary}" for o in reversed(recent_outlines)
-        ])
+        outlines_summary = "\n".join(
+            [f"第{o.chapter_number}章 {o.title}: {o.summary}" for o in reversed(recent_outlines)]
+        )
 
         # 卷摘要前置注入（方案 A：在大纲摘要前插入卷级摘要，保障长期连贯性）
         try:
-            vol_summaries = (await self.db.execute(
-                select(StoryMemory).where(
-                    StoryMemory.project_id == self.project_id,
-                    StoryMemory.memory_type == "volume_summary",
-                    StoryMemory.chapter_number < chapter.chapter_number,
-                ).order_by(StoryMemory.chapter_number)
-            )).scalars().all()
+            vol_summaries = (
+                (
+                    await self.db.execute(
+                        select(StoryMemory)
+                        .where(
+                            StoryMemory.project_id == self.project_id,
+                            StoryMemory.memory_type == "volume_summary",
+                            StoryMemory.chapter_number < chapter.chapter_number,
+                        )
+                        .order_by(StoryMemory.chapter_number)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             if vol_summaries:
                 vol_parts = []
                 for vs in vol_summaries:
@@ -381,22 +495,23 @@ class ChapterContextService:
                     vol_parts.append(f"【{title}】{vs.content}")
                 # 全书主线脉络压缩（3+ 卷时）
                 if len(vol_parts) >= 3:
-                    recent_arcs = " → ".join(
-                        vs.content[:50] + "…" for vs in vol_summaries[-5:]
-                    )
+                    recent_arcs = " → ".join(vs.content[:50] + "…" for vs in vol_summaries[-5:])
                     vol_parts.append(f"【全书主线脉络】{recent_arcs}")
                 outlines_summary = "\n\n".join(vol_parts) + "\n\n" + outlines_summary
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"[context] 卷摘要注入失败（不影响生成）: {e}")
 
         # 上一章末尾
         result = await self.db.execute(
-            select(Chapter).where(
+            select(Chapter)
+            .where(
                 Chapter.project_id == self.project_id,
                 Chapter.chapter_number == chapter.chapter_number - 1,
                 Chapter.status == "completed",
-            ).order_by(Chapter.id.desc())
+            )
+            .order_by(Chapter.id.desc())
         )
         prev_chapter = result.scalars().first()
         continuation_point = ""
@@ -404,10 +519,18 @@ class ChapterContextService:
         prev_chapter_content = ""
         if prev_chapter and prev_chapter.content:
             words = settings.CHAPTER_CONTEXT_WORDS
-            continuation_point = prev_chapter.content[-words:] if len(prev_chapter.content) > words else prev_chapter.content
+            continuation_point = (
+                prev_chapter.content[-words:]
+                if len(prev_chapter.content) > words
+                else prev_chapter.content
+            )
             prev_summary = prev_chapter.summary or ""
             # 前一章正文（截取最后 3000 字供模板使用）
-            prev_chapter_content = prev_chapter.content[-3000:] if len(prev_chapter.content) > 3000 else prev_chapter.content
+            prev_chapter_content = (
+                prev_chapter.content[-3000:]
+                if len(prev_chapter.content) > 3000
+                else prev_chapter.content
+            )
 
         # 最近几章上下文（最近 3 章末尾各 500 字拼接）
         result = await self.db.execute(
@@ -421,9 +544,17 @@ class ChapterContextService:
             .limit(3)
         )
         recent_chapters = list(result.scalars().all())
-        recent_chapters_context = "\n---\n".join([
-            f"【第{c.chapter_number}章 末尾】\n{c.content[-500:]}" for c in recent_chapters if c.content
-        ]) if recent_chapters else ""
+        recent_chapters_context = (
+            "\n---\n".join(
+                [
+                    f"【第{c.chapter_number}章 末尾】\n{c.content[-500:]}"
+                    for c in recent_chapters
+                    if c.content
+                ]
+            )
+            if recent_chapters
+            else ""
+        )
 
         # ===== 连贯性增强：上一章剧情分析 + 角色当前状态 + 故事进度 =====
         prev_analysis_summary = ""
@@ -435,61 +566,98 @@ class ChapterContextService:
         try:
             # 前 2 章的剧情分析（形成连贯衔接，不只是上一章）
             if prev_chapter:
-                prev_analyses = (await self.db.execute(
-                    select(PlotAnalysis).where(
-                        PlotAnalysis.project_id == self.project_id,
-                        PlotAnalysis.chapter_number < chapter.chapter_number,
-                    ).order_by(desc(PlotAnalysis.chapter_number)).limit(2)
-                )).scalars().all()
+                prev_analyses = (
+                    (
+                        await self.db.execute(
+                            select(PlotAnalysis)
+                            .where(
+                                PlotAnalysis.project_id == self.project_id,
+                                PlotAnalysis.chapter_number < chapter.chapter_number,
+                            )
+                            .order_by(desc(PlotAnalysis.chapter_number))
+                            .limit(2)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 if prev_analyses:
                     pa_parts = []
                     for pa in reversed(prev_analyses):  # 按章节正序
                         parts_pa = []
                         parts_pa.append(f"第{pa.chapter_number}章")
                         ec = pa.emotional_curve if isinstance(pa.emotional_curve, dict) else {}
-                        if ec.get('end'):
+                        if ec.get("end"):
                             parts_pa.append(f"情感结尾：{ec['end']}")
                         if pa.plot_stage:
                             parts_pa.append(f"剧情阶段：{pa.plot_stage}")
                         # 关键情节点
                         if pa.key_plot_points:
-                            kps = [p if isinstance(p, str) else p.get('event', p.get('description', '')) for p in (pa.key_plot_points or [])]
+                            kps = [
+                                p
+                                if isinstance(p, str)
+                                else p.get("event", p.get("description", ""))
+                                for p in (pa.key_plot_points or [])
+                            ]
                             parts_pa.append("关键转折：" + "；".join(kps[:3]))
                         # 伏笔动态
                         if pa.foreshadows:
-                            fs = [f"{f.get('type','')}{f.get('title','')}" for f in (pa.foreshadows or []) if isinstance(f, dict)]
+                            fs = [
+                                f"{f.get('type', '')}{f.get('title', '')}"
+                                for f in (pa.foreshadows or [])
+                                if isinstance(f, dict)
+                            ]
                             parts_pa.append("伏笔动态：" + "、".join(fs[:3]))
                         # 未解决的冲突
                         if pa.conflicts:
-                            cfs = [c.get('description', c.get('type', '')) if isinstance(c, dict) else str(c) for c in (pa.conflicts or [])]
+                            cfs = [
+                                c.get("description", c.get("type", ""))
+                                if isinstance(c, dict)
+                                else str(c)
+                                for c in (pa.conflicts or [])
+                            ]
                             parts_pa.append("未决冲突：" + "；".join(cfs[:2]))
                         pa_parts.append("｜".join(parts_pa))
                     # 最近一章的改进建议
                     latest = prev_analyses[0]
                     if latest.suggestions:
-                        sugs = [s if isinstance(s, str) else s.get('suggestion', '') for s in (latest.suggestions or [])]
+                        sugs = [
+                            s if isinstance(s, str) else s.get("suggestion", "")
+                            for s in (latest.suggestions or [])
+                        ]
                         pa_parts.append("上章改进建议（本章注意）：" + "；".join(sugs[:2]))
                     prev_analysis_summary = "\n".join(p for p in pa_parts if p.strip())
 
             # 角色当前状态（优先用该章节前的历史快照，避免未来信息泄露）
-            _chars = (await self.db.execute(
-                select(Character).where(Character.project_id == self.project_id)
-            )).scalars().all()
+            _chars = (
+                (
+                    await self.db.execute(
+                        select(Character).where(Character.project_id == self.project_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             from app.api.routes.projects_pkg.characters import get_character_state_at_chapter
+
             char_states_parts = []
             for char in _chars[:8]:  # 主要角色
                 # 尝试获取章节前的历史快照
-                snapshot = await get_character_state_at_chapter(self.db, self.project_id, char.id, chapter.chapter_number)
+                snapshot = await get_character_state_at_chapter(
+                    self.db, self.project_id, char.id, chapter.chapter_number
+                )
                 state = snapshot if snapshot else {}
                 state_parts = [char.name]
-                mental = state.get('mental_state', char.mental_state)
-                status = state.get('status', char.status)
-                stage = state.get('main_career_stage_desc', '') or str(state.get('main_career_stage', getattr(char, 'main_career_stage', '') or ''))
+                mental = state.get("mental_state", char.mental_state)
+                status = state.get("status", char.status)
+                stage = state.get("main_career_stage_desc", "") or str(
+                    state.get("main_career_stage", getattr(char, "main_career_stage", "") or "")
+                )
                 if mental:
                     state_parts.append(f"心理：{str(mental)[:40]}")
                 if status and str(status) != "alive":
                     state_parts.append(f"状态：{status}")
-                if stage and str(stage) not in ('0', '', 'None'):
+                if stage and str(stage) not in ("0", "", "None"):
                     state_parts.append(f"境界：{stage}")
                 if len(state_parts) > 1:
                     char_states_parts.append("（" + "，".join(state_parts[1:]) + "）")
@@ -509,24 +677,43 @@ class ChapterContextService:
             story_progress = f"已完成 {total_chapters_written or 0} 章，累计 {total_words or 0} 字"
 
             # 待回收/即将到期的伏笔提醒（直接注入，不依赖生成时 foreshadow_service）
-            pending_fs = await self.foreshadow_service.get_pending_resolve_foreshadows(chapter.chapter_number, lookahead=5)
-            overdue_fs = await self.foreshadow_service.get_overdue_foreshadows(chapter.chapter_number)
+            pending_fs = await self.foreshadow_service.get_pending_resolve_foreshadows(
+                chapter.chapter_number, lookahead=5
+            )
+            overdue_fs = await self.foreshadow_service.get_overdue_foreshadows(
+                chapter.chapter_number
+            )
             fs_parts = []
             if overdue_fs:
-                fs_parts.append("⚠️ 超期必须回收：" + "、".join(f"《{f.title}》({f.content[:20]}…)" for f in overdue_fs[:8]))
+                fs_parts.append(
+                    "⚠️ 超期必须回收："
+                    + "、".join(f"《{f.title}》({f.content[:20]}…)" for f in overdue_fs[:8])
+                )
             if pending_fs:
-                fs_parts.append("近期应回收：" + "、".join(f"《{f.title}》({f.content[:20]}…)" for f in pending_fs[:8]))
+                fs_parts.append(
+                    "近期应回收："
+                    + "、".join(f"《{f.title}》({f.content[:20]}…)" for f in pending_fs[:8])
+                )
             if fs_parts:
                 pending_foreshadows = "\n".join(fs_parts)
 
             # 已写章节的 expansion_plan 规划摘要链（让 AI 回顾之前每章规划了什么剧情）
-            recent_written = (await self.db.execute(
-                select(Chapter).where(
-                    Chapter.project_id == self.project_id,
-                    Chapter.chapter_number < chapter.chapter_number,
-                    Chapter.status == "completed",
-                ).order_by(desc(Chapter.chapter_number)).limit(10)
-            )).scalars().all()
+            recent_written = (
+                (
+                    await self.db.execute(
+                        select(Chapter)
+                        .where(
+                            Chapter.project_id == self.project_id,
+                            Chapter.chapter_number < chapter.chapter_number,
+                            Chapter.status == "completed",
+                        )
+                        .order_by(desc(Chapter.chapter_number))
+                        .limit(10)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             plan_parts = []
             for rc in reversed(recent_written):  # 按章节正序
                 if rc.expansion_plan and isinstance(rc.expansion_plan, dict):
@@ -539,12 +726,21 @@ class ChapterContextService:
                 recent_expansion_plans = "\n".join(plan_parts)
 
             # 质量分项趋势（最近5章 8维度评分）
-            recent_analyses = (await self.db.execute(
-                select(PlotAnalysis).where(
-                    PlotAnalysis.project_id == self.project_id,
-                    PlotAnalysis.chapter_number < chapter.chapter_number,
-                ).order_by(desc(PlotAnalysis.chapter_number)).limit(5)
-            )).scalars().all()
+            recent_analyses = (
+                (
+                    await self.db.execute(
+                        select(PlotAnalysis)
+                        .where(
+                            PlotAnalysis.project_id == self.project_id,
+                            PlotAnalysis.chapter_number < chapter.chapter_number,
+                        )
+                        .order_by(desc(PlotAnalysis.chapter_number))
+                        .limit(5)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             if recent_analyses:
                 trend_parts = []
                 for ra in reversed(recent_analyses):
@@ -567,17 +763,28 @@ class ChapterContextService:
                 # 追加最近一章的改进建议
                 latest_suggestions = recent_analyses[0].suggestions or []
                 if latest_suggestions:
-                    sugs = [s if isinstance(s, str) else s.get("suggestion", "") for s in latest_suggestions[:2]]
+                    sugs = [
+                        s if isinstance(s, str) else s.get("suggestion", "")
+                        for s in latest_suggestions[:2]
+                    ]
                     quality_trends_detail += "\n最近改进建议：" + "；".join(sugs)
                 # 追加最近一章的一致性问题（如果有）
                 latest_analysis = recent_analyses[0]
-                if hasattr(latest_analysis, 'consistency_issues') and latest_analysis.consistency_issues:
+                if (
+                    hasattr(latest_analysis, "consistency_issues")
+                    and latest_analysis.consistency_issues
+                ):
                     issues = latest_analysis.consistency_issues
                     if isinstance(issues, list) and issues:
-                        quality_trends_detail += "\n⚠️ 上章一致性问题：" + "；".join(str(i) for i in issues[:3])
+                        quality_trends_detail += "\n⚠️ 上章一致性问题：" + "；".join(
+                            str(i) for i in issues[:3]
+                        )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning(f"[context] 连贯性增强信息加载失败（不影响生成）: {e}")
+
+            logging.getLogger(__name__).warning(
+                f"[context] 连贯性增强信息加载失败（不影响生成）: {e}"
+            )
 
         # 字数要求
         word_count_requirement = f"目标{settings.CHAPTER_DEFAULT_WORDS}字，不少于{settings.CHAPTER_MIN_WORDS}字，不超过{settings.CHAPTER_MAX_WORDS}字"
@@ -611,16 +818,24 @@ class ChapterContextService:
         if not scene_anchor or not character_intents:
             ol_struct = None
             if not chapter.outline_id:
-                ol = (await self.db.execute(
-                    select(Outline).where(
-                        Outline.project_id == self.project_id,
-                        Outline.chapter_number == chapter.chapter_number,
-                    ).order_by(Outline.id.desc())
-                )).scalars().first()
+                ol = (
+                    (
+                        await self.db.execute(
+                            select(Outline)
+                            .where(
+                                Outline.project_id == self.project_id,
+                                Outline.chapter_number == chapter.chapter_number,
+                            )
+                            .order_by(Outline.id.desc())
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
             else:
-                ol = (await self.db.execute(
-                    select(Outline).where(Outline.id == chapter.outline_id)
-                )).scalar_one_or_none()
+                ol = (
+                    await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))
+                ).scalar_one_or_none()
             if ol and ol.structure and isinstance(ol.structure, dict):
                 ol_struct = ol.structure
             if ol_struct:
@@ -679,9 +894,10 @@ class ChapterContextService:
 
     async def _get_important_context(self, chapter: Chapter) -> dict:
         """P1-重要信息：角色完整信息 + 关系网络 + 组织归属"""
+        import json
+
         from app.models.character import CharacterRelation
         from app.models.organization import Organization
-        import json
 
         result = await self.db.execute(
             select(Character).where(Character.project_id == self.project_id)
@@ -689,9 +905,17 @@ class ChapterContextService:
         characters = list(result.scalars().all())
 
         # 预加载关系网（一次查询，避免 N+1），限制数量防止膨胀
-        rels = (await self.db.execute(
-            select(CharacterRelation).where(CharacterRelation.project_id == self.project_id).limit(30)
-        )).scalars().all()
+        rels = (
+            (
+                await self.db.execute(
+                    select(CharacterRelation)
+                    .where(CharacterRelation.project_id == self.project_id)
+                    .limit(30)
+                )
+            )
+            .scalars()
+            .all()
+        )
         # name → 角色名映射，构造 {char_id: ["A--师徒-->B", ...]}
         id_to_name = {c.id: c.name for c in characters}
         rel_map = {}
@@ -703,9 +927,15 @@ class ChapterContextService:
             )
 
         # 预加载组织
-        orgs = (await self.db.execute(
-            select(Organization).where(Organization.project_id == self.project_id)
-        )).scalars().all()
+        orgs = (
+            (
+                await self.db.execute(
+                    select(Organization).where(Organization.project_id == self.project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         org_map = {o.id: o for o in orgs}
 
         # 智能筛选：本章涉及的角色（从大纲/扩展计划提取）+ 主角 + 反派，其余只留名字
@@ -730,18 +960,32 @@ class ChapterContextService:
         chapter_character_names = set()
         # 从 expansion_plan 提取角色焦点
         if chapter.expansion_plan and isinstance(chapter.expansion_plan, dict):
-            chapter_character_names.update(_extract_char_names(chapter.expansion_plan.get("character_focus")))
+            chapter_character_names.update(
+                _extract_char_names(chapter.expansion_plan.get("character_focus"))
+            )
         # 从本章大纲提取角色
         if chapter.outline_id:
-            ol = (await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))).scalar_one_or_none()
+            ol = (
+                await self.db.execute(select(Outline).where(Outline.id == chapter.outline_id))
+            ).scalar_one_or_none()
             if ol and ol.characters:
                 chapter_character_names.update(_extract_char_names(ol.characters))
         # 也从 chapter_number 匹配的大纲提取（1对1模式 outline_id 可能为空）
         if not chapter_character_names:
-            ol = (await self.db.execute(
-                select(Outline).where(Outline.project_id == self.project_id, Outline.chapter_number == chapter.chapter_number)
-                .order_by(Outline.id.desc())
-            )).scalars().first()
+            ol = (
+                (
+                    await self.db.execute(
+                        select(Outline)
+                        .where(
+                            Outline.project_id == self.project_id,
+                            Outline.chapter_number == chapter.chapter_number,
+                        )
+                        .order_by(Outline.id.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             if ol and ol.characters:
                 chapter_character_names.update(_extract_char_names(ol.characters))
 
@@ -766,25 +1010,28 @@ class ChapterContextService:
 
         chars_info_parts = []
         from app.api.routes.projects_pkg.characters import get_character_state_at_chapter
+
         # 核心角色：完整信息（对于有变化日志的角色，使用章节前的历史快照）
         for c in core_chars:
-            snapshot = await get_character_state_at_chapter(self.db, self.project_id, c.id, chapter.chapter_number)
+            snapshot = await get_character_state_at_chapter(
+                self.db, self.project_id, c.id, chapter.chapter_number
+            )
             s = snapshot if snapshot else {}
-            _st = s.get('status', c.status)
-            _ms = s.get('mental_state', c.mental_state)
-            _ap = s.get('appearance', c.appearance)
-            _pe = s.get('personality', c.personality)
-            _bg = s.get('background', c.background)
-            _ab = s.get('ability', c.ability)
-            _oi = s.get('organization_id', c.organization_id)
-            _id = s.get('identity', c.identity)
-            _wk = s.get('weakness', c.weakness)
-            _sg = s.get('story_goal', c.story_goal)
-            _mo = s.get('motivation', c.motivation)
-            _ge = s.get('growth_experience', c.growth_experience)
-            _at = s.get('arc_type', c.arc_type)
-            _cc = s.get('character_change', c.character_change)
-            _cs = s.get('main_career_stage_desc', c.main_career_stage_desc)
+            _st = s.get("status", c.status)
+            _ms = s.get("mental_state", c.mental_state)
+            _ap = s.get("appearance", c.appearance)
+            _pe = s.get("personality", c.personality)
+            _bg = s.get("background", c.background)
+            _ab = s.get("ability", c.ability)
+            _oi = s.get("organization_id", c.organization_id)
+            _id = s.get("identity", c.identity)
+            _wk = s.get("weakness", c.weakness)
+            _sg = s.get("story_goal", c.story_goal)
+            _mo = s.get("motivation", c.motivation)
+            _ge = s.get("growth_experience", c.growth_experience)
+            _at = s.get("arc_type", c.arc_type)
+            _cc = s.get("character_change", c.character_change)
+            _cs = s.get("main_career_stage_desc", c.main_career_stage_desc)
             parts = [f"【{c.name}】{c.role}，{c.gender}，{c.age}岁"]
             if _id:
                 parts.append(f"  身份：{str(_id)[:100]}")
@@ -829,13 +1076,17 @@ class ChapterContextService:
 
         # 次要角色：仅名字+定位（一行一个，节省上下文）
         if minor_chars:
-            minor_names = [f"{c.name}（{c.role or '配角'}）" for c in minor_chars[:20]]  # 最多列20个
+            minor_names = [
+                f"{c.name}（{c.role or '配角'}）" for c in minor_chars[:20]
+            ]  # 最多列20个
             chars_info_parts.append("其他角色：" + "、".join(minor_names))
 
         characters_info = "\n\n".join(chars_info_parts) if chars_info_parts else "暂无角色信息"
 
         # 写作风格
-        proj = (await self.db.execute(select(Project).where(Project.id == self.project_id))).scalar_one_or_none()
+        proj = (
+            await self.db.execute(select(Project).where(Project.id == self.project_id))
+        ).scalar_one_or_none()
         writing_style = ""
         style_custom_prompt = ""
         style_traits = ""
@@ -849,8 +1100,12 @@ class ChapterContextService:
             # 提取用户自定义提示词（高级），单独注入让 AI 明确遵循
             style_custom_prompt = (ws.get("custom_prompt") or "").strip()
             # 三个区块开关（跟随 apply 快照；兼容旧 disable_dimensions）
-            style_enable_traits = ws.get("enable_traits") if ws.get("enable_traits") is not None else True
-            style_enable_custom = ws.get("enable_custom") if ws.get("enable_custom") is not None else True
+            style_enable_traits = (
+                ws.get("enable_traits") if ws.get("enable_traits") is not None else True
+            )
+            style_enable_custom = (
+                ws.get("enable_custom") if ws.get("enable_custom") is not None else True
+            )
             if ws.get("enable_dimensions") is not None:
                 style_enable_dimensions = bool(ws.get("enable_dimensions"))
             else:
@@ -863,7 +1118,10 @@ class ChapterContextService:
             _sid = ws.get("style_id")
             if isinstance(_sid, int):
                 from app.models.writing_style import WritingStyle as _WS
-                ws_row = (await db.execute(select(_WS).where(_WS.id == _sid))).scalar_one_or_none()
+
+                ws_row = (
+                    await self.db.execute(select(_WS).where(_WS.id == _sid))
+                ).scalar_one_or_none()
                 if ws_row:
                     latest_traits = ws_row.style_traits or {}
                     latest_ref = (ws_row.reference_text or "").strip()
@@ -874,8 +1132,12 @@ class ChapterContextService:
                 style_traits = json.dumps(_traits, ensure_ascii=False)
             elif isinstance(_traits, str) and _traits.strip():
                 style_traits = _traits.strip()
-            author_name = (latest_author if latest_author is not None else (ws.get("author_name") or "")).strip()
-            style_reference_text = (latest_ref if latest_ref is not None else (ws.get("reference_text") or "")).strip()
+            author_name = (
+                latest_author if latest_author is not None else (ws.get("author_name") or "")
+            ).strip()
+            style_reference_text = (
+                latest_ref if latest_ref is not None else (ws.get("reference_text") or "")
+            ).strip()
             writing_style = json.dumps(ws, ensure_ascii=False)
 
         return {
@@ -909,42 +1171,57 @@ class ChapterContextService:
         for m in memories:
             mem_by_type.setdefault(m.memory_type or "other", []).append(m.content)
         if mem_by_type:
-            relevant_memories = "\n".join([
-                f"[{t}] " + "；".join(items[:4])
-                for t, items in mem_by_type.items()
-            ])
+            relevant_memories = "\n".join(
+                [f"[{t}] " + "；".join(items[:4]) for t, items in mem_by_type.items()]
+            )
         else:
             relevant_memories = "暂无相关记忆"
 
         # 上一章关键事件：从剧情分析提取（对标原项目 key_events）
         prev_key_events = ""
-        prev_analysis = (await self.db.execute(
-            select(PlotAnalysis).where(
-                PlotAnalysis.project_id == self.project_id,
-                PlotAnalysis.chapter_number == chapter.chapter_number - 1,
+        prev_analysis = (
+            await self.db.execute(
+                select(PlotAnalysis).where(
+                    PlotAnalysis.project_id == self.project_id,
+                    PlotAnalysis.chapter_number == chapter.chapter_number - 1,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if prev_analysis:
             ev_parts = []
             # 剧情分析里的关键情节点
             if prev_analysis.key_plot_points:
-                for kp in (prev_analysis.key_plot_points if isinstance(prev_analysis.key_plot_points, list) else [])[:5]:
+                for kp in (
+                    prev_analysis.key_plot_points
+                    if isinstance(prev_analysis.key_plot_points, list)
+                    else []
+                )[:5]:
                     if isinstance(kp, dict):
                         ev_parts.append(f"- {kp.get('event', kp.get('title', str(kp)[:60]))}")
                     else:
                         ev_parts.append(f"- {str(kp)[:60]}")
             # 冲突进展
             if prev_analysis.conflicts:
-                for cf in (prev_analysis.conflicts if isinstance(prev_analysis.conflicts, list) else [])[:3]:
+                for cf in (
+                    prev_analysis.conflicts if isinstance(prev_analysis.conflicts, list) else []
+                )[:3]:
                     if isinstance(cf, dict) and cf.get("resolution_progress"):
-                        ev_parts.append(f"- 冲突: {cf.get('description', '')[:50]} → {cf['resolution_progress']}")
+                        ev_parts.append(
+                            f"- 冲突: {cf.get('description', '')[:50]} → {cf['resolution_progress']}"
+                        )
             # 角色状态变化
             if prev_analysis.character_states:
-                for cs in (prev_analysis.character_states if isinstance(prev_analysis.character_states, list) else [])[:3]:
+                for cs in (
+                    prev_analysis.character_states
+                    if isinstance(prev_analysis.character_states, list)
+                    else []
+                )[:3]:
                     if isinstance(cs, dict):
-                        ev_parts.append(f"- {cs.get('character', '')}: {cs.get('state_after', cs.get('change', str(cs)[:40]))}")
+                        ev_parts.append(
+                            f"- {cs.get('character', '')}: {cs.get('state_after', cs.get('change', str(cs)[:40]))}"
+                        )
             if ev_parts:
-                prev_key_events = f"【上一章关键事件/角色变化】\n" + "\n".join(ev_parts)
+                prev_key_events = "【上一章关键事件/角色变化】\n" + "\n".join(ev_parts)
 
         # 伏笔提醒（分层：必须回收/即将到期/其他）
         foreshadow_reminders = await self.foreshadow_service.get_foreshadow_reminders(

@@ -10,8 +10,8 @@
 - bge-small-zh-v1.5: 512 tokens ≈ 340 中文字（chunk 必须 < 400 字）
 - jina-v2-base-zh: 8192 tokens（不受限，但小 chunk 检索更精确）
 """
+
 import re
-from typing import List
 
 DEFAULT_MIN_CHUNK = 250
 DEFAULT_MAX_CHUNK = 400
@@ -23,7 +23,7 @@ def split_text_to_chunks(
     min_chunk_size: int = DEFAULT_MIN_CHUNK,
     max_chunk_size: int = DEFAULT_MAX_CHUNK,
     overlap_size: int = DEFAULT_OVERLAP,
-) -> List[str]:
+) -> list[str]:
     """将长文本切分为重叠的 chunk。
 
     Args:
@@ -84,17 +84,17 @@ def split_text_to_chunks(
     return chunks
 
 
-def _split_paragraphs(text: str) -> List[str]:
+def _split_paragraphs(text: str) -> list[str]:
     """按空行/换行切分段落。"""
-    parts = re.split(r'\n\s*\n', text)
+    parts = re.split(r"\n\s*\n", text)
     if len(parts) <= 1:
-        parts = text.split('\n')
+        parts = text.split("\n")
     return [p.strip() for p in parts if p.strip()]
 
 
-def _split_sentences(text: str) -> List[str]:
+def _split_sentences(text: str) -> list[str]:
     """按句号/问号/感叹号切分句子。"""
-    sentences = re.split(r'(?<=[。！？!?…\n])', text)
+    sentences = re.split(r"(?<=[。！？!?…\n])", text)
     return [s for s in sentences if s.strip()]
 
 
@@ -104,8 +104,8 @@ def _get_overlap(text: str, overlap_size: int) -> str:
         return text
     tail = text[-overlap_size:]
     for i, ch in enumerate(tail):
-        if ch in '。！？!?\n':
-            return tail[i + 1:]
+        if ch in "。！？!?\n":
+            return tail[i + 1 :]
     return tail
 
 

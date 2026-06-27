@@ -7,11 +7,12 @@
 消息格式：JSON { "type": "task_update", "task": {...} }
 心跳：服务端每 30 秒发送 {"type":"ping"}，客户端需回复 {"type":"pong"}
 """
-import json
+
 import asyncio
+import json
 import logging
-from typing import Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from app.core.auth import decode_token
 
@@ -98,7 +99,7 @@ async def ws_tasks(ws: WebSocket, token: str = Query(None)):
                 msg = json.loads(data)
                 if msg.get("type") == "pong":
                     continue
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # 30 秒无消息，发送 ping 保持连接
                 try:
                     await ws.send_text(json.dumps({"type": "ping"}))
@@ -112,12 +113,16 @@ async def ws_tasks(ws: WebSocket, token: str = Query(None)):
 
 # ===== 供其他模块调用的广播函数 =====
 
+
 async def broadcast_task_update(user_id: int, task_data: dict):
     """广播任务状态更新给指定用户。
 
     由 TaskProgressTracker.update/complete/fail 调用。
     """
-    await task_ws_manager.broadcast_to_user(user_id, {
-        "type": "task_update",
-        "task": task_data,
-    })
+    await task_ws_manager.broadcast_to_user(
+        user_id,
+        {
+            "type": "task_update",
+            "task": task_data,
+        },
+    )

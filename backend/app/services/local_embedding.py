@@ -7,8 +7,9 @@
 
 设计：单例懒加载（首次使用时初始化），提供 sync 的 embed 方法。
 """
-import os
+
 import logging
+import os
 import threading
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,10 @@ def _get_model():
             return _model
         try:
             from fastembed import TextEmbedding
+
             logger.info(f"[embedding] 正在加载本地模型 {DEFAULT_MODEL}（首次需下载）...")
             _model = TextEmbedding(model_name=DEFAULT_MODEL)
-            logger.info(f"[embedding] 本地模型加载完成，维度 512")
+            logger.info("[embedding] 本地模型加载完成，维度 512")
             return _model
         except ImportError:
             _init_error = "fastembed 未安装（pip install fastembed）"

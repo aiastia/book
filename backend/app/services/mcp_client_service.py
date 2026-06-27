@@ -1,9 +1,10 @@
 """MCP 客户端服务：连接外部 MCP Server，获取工具列表，执行工具调用。"""
+
 import json
 import logging
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.mcp_server import McpServer
 
@@ -43,9 +44,13 @@ class McpClientService:
 
     async def execute_tool(self, server_id: int, tool_name: str, arguments: dict) -> str:
         """在指定 MCP Server 上执行工具。"""
-        server = (await self.db.execute(
-            select(McpServer).where(McpServer.id == server_id, McpServer.user_id == self.user_id)
-        )).scalar_one_or_none()
+        server = (
+            await self.db.execute(
+                select(McpServer).where(
+                    McpServer.id == server_id, McpServer.user_id == self.user_id
+                )
+            )
+        ).scalar_one_or_none()
         if not server:
             return json.dumps({"error": "MCP Server 不存在"})
         try:
@@ -57,21 +62,17 @@ class McpClientService:
     async def _discover_tools(self, server_dict: dict) -> list[dict]:
         """从 MCP Server 发现工具列表。"""
         import aiohttp
+
         url = server_dict["url"].rstrip("/")
         api_key = (server_dict.get("config", {}) or {}).get("api_key", "")
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["X-Api-Key"] = api_key
             headers["Authorization"] = f"Bearer {api_key}"
-        
+
         async with aiohttp.ClientSession() as session:
             # MCP streamable-http: POST /mcp with method=tools/list
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/list",
-                "params": {}
-            }
+            payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
             try:
                 async with session.post(
                     f"{url}/mcp" if "/mcp" not in url else url,
@@ -97,37 +98,42 @@ class McpClientService:
                             return []
                 except Exception:
                     return []
-        
+
         # 转换为 OpenAI function calling 格式
         openai_tools = []
         for tool in tools:
             name = tool.get("name", "")
             desc = tool.get("description", "")
             schema = tool.get("inputSchema", tool.get("parameters", {}))
-            openai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": f"mcp_{name}",
-                    "description": f"[MCP:{server_dict['name']}] {desc}",
-                    "parameters": {
-                        "type": "object",
-                        "properties": schema.get("properties", {}),
-                        "required": schema.get("required", []),
-                    } if schema.get("properties") else {"type": "object", "properties": {}}
+            openai_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": f"mcp_{name}",
+                        "description": f"[MCP:{server_dict['name']}] {desc}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": schema.get("properties", {}),
+                            "required": schema.get("required", []),
+                        }
+                        if schema.get("properties")
+                        else {"type": "object", "properties": {}},
+                    },
                 }
-            })
+            )
         return openai_tools
 
     async def _call_tool(self, server: McpServer, tool_name: str, arguments: dict) -> str:
         """调用 MCP 工具。"""
         import aiohttp
+
         url = server.url.rstrip("/")
         api_key = (server.config or {}).get("api_key", "")
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["X-Api-Key"] = api_key
             headers["Authorization"] = f"Bearer {api_key}"
-        
+
         async with aiohttp.ClientSession() as session:
             payload = {
                 "jsonrpc": "2.0",
@@ -136,7 +142,7 @@ class McpClientService:
                 "params": {
                     "name": tool_name,
                     "arguments": arguments,
-                }
+                },
             }
             async with session.post(
                 f"{url}/mcp" if "/mcp" not in url else url,

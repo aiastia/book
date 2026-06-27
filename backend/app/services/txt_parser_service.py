@@ -5,8 +5,9 @@
 - 文本清洗：换行归一、压缩空行
 - 章节切分：强标题（第X章）+ 弱标题（短行+前后空行）+ 兜底窗口
 """
-import re
+
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -90,20 +91,25 @@ def split_chapters(text: str) -> list[dict]:
             content_start = start + 1
             content_end = title_positions[idx + 1] if idx + 1 < len(title_positions) else len(lines)
             content = "\n".join(lines[content_start:content_end]).strip()
-            chapters.append({
-                "chapter_number": idx + 1,
-                "title": title,
-                "content": content,
-            })
+            chapters.append(
+                {
+                    "chapter_number": idx + 1,
+                    "title": title,
+                    "content": content,
+                }
+            )
         # 标题前的内容作为前言
         if title_positions[0] > 0:
-            preface = "\n".join(lines[:title_positions[0]]).strip()
+            preface = "\n".join(lines[: title_positions[0]]).strip()
             if len(preface) > 100:
-                chapters.insert(0, {
-                    "chapter_number": 0,
-                    "title": "前言",
-                    "content": preface,
-                })
+                chapters.insert(
+                    0,
+                    {
+                        "chapter_number": 0,
+                        "title": "前言",
+                        "content": preface,
+                    },
+                )
         return chapters
 
     # 第二遍：弱标题
@@ -121,11 +127,13 @@ def split_chapters(text: str) -> list[dict]:
             content_start = start + 1
             content_end = title_positions[idx + 1] if idx + 1 < len(title_positions) else len(lines)
             content = "\n".join(lines[content_start:content_end]).strip()
-            chapters.append({
-                "chapter_number": idx + 1,
-                "title": title,
-                "content": content,
-            })
+            chapters.append(
+                {
+                    "chapter_number": idx + 1,
+                    "title": title,
+                    "content": content,
+                }
+            )
         return chapters
 
     # 第三遍：固定窗口兜底（每 3000-5000 字一章，按段落边界切）
@@ -139,20 +147,24 @@ def split_chapters(text: str) -> list[dict]:
         current.append(para)
         current_len += len(para)
         if current_len >= WINDOW:
-            chapters.append({
-                "chapter_number": ch_num,
-                "title": f"第{ch_num}章",
-                "content": "\n\n".join(current).strip(),
-            })
+            chapters.append(
+                {
+                    "chapter_number": ch_num,
+                    "title": f"第{ch_num}章",
+                    "content": "\n\n".join(current).strip(),
+                }
+            )
             current = []
             current_len = 0
             ch_num += 1
     if current:
-        chapters.append({
-            "chapter_number": ch_num,
-            "title": f"第{ch_num}章",
-            "content": "\n\n".join(current).strip(),
-        })
+        chapters.append(
+            {
+                "chapter_number": ch_num,
+                "title": f"第{ch_num}章",
+                "content": "\n\n".join(current).strip(),
+            }
+        )
     return chapters
 
 
@@ -166,6 +178,9 @@ def parse_txt_file(raw: bytes) -> dict:
         "stats": {
             "total_chars": len(text),
             "chapter_count": len(chapters),
-            "has_strong_titles": any(c.get("chapter_number", 0) > 0 and c.get("title", "").startswith("第") for c in chapters),
+            "has_strong_titles": any(
+                c.get("chapter_number", 0) > 0 and c.get("title", "").startswith("第")
+                for c in chapters
+            ),
         },
     }

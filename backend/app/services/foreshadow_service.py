@@ -1,9 +1,10 @@
 """伏笔管理服务"""
-from typing import Optional
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
-from app.models.foreshadow import Foreshadow
+
 from app.core.config import settings
+from app.models.foreshadow import Foreshadow
 
 
 class ForeshadowService:
@@ -18,7 +19,7 @@ class ForeshadowService:
         await self.db.refresh(fs)
         return fs
 
-    async def get(self, foreshadow_id: int) -> Optional[Foreshadow]:
+    async def get(self, foreshadow_id: int) -> Foreshadow | None:
         result = await self.db.execute(
             select(Foreshadow).where(
                 Foreshadow.id == foreshadow_id,
@@ -35,7 +36,7 @@ class ForeshadowService:
         result = await self.db.execute(q)
         return list(result.scalars().all())
 
-    async def update(self, foreshadow_id: int, data: dict) -> Optional[Foreshadow]:
+    async def update(self, foreshadow_id: int, data: dict) -> Foreshadow | None:
         fs = await self.get(foreshadow_id)
         if not fs:
             return None
@@ -67,7 +68,9 @@ class ForeshadowService:
         )
         return list(result.scalars().all())
 
-    async def get_pending_resolve_foreshadows(self, chapter_number: int, lookahead: int = None) -> list[Foreshadow]:
+    async def get_pending_resolve_foreshadows(
+        self, chapter_number: int, lookahead: int = None
+    ) -> list[Foreshadow]:
         """获取即将到期的伏笔（未来 lookahead 章内需回收）"""
         lookahead = lookahead or settings.FORESHADOW_LOOKAHEAD
         result = await self.db.execute(
@@ -119,7 +122,9 @@ class ForeshadowService:
         if pending_resolve:
             lines = ["⏰ 【即将到期伏笔】"]
             for fs in pending_resolve:
-                lines.append(f"  - 第{fs.target_resolve_chapter_number}章前需回收: {fs.title} - {fs.content}")
+                lines.append(
+                    f"  - 第{fs.target_resolve_chapter_number}章前需回收: {fs.title} - {fs.content}"
+                )
             parts.append("\n".join(lines))
 
         # 3. 超期未回收的伏笔
@@ -127,7 +132,9 @@ class ForeshadowService:
         if overdue:
             lines = ["⚠️ 【超期未回收伏笔】"]
             for fs in overdue:
-                lines.append(f"  - {fs.title}（第{fs.actual_plant_chapter or '?'}章埋入，已超期）: {fs.content}")
+                lines.append(
+                    f"  - {fs.title}（第{fs.actual_plant_chapter or '?'}章埋入，已超期）: {fs.content}"
+                )
             parts.append("\n".join(lines))
 
         # 4. 本章应埋入的伏笔（新增！）
@@ -135,7 +142,9 @@ class ForeshadowService:
         if pending_plant:
             lines = ["🌱 【本章应埋入的伏笔】"]
             for fs in pending_plant:
-                lines.append(f"  - {fs.title}: {fs.content}（计划在第{fs.plant_chapter_number}章埋入，第{fs.target_resolve_chapter_number or '?'}章回收）")
+                lines.append(
+                    f"  - {fs.title}: {fs.content}（计划在第{fs.plant_chapter_number}章埋入，第{fs.target_resolve_chapter_number or '?'}章回收）"
+                )
             parts.append("\n".join(lines))
 
         return "\n\n".join(parts) if parts else "暂无伏笔提醒"
@@ -160,9 +169,12 @@ class ForeshadowService:
         """
         fs_list = await self.list_all()
         to_delete = [
-            f for f in fs_list
+            f
+            for f in fs_list
             if f.source_type == "analysis"
-            and (f.actual_plant_chapter == chapter_number or f.plant_chapter_number == chapter_number)
+            and (
+                f.actual_plant_chapter == chapter_number or f.plant_chapter_number == chapter_number
+            )
         ]
         for f in to_delete:
             await self.db.delete(f)
@@ -176,20 +188,26 @@ class ForeshadowService:
             fs_type = fs_data.get("type", "")
             title = fs_data.get("title", "")
             # 字段兼容：detail / content / description 都接受
-            detail = fs_data.get("detail") or fs_data.get("content") or fs_data.get("description") or ""
+            detail = (
+                fs_data.get("detail") or fs_data.get("content") or fs_data.get("description") or ""
+            )
             ref_id = fs_data.get("reference_foreshadow_id")
             # 兼容 "f1" / "1" 格式 → 纯数字
             if isinstance(ref_id, str):
                 ref_id = ref_id.lstrip("fF")
-                try: ref_id = int(ref_id)
-                except ValueError: ref_id = None
+                try:
+                    ref_id = int(ref_id)
+                except ValueError:
+                    ref_id = None
             fs_subtype = fs_data.get("foreshadow_type", "")
             importance = fs_data.get("importance") or fs_data.get("priority") or 5
             target_resolve = fs_data.get("target_resolve_chapter_number")
             # 解析关联角色（AI 新增字段）
             related_chars = fs_data.get("related_characters") or []
             if isinstance(related_chars, str):
-                related_chars = [c.strip() for c in related_chars.replace("、", ",").split(",") if c.strip()]
+                related_chars = [
+                    c.strip() for c in related_chars.replace("、", ",").split(",") if c.strip()
+                ]
 
             def _merge_related(fs_obj):
                 """把 related_chars 合并进 fs_obj.structure.related_characters"""
@@ -270,9 +288,12 @@ class ForeshadowService:
 
         await self.db.commit()
 
-    async def plan_foreshadows_from_outlines(self, ai_client, outlines_data: str, characters_info: str, user_id: int = None) -> list[dict]:
+    async def plan_foreshadows_from_outlines(
+        self, ai_client, outlines_data: str, characters_info: str, user_id: int = None
+    ) -> list[dict]:
         """AI 根据大纲自动规划伏笔"""
         from app.skills.engine import SkillEngine
+
         engine = SkillEngine(self.db, user_id)
         result = await engine.execute_skill(
             "foreshadow_plan",
@@ -305,10 +326,17 @@ class ForeshadowService:
             }
             # 扩展字段存入 structure（含关联角色、暗示文本、重要性等）
             extension_keys = {
-                "importance", "strength", "concealment", "is_long_term",
-                "hint_text", "notes", "design_reason",
+                "importance",
+                "strength",
+                "concealment",
+                "is_long_term",
+                "hint_text",
+                "notes",
+                "design_reason",
                 "related_characters",
-                "auto_remind", "include_in_context", "remind_before_chapters",
+                "auto_remind",
+                "include_in_context",
+                "remind_before_chapters",
             }
             structure = {}
             for k in extension_keys:
@@ -316,23 +344,25 @@ class ForeshadowService:
                     structure[k] = item[k]
             base_fields["structure"] = structure
             fs = await self.create(base_fields)
-            created.append({
-                "id": fs.id,
-                "title": fs.title,
-                "content": fs.content,
-                "foreshadow_type": fs.foreshadow_type,
-                "plant_chapter_number": fs.plant_chapter_number,
-                "target_resolve_chapter_number": fs.target_resolve_chapter_number,
-                "priority": fs.priority,
-                "structure": fs.structure,
-            })
+            created.append(
+                {
+                    "id": fs.id,
+                    "title": fs.title,
+                    "content": fs.content,
+                    "foreshadow_type": fs.foreshadow_type,
+                    "plant_chapter_number": fs.plant_chapter_number,
+                    "target_resolve_chapter_number": fs.target_resolve_chapter_number,
+                    "priority": fs.priority,
+                    "structure": fs.structure,
+                }
+            )
         return created
 
     # ===== #15 伏笔闭环操作 =====
 
     async def mark_as_planted(
         self, foreshadow_id: int, chapter_number: int, hint_text: str = ""
-    ) -> Optional[Foreshadow]:
+    ) -> Foreshadow | None:
         """标记伏笔为已埋入。"""
         fs = await self.get(foreshadow_id)
         if not fs:
@@ -345,9 +375,12 @@ class ForeshadowService:
         return fs
 
     async def mark_as_resolved(
-        self, foreshadow_id: int, chapter_number: int,
-        resolution_text: str = "", is_partial: bool = False,
-    ) -> Optional[Foreshadow]:
+        self,
+        foreshadow_id: int,
+        chapter_number: int,
+        resolution_text: str = "",
+        is_partial: bool = False,
+    ) -> Foreshadow | None:
         """标记伏笔为已回收。is_partial=True 时标记为 partially_resolved。"""
         fs = await self.get(foreshadow_id)
         if not fs:
@@ -355,13 +388,13 @@ class ForeshadowService:
         fs.status = "partially_resolved" if is_partial else "resolved"
         fs.actual_resolve_chapter = chapter_number
         if resolution_text:
-            fs.resolution_text = resolution_text if hasattr(fs, "resolution_text") else resolution_text
+            fs.resolution_text = (
+                resolution_text if hasattr(fs, "resolution_text") else resolution_text
+            )
         await self.db.commit()
         return fs
 
-    async def mark_as_abandoned(
-        self, foreshadow_id: int, reason: str = ""
-    ) -> Optional[Foreshadow]:
+    async def mark_as_abandoned(self, foreshadow_id: int, reason: str = "") -> Foreshadow | None:
         """放弃伏笔。"""
         fs = await self.get(foreshadow_id)
         if not fs:
@@ -393,6 +426,7 @@ class ForeshadowService:
     ) -> dict:
         """从多个章节的剧情分析批量同步伏笔状态。"""
         from app.models.plot_analysis import PlotAnalysis
+
         session = db or self.db
         q = select(PlotAnalysis).where(PlotAnalysis.project_id == project_id)
         if chapter_ids:
@@ -400,7 +434,7 @@ class ForeshadowService:
         analyses = (await session.execute(q)).scalars().all()
         planted = resolved = 0
         for a in analyses:
-            for fs_data in (a.foreshadows or []):
+            for fs_data in a.foreshadows or []:
                 if not isinstance(fs_data, dict):
                     continue
                 fs_type = fs_data.get("type", "")
@@ -408,8 +442,10 @@ class ForeshadowService:
                 # 兼容 "f1" / "1" 格式 → 纯数字
                 if isinstance(ref_id, str):
                     ref_id = ref_id.lstrip("fF")
-                    try: ref_id = int(ref_id)
-                    except ValueError: ref_id = None
+                    try:
+                        ref_id = int(ref_id)
+                    except ValueError:
+                        ref_id = None
                 title = fs_data.get("title", "")
                 if fs_type == "planted" and ref_id:
                     fs = await self.get(ref_id)

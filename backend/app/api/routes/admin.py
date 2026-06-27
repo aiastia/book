@@ -3,14 +3,16 @@
 对标 MuMuAINovel admin.py + settings.py（系统级部分）。
 所有端点需 is_admin 校验。
 """
+
 import secrets
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.core.auth import get_current_user, get_password_hash
+from app.core.database import get_db
 from app.models.user import User
 
 router = APIRouter(prefix="/api/admin", tags=["管理后台"])
@@ -57,7 +59,12 @@ async def list_users(
     total = await db.scalar(select(func.count()).select_from(q.subquery()))
     q = q.order_by(User.id.asc()).offset((page - 1) * page_size).limit(page_size)
     users = (await db.execute(q)).scalars().all()
-    return {"items": [_user_dict(u) for u in users], "total": total or 0, "page": page, "page_size": page_size}
+    return {
+        "items": [_user_dict(u) for u in users],
+        "total": total or 0,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 class CreateUserReq(BaseModel):
@@ -75,7 +82,9 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
 ):
     """创建用户（管理员）。"""
-    existing = (await db.execute(select(User).where(User.username == req.username))).scalar_one_or_none()
+    existing = (
+        await db.execute(select(User).where(User.username == req.username))
+    ).scalar_one_or_none()
     if existing:
         raise HTTPException(400, "用户名已存在")
     pwd = req.password or secrets.token_urlsafe(12)
@@ -102,7 +111,8 @@ class UpdateUserReq(BaseModel):
 
 @router.put("/users/{user_id}")
 async def update_user(
-    user_id: int, req: UpdateUserReq,
+    user_id: int,
+    req: UpdateUserReq,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -171,8 +181,9 @@ async def admin_stats(
     db: AsyncSession = Depends(get_db),
 ):
     """系统统计（管理员）。"""
-    from app.models.project import Project
     from app.models.chapter import Chapter
+    from app.models.project import Project
+
     user_count = await db.scalar(select(func.count(User.id)))
     project_count = await db.scalar(select(func.count(Project.id)))
     chapter_count = await db.scalar(select(func.count(Chapter.id)))
@@ -263,8 +274,8 @@ async def test_smtp(
 ):
     """发送测试邮件（管理员）。"""
     import smtplib
-    from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
     admin_user = await _get_admin_user(db, admin)
     smtp = (admin_user.settings or {}).get("smtp", {})
@@ -283,7 +294,9 @@ async def test_smtp(
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = req.to_email
     msg["Subject"] = "墨语 - 测试邮件"
-    msg.attach(MIMEText("这是一封来自墨语的测试邮件，如果您收到说明 SMTP 配置正确。", "plain", "utf-8"))
+    msg.attach(
+        MIMEText("这是一封来自墨语的测试邮件，如果您收到说明 SMTP 配置正确。", "plain", "utf-8")
+    )
 
     try:
         if use_ssl:

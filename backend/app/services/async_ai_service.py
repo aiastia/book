@@ -17,8 +17,10 @@
     )
     return {"task_id": task_id}
 """
+
 import asyncio
-from typing import Callable, Optional
+from collections.abc import Callable
+
 from app.services import background_task_service as bg_service
 
 

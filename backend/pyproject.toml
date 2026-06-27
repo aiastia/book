@@ -46,18 +46,28 @@ extend-exclude = [
 #   N   pep8-naming（命名规范）
 select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "N"]
 
-# 暂时忽略的规则（分析时不过度打扰，可按需收紧）:
-#   E501 行太长 —— format 会处理大部分，长字符串/URL 不强求
-#   B008 函数默认参数中调用函数 —— FastAPI Depends() 的标准用法
+# 全局忽略的规则（本项目技术栈相关，非代码质量问题）:
+#   E501   行太长 —— format 会处理大部分，长字符串/URL 不强求
+#   B008   函数默认参数中调用函数 —— FastAPI Depends() 的标准用法
+#   E712   与 True/False 比较 —— SQLAlchemy 查询 .where(Col == True) 是必须写法
+#   SIM114 多分支相同 —— 有时为了可读性刻意分开
 ignore = [
     "E501",
     "B008",
+    "E712",
+    "SIM114",
 ]
 
-# 每条规则默认最多显示的修复建议数量
+# ------------------------------------------------------------
+# 按文件的忽略规则
+# ------------------------------------------------------------
 [tool.ruff.lint.per-file-ignores]
 # 测试文件放宽部分规则
 "tests/**" = ["B011"]  # assert False 在测试中是合法的
+# projects_pkg 子包：从 base.py `import *` 是刻意的代码复用模式
+# （base.py 集中导出 Pydantic schema、模型、辅助函数），豁免 star-import 相关噪音
+# 但保留其他规则（F401 真正未用的导入仍会报、B904 等仍会报）
+"app/api/routes/projects_pkg/*.py" = ["F403", "F405"]
 
 # ------------------------------------------------------------
 # 格式化配置（format，兼容 Black 风格）
@@ -66,3 +76,46 @@ ignore = [
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
+
+
+# ============================================================
+# Vulture 配置（死代码检测）
+# 文档: https://github.com/jendrikseipp/vulture
+# 本地使用: cd backend && vulture app/
+# ============================================================
+[tool.vulture]
+# 最小置信度（0-100）。低于此值的报告会被过滤，减少误报。
+# 默认 60。FastAPI/SQLAlchemy 项目误报较多，设 80 更实用。
+min_confidence = 80
+# 只分析 app 目录（排除 venv/data/migrations 等）
+paths = ["app"]
+# 排除的路径
+exclude = ["venv", ".venv", "data", "__pycache__", "build", "dist"]
+# 忽略被这些装饰器修饰的函数/方法（避免误判为未使用）
+ignore_decorators = [
+    # FastAPI 路由（单引号字面串，反斜杠无需转义）
+    '@app.route',
+    '@.*\.get',
+    '@.*\.post',
+    '@.*\.put',
+    '@.*\.delete',
+    '@.*\.patch',
+    '@.*\.websocket',
+    # 标准装饰器
+    '@property',
+    '@staticmethod',
+    '@classmethod',
+    '@abstractmethod',
+    # Pytest
+    '@pytest.fixture',
+    '@.*\.mark\.',
+]
+# 忽略这些名称（避免误判）
+ignore_names = [
+    # SQLAlchemy / Pydantic 常用
+    "__tablename__",
+    "__table_args__",
+    "__init_subclass__",
+    # dunder 方法（通常被框架调用）
+    "__*__",
+]

@@ -1,6 +1,9 @@
 """章节模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Float
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -21,7 +24,9 @@ class Chapter(Base):
     expansion_plan = Column(JSON, default=dict)  # 1-N 模式的扩展计划
     quality_score = Column(Float, nullable=True)  # 综合质量评分
     quality_detail = Column(JSON, default=dict)  # 评分明细
-    quality_alert = Column(String(50), default="")  # 质量告警：low_score/consistency_issue/low_coherence
+    quality_alert = Column(
+        String(50), default=""
+    )  # 质量告警：low_score/consistency_issue/low_coherence
     generation_history = Column(JSON, default=list)  # 生成历史记录
     style_config = Column(JSON, default=dict)  # 本章写作风格覆盖
     created_at = Column(DateTime, default=datetime.utcnow)

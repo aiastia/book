@@ -1,13 +1,16 @@
 """项目 CRUD：创建/列表/详情/更新/删除/导入导出"""
-from datetime import datetime
-from app.api.routes.projects_pkg.base import *
 
+from datetime import datetime
+
+from app.api.routes.projects_pkg.base import *
 
 router = make_router()
 
 
 @router.post("")
-async def create_project(req: ProjectCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_project(
+    req: ProjectCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     project = Project(user_id=user.id, **req.model_dump())
     db.add(project)
     await db.commit()
@@ -26,7 +29,11 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
     chapter_counts = {}
     if projects:
         rows = await db.execute(
-            select(Chapter.project_id, func.coalesce(func.sum(Chapter.word_count), 0), func.count(Chapter.id))
+            select(
+                Chapter.project_id,
+                func.coalesce(func.sum(Chapter.word_count), 0),
+                func.count(Chapter.id),
+            )
             .where(Chapter.project_id.in_([p.id for p in projects]))
             .group_by(Chapter.project_id)
         )
@@ -54,16 +61,18 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
 
 
 @router.get("/{project_id}")
-async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_project(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     p = await get_user_project(db, project_id, user)
     # 动态计算当前总字数 + 实际章节数（从 chapters 表查，不依赖项目表的静态字段）
     word_sum = await db.scalar(
-        select(func.coalesce(func.sum(Chapter.word_count), 0))
-        .where(Chapter.project_id == project_id)
+        select(func.coalesce(func.sum(Chapter.word_count), 0)).where(
+            Chapter.project_id == project_id
+        )
     )
     actual_chapter_count = await db.scalar(
-        select(func.count(Chapter.id))
-        .where(Chapter.project_id == project_id)
+        select(func.count(Chapter.id)).where(Chapter.project_id == project_id)
     )
     return {
         "id": p.id,
@@ -84,7 +93,12 @@ async def get_project(project_id: int, db: AsyncSession = Depends(get_db), user=
 
 
 @router.put("/{project_id}")
-async def update_project(project_id: int, req: ProjectUpdate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def update_project(
+    project_id: int,
+    req: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     p = await get_user_project(db, project_id, user)
     for key, value in req.model_dump(exclude_unset=True).items():
         setattr(p, key, value)
@@ -93,27 +107,44 @@ async def update_project(project_id: int, req: ProjectUpdate, db: AsyncSession =
 
 
 @router.delete("/{project_id}")
-async def delete_project(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def delete_project(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """删除项目（级联删除所有关联数据）"""
     await get_user_project(db, project_id, user)
     # 级联删除关联数据（SQLite 不一定有 ON DELETE CASCADE，手动删更稳）
-    from app.models.outline import Outline
+
+    from app.models.career import Career
     from app.models.character import Character, CharacterRelation
-    from app.models.world import WorldSetting
-    from app.models.organization import Organization
     from app.models.foreshadow import Foreshadow
+    from app.models.organization import Organization
+    from app.models.outline import Outline
     from app.models.plot_analysis import PlotAnalysis
     from app.models.story_memory import StoryMemory
-    from app.models.career import Career
-    from app.models.writing_style import WritingStyle
-    import json
+    from app.models.world import WorldSetting
 
-    for Model in [Chapter, Outline, Character, CharacterRelation, WorldSetting,
-                  Organization, Foreshadow, PlotAnalysis, StoryMemory, Career]:
-        items = (await db.execute(select(Model).where(Model.project_id == project_id))).scalars().all()
+    for Model in [
+        Chapter,
+        Outline,
+        Character,
+        CharacterRelation,
+        WorldSetting,
+        Organization,
+        Foreshadow,
+        PlotAnalysis,
+        StoryMemory,
+        Career,
+    ]:
+        items = (
+            (await db.execute(select(Model).where(Model.project_id == project_id))).scalars().all()
+        )
         for it in items:
             await db.delete(it)
-    p = (await db.execute(select(Project).where(Project.id == project_id, Project.user_id == user.id))).scalar_one_or_none()
+    p = (
+        await db.execute(
+            select(Project).where(Project.id == project_id, Project.user_id == user.id)
+        )
+    ).scalar_one_or_none()
     if p:
         await db.delete(p)
     await db.commit()
@@ -124,7 +155,8 @@ async def delete_project(project_id: int, db: AsyncSession = Depends(get_db), us
 async def export_project(
     project_id: int,
     format: str = "json",  # json / txt
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """导出项目完整数据。
 
@@ -132,35 +164,54 @@ async def export_project(
     format=txt：整书纯文本导出
     """
     p = await get_user_project(db, project_id, user)
-    from app.models.outline import Outline
-    from app.models.character import Character, CharacterRelation
-    from app.models.world import WorldSetting
-    from app.models.organization import Organization
-    from app.models.organization_member import OrganizationMember
-    from app.models.foreshadow import Foreshadow
+    from fastapi.responses import PlainTextResponse
+
     from app.models.career import Career
+    from app.models.character import Character, CharacterRelation
+    from app.models.foreshadow import Foreshadow
     from app.models.item import Item
     from app.models.location import Location
-    from app.models.story_memory import StoryMemory
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
+    from app.models.outline import Outline
     from app.models.plot_analysis import PlotAnalysis
-    from fastapi.responses import PlainTextResponse
+    from app.models.story_memory import StoryMemory
+    from app.models.world import WorldSetting
 
     def to_dict(obj):
         if not obj:
             return None
-        return {c.name: getattr(obj, c.name) for c in obj.__table__.columns
-                if c.name not in ('created_at', 'updated_at')}
+        return {
+            c.name: getattr(obj, c.name)
+            for c in obj.__table__.columns
+            if c.name not in ("created_at", "updated_at")
+        }
 
     def list_dicts(items):
-        return [{c.name: getattr(it, c.name) for c in it.__table__.columns
-                 if c.name not in ('id', 'project_id', 'created_at', 'updated_at')} for it in items]
+        return [
+            {
+                c.name: getattr(it, c.name)
+                for c in it.__table__.columns
+                if c.name not in ("id", "project_id", "created_at", "updated_at")
+            }
+            for it in items
+        ]
 
     # TXT 整书导出
     if format == "txt":
         from urllib.parse import quote
-        chapters = (await db.execute(
-            select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
-        )).scalars().all()
+
+        chapters = (
+            (
+                await db.execute(
+                    select(Chapter)
+                    .where(Chapter.project_id == project_id)
+                    .order_by(Chapter.chapter_number)
+                )
+            )
+            .scalars()
+            .all()
+        )
         lines = [p.title or "未命名", ""]
         lines.append("=" * 40)
         for ch in chapters:
@@ -169,24 +220,91 @@ async def export_project(
             lines.append("")
         safe_name = quote(p.title or "book", safe="")
         return PlainTextResponse(
-            "\n".join(lines), media_type="text/plain; charset=utf-8",
+            "\n".join(lines),
+            media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_name}.txt"},
         )
 
     # 全量 JSON 导出
-    worlds = (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id))).scalars().all()
-    chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
-    rels = (await db.execute(select(CharacterRelation).where(CharacterRelation.project_id == project_id))).scalars().all()
-    orgs = (await db.execute(select(Organization).where(Organization.project_id == project_id))).scalars().all()
-    members = (await db.execute(select(OrganizationMember).where(OrganizationMember.project_id == project_id))).scalars().all()
-    outlines = (await db.execute(select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number))).scalars().all()
-    chapters = (await db.execute(select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number))).scalars().all()
-    foreshadows = (await db.execute(select(Foreshadow).where(Foreshadow.project_id == project_id))).scalars().all()
-    careers = (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
+    worlds = (
+        (await db.execute(select(WorldSetting).where(WorldSetting.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    chars = (
+        (await db.execute(select(Character).where(Character.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    rels = (
+        (
+            await db.execute(
+                select(CharacterRelation).where(CharacterRelation.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    orgs = (
+        (await db.execute(select(Organization).where(Organization.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    members = (
+        (
+            await db.execute(
+                select(OrganizationMember).where(OrganizationMember.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    outlines = (
+        (
+            await db.execute(
+                select(Outline)
+                .where(Outline.project_id == project_id)
+                .order_by(Outline.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    chapters = (
+        (
+            await db.execute(
+                select(Chapter)
+                .where(Chapter.project_id == project_id)
+                .order_by(Chapter.chapter_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    foreshadows = (
+        (await db.execute(select(Foreshadow).where(Foreshadow.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    careers = (
+        (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
+    )
     items = (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
-    locations = (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
-    memories = (await db.execute(select(StoryMemory).where(StoryMemory.project_id == project_id))).scalars().all()
-    analyses = (await db.execute(select(PlotAnalysis).where(PlotAnalysis.project_id == project_id))).scalars().all()
+    locations = (
+        (await db.execute(select(Location).where(Location.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    memories = (
+        (await db.execute(select(StoryMemory).where(StoryMemory.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    analyses = (
+        (await db.execute(select(PlotAnalysis).where(PlotAnalysis.project_id == project_id)))
+        .scalars()
+        .all()
+    )
 
     return {
         "project": to_dict(p),
@@ -209,20 +327,22 @@ async def export_project(
 
 
 @router.post("/import")
-async def import_project(req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def import_project(
+    req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """导入项目数据（从 export 的 JSON 恢复，创建为新项目，含全量表 #22）。"""
-    from app.models.outline import Outline
-    from app.models.character import Character, CharacterRelation
-    from app.models.world import WorldSetting
-    from app.models.organization import Organization
-    from app.models.organization_member import OrganizationMember
-    from app.models.foreshadow import Foreshadow
+
     from app.models.career import Career
+    from app.models.character import Character, CharacterRelation
+    from app.models.foreshadow import Foreshadow
     from app.models.item import Item
     from app.models.location import Location
-    from app.models.story_memory import StoryMemory
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
+    from app.models.outline import Outline
     from app.models.plot_analysis import PlotAnalysis
-    from datetime import datetime
+    from app.models.story_memory import StoryMemory
+    from app.models.world import WorldSetting
 
     proj_data = req.get("project", {})
     # 创建新项目（不沿用原 id）
@@ -302,17 +422,20 @@ async def import_project(req: dict, db: AsyncSession = Depends(get_db), user=Dep
 # ========== 思考模式设置 ==========
 
 THINKING_MODES_DEFAULTS = {
-    "world":     {"enabled": False, "reasoning_effort": "high", "temperature": None},
+    "world": {"enabled": False, "reasoning_effort": "high", "temperature": None},
     "character": {"enabled": False, "reasoning_effort": "high", "temperature": None},
-    "outline":   {"enabled": False, "reasoning_effort": "high", "temperature": None},
-    "expand":    {"enabled": False, "reasoning_effort": "low",  "temperature": None},
-    "chapter":   {"enabled": False, "reasoning_effort": "none", "temperature": None},
-    "polish":    {"enabled": False, "reasoning_effort": "none", "temperature": None},
-    "analysis":  {"enabled": False, "reasoning_effort": "high", "temperature": None},
+    "outline": {"enabled": False, "reasoning_effort": "high", "temperature": None},
+    "expand": {"enabled": False, "reasoning_effort": "low", "temperature": None},
+    "chapter": {"enabled": False, "reasoning_effort": "none", "temperature": None},
+    "polish": {"enabled": False, "reasoning_effort": "none", "temperature": None},
+    "analysis": {"enabled": False, "reasoning_effort": "high", "temperature": None},
 }
 
+
 @router.get("/{project_id}/thinking-modes")
-async def get_thinking_modes(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_thinking_modes(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     proj = await get_user_project(db, project_id, user)
     settings = dict(proj.settings or {})
     modes = settings.get("thinking_modes", THINKING_MODES_DEFAULTS)
@@ -322,8 +445,11 @@ async def get_thinking_modes(project_id: int, db: AsyncSession = Depends(get_db)
             modes[k] = v
     return {"modes": modes}
 
+
 @router.put("/{project_id}/thinking-modes")
-async def update_thinking_modes(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def update_thinking_modes(
+    project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     proj = await get_user_project(db, project_id, user)
     settings = dict(proj.settings or {})
     settings["thinking_modes"] = req.get("modes", THINKING_MODES_DEFAULTS)

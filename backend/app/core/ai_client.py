@@ -1,9 +1,10 @@
 """AI 客户端 - 自定义 OpenAI 兼容接口"""
+
+import asyncio
 import json
 import re
 import time
-import asyncio
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 
 def _try_parse_inline_tool_calls(content: str) -> list | None:
@@ -21,7 +22,8 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
         tool_calls = []
         for match in re.finditer(
             r"<\|tool_call_begin\|>(.+?)<\|tool_call_argument_begin\|>(.+?)<\|tool_call_end\|>",
-            content, re.DOTALL
+            content,
+            re.DOTALL,
         ):
             name = match.group(1).strip()
             args_str = match.group(2).strip()
@@ -31,16 +33,23 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
                 args = {}
             # 去掉 functions. 前缀（如 functions.query_location → query_location）
             clean_name = name.replace("functions.", "").split(":")[0]
-            tool_calls.append({
-                "id": f"inline_{clean_name}",
-                "type": "function",
-                "function": {"name": clean_name, "arguments": json.dumps(args, ensure_ascii=False)},
-            })
+            tool_calls.append(
+                {
+                    "id": f"inline_{clean_name}",
+                    "type": "function",
+                    "function": {
+                        "name": clean_name,
+                        "arguments": json.dumps(args, ensure_ascii=False),
+                    },
+                }
+            )
         return tool_calls if tool_calls else None
     return None
-from openai import AsyncOpenAI
-from app.core.config import settings
 
+
+from openai import AsyncOpenAI
+
+from app.core.config import settings
 
 # 支持的 Provider 类型
 SUPPORTED_PROVIDERS = ["openai", "anthropic", "gemini"]
@@ -55,11 +64,21 @@ class AIClient:
     - gemini：Google Gemini
     """
 
-    def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
-                 provider: str = "openai", embedding_model: str = None,
-                 reasoning_model: bool = False, reasoning_effort: str = "low",
-                 default_temperature: float = None, default_top_p: float = None,
-                 default_frequency_penalty: float = None, default_presence_penalty: float = None, default_max_tokens: int = None):
+    def __init__(
+        self,
+        base_url: str = None,
+        api_key: str = None,
+        model: str = None,
+        provider: str = "openai",
+        embedding_model: str = None,
+        reasoning_model: bool = False,
+        reasoning_effort: str = "low",
+        default_temperature: float = None,
+        default_top_p: float = None,
+        default_frequency_penalty: float = None,
+        default_presence_penalty: float = None,
+        default_max_tokens: int = None,
+    ):
         self.base_url = base_url or settings.AI_BASE_URL
         self.api_key = api_key or settings.AI_API_KEY
         self.model = model or settings.AI_MODEL
@@ -118,9 +137,13 @@ class AIClient:
         return dict(
             default_temperature=cfg.temperature / 100 if cfg.temperature is not None else None,
             default_top_p=cfg.top_p / 100 if cfg.top_p is not None else None,
-            default_frequency_penalty=cfg.frequency_penalty / 100 if cfg.frequency_penalty is not None else None,
-            default_presence_penalty=cfg.presence_penalty / 100 if cfg.presence_penalty is not None else None,
-                    default_max_tokens=cfg.max_tokens,
+            default_frequency_penalty=cfg.frequency_penalty / 100
+            if cfg.frequency_penalty is not None
+            else None,
+            default_presence_penalty=cfg.presence_penalty / 100
+            if cfg.presence_penalty is not None
+            else None,
+            default_max_tokens=cfg.max_tokens,
         )
 
     @classmethod
@@ -131,8 +154,10 @@ class AIClient:
         自动读取用户在 AI 设置页配的参数。
         """
         try:
-            from app.models.ai_model import AIModelConfig
             from sqlalchemy import select
+
+            from app.models.ai_model import AIModelConfig
+
             result = await db.execute(
                 select(AIModelConfig).where(
                     AIModelConfig.user_id == user_id,
@@ -159,6 +184,7 @@ class AIClient:
     def client(self) -> AsyncOpenAI:
         if self._client is None:
             import httpx
+
             self._client = AsyncOpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key or "dummy-key",
@@ -193,7 +219,9 @@ class AIClient:
             "max_tokens": self._resolve_max_tokens(max_tokens),
         }
         # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
-        eff_fp = frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
+        eff_fp = (
+            frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
+        )
         eff_pp = presence_penalty if presence_penalty is not None else self.default_presence_penalty
         if eff_fp is not None:
             kwargs["frequency_penalty"] = eff_fp
@@ -210,7 +238,10 @@ class AIClient:
             resp = await self.client.chat.completions.create(**kwargs)
             message = resp.choices[0].message
             content = message.content or ""
-            tool_calls = [tc.model_dump() if hasattr(tc, "model_dump") else tc for tc in (message.tool_calls or [])]
+            tool_calls = [
+                tc.model_dump() if hasattr(tc, "model_dump") else tc
+                for tc in (message.tool_calls or [])
+            ]
             usage = resp.usage
             return {
                 "content": content,
@@ -241,7 +272,7 @@ class AIClient:
         tool_choice: str = None,
     ) -> dict:
         """流式调用，收集完整响应（含 tool_calls）。
-        
+
         使用 stream=True 保持连接活跃，防止 Cloudflare/CDN 代理超时掐断。
         返回格式与 chat() 完全一致。
         """
@@ -255,7 +286,9 @@ class AIClient:
             "stream": True,
         }
         # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
-        eff_fp = frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
+        eff_fp = (
+            frequency_penalty if frequency_penalty is not None else self.default_frequency_penalty
+        )
         eff_pp = presence_penalty if presence_penalty is not None else self.default_presence_penalty
         if eff_fp is not None:
             kwargs["frequency_penalty"] = eff_fp
@@ -285,7 +318,11 @@ class AIClient:
                         for tc in delta.tool_calls:
                             idx = tc.index
                             if idx not in tool_call_buf:
-                                tool_call_buf[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                                tool_call_buf[idx] = {
+                                    "id": tc.id or "",
+                                    "name": "",
+                                    "arguments": "",
+                                }
                             if tc.id:
                                 tool_call_buf[idx]["id"] = tc.id
                             if tc.function:
@@ -299,11 +336,13 @@ class AIClient:
             for idx in sorted(tool_call_buf.keys()):
                 tc = tool_call_buf[idx]
                 if tc["name"]:  # 有 name 才算有效 tool_call
-                    tool_calls.append({
-                        "index": idx,
-                        "id": tc["id"],
-                        "function": {"name": tc["name"], "arguments": tc["arguments"]},
-                    })
+                    tool_calls.append(
+                        {
+                            "index": idx,
+                            "id": tc["id"],
+                            "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                        }
+                    )
 
             return {
                 "content": content,
@@ -355,6 +394,7 @@ class AIClient:
     ) -> dict:
         """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
         import logging
+
         logger = logging.getLogger(__name__)
         result = await self.chat_stream_collect(
             messages=messages,
@@ -396,6 +436,7 @@ class AIClient:
 
         # 先尝试解析 JSON。如果短内容（如 "[]" "{}"）能解析成功，不应拒绝。
         from app.services.json_helper import clean_json_response, parse_json
+
         try:
             cleaned = clean_json_response(content)
             parsed = parse_json(cleaned)
@@ -445,6 +486,7 @@ class AIClient:
         - 每次重试在 messages 末尾追加格式强化提示，并把上次失败内容反馈给 AI。
         """
         import logging
+
         logger = logging.getLogger(__name__)
         if max_retries is None:
             max_retries = settings.AI_MAX_RETRIES
@@ -476,12 +518,21 @@ class AIClient:
             # AI 调用本身的错误
             # 连接错误（Connection error）也重试，其他错误（401/权限）不重试
             err_msg = last_result.get("error") or ""
-            is_conn_error = "Connection" in err_msg or "connection" in err_msg or "Timeout" in err_msg
-            if last_result.get("error") and last_result.get("json") is None and not last_result.get("parse_error") and not is_conn_error:
+            is_conn_error = (
+                "Connection" in err_msg or "connection" in err_msg or "Timeout" in err_msg
+            )
+            if (
+                last_result.get("error")
+                and last_result.get("json") is None
+                and not last_result.get("parse_error")
+                and not is_conn_error
+            ):
                 return last_result
             if is_conn_error and attempt < max_retries:
                 delay = min(settings.AI_RETRY_DELAY * attempt, settings.AI_RETRY_MAX_DELAY)
-                logger.warning(f"[AI] 连接错误，{delay}s后重试 (attempt {attempt}/{max_retries}): {err_msg[:200]}")
+                logger.warning(
+                    f"[AI] 连接错误，{delay}s后重试 (attempt {attempt}/{max_retries}): {err_msg[:200]}"
+                )
                 await asyncio.sleep(delay)
                 continue
 
@@ -532,6 +583,7 @@ class AIClient:
         """
         import json
         import logging
+
         logger = logging.getLogger(__name__)
 
         # 注入工具调用预算提示，让 AI 合理规划查询
@@ -551,7 +603,7 @@ class AIClient:
         tool_call_history: list[dict] = []  # 记录所有工具调用（名称+参数），供上层校验
 
         for round_num in range(max_rounds):
-            is_last_round = (round_num == max_rounds - 1)
+            is_last_round = round_num == max_rounds - 1
             tool_choice = "none" if is_last_round else "auto"
             actual_tools = None if is_last_round else tools
 
@@ -589,8 +641,12 @@ class AIClient:
                         f"强制无工具重试..."
                     )
                     retry = await self.chat_stream_collect(
-                        messages=current_messages + [
-                            {"role": "system", "content": "请直接输出完整正文，不要调用工具。内容不足会判定失败，请确保写够目标字数。"},
+                        messages=current_messages
+                        + [
+                            {
+                                "role": "system",
+                                "content": "请直接输出完整正文，不要调用工具。内容不足会判定失败，请确保写够目标字数。",
+                            },
                         ],
                         model=model,
                         temperature=temperature,
@@ -604,14 +660,18 @@ class AIClient:
                 return result
 
             # 有工具调用 → 执行并追加消息
-            logger.info(f"[tools] 第{round_num+1}轮: AI 调用了 {len(tool_calls)} 个工具: {[tc.get('function',{}).get('name','?') for tc in tool_calls]}")
+            logger.info(
+                f"[tools] 第{round_num + 1}轮: AI 调用了 {len(tool_calls)} 个工具: {[tc.get('function', {}).get('name', '?') for tc in tool_calls]}"
+            )
 
             # 追加 assistant 的 tool_calls 消息
-            current_messages.append({
-                "role": "assistant",
-                "content": content,
-                "tool_calls": tool_calls,
-            })
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": tool_calls,
+                }
+            )
 
             # 执行每个工具，追加 tool 结果消息
             for tc in tool_calls:
@@ -624,11 +684,13 @@ class AIClient:
 
                 tool_result = await tool_executor(tool_name, args)
                 tool_call_history.append({"name": tool_name, "arguments": args})
-                current_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": tool_result,
-                })
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.get("id", ""),
+                        "content": tool_result,
+                    }
+                )
 
             # 首次工具调用完成后，注入延迟消息（如写作指导）
             if not post_tool_inserted and post_tool_messages:
@@ -648,7 +710,11 @@ class AIClient:
                 return final
 
         # 兜底
-        return {"content": "", "error": "工具调用超过最大轮数", "tool_call_history": tool_call_history}
+        return {
+            "content": "",
+            "error": "工具调用超过最大轮数",
+            "tool_call_history": tool_call_history,
+        }
 
     async def embed(self, texts, model: str = None) -> dict:
         """调用 embedding API 生成向量（用于记忆向量检索）。
@@ -661,7 +727,6 @@ class AIClient:
             {"vectors": [[...], ...], "model": ..., "error": None/str}
             单条输入时 vectors 仍是 list[list[float]]，调用方取 [0]
         """
-        import httpx
         start = time.time()
         if isinstance(texts, str):
             inputs = [texts]
@@ -673,7 +738,7 @@ class AIClient:
         emb_model = model or self.embedding_model or "text-embedding-3-small"
         try:
             for i in range(0, len(inputs), MAX_BATCH):
-                batch = inputs[i:i + MAX_BATCH]
+                batch = inputs[i : i + MAX_BATCH]
                 resp = await self.client.embeddings.create(
                     model=emb_model,
                     input=batch,

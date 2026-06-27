@@ -1,6 +1,9 @@
 """提示词模板模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Boolean
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 

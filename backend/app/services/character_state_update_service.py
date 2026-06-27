@@ -6,8 +6,9 @@
 关键：章节号防回退保护——只允许更新 chapter_number >= 已记录章节的状态，
 防止重新分析旧章节时覆盖新状态。
 """
+
 import logging
-from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,22 +28,32 @@ class CharacterStateUpdateService:
     async def update_from_analysis(
         self,
         character_states: list,
-        chapter_id: Optional[int] = None,
-        chapter_number: Optional[int] = None,
+        chapter_id: int | None = None,
+        chapter_number: int | None = None,
     ):
         """主入口：依次更新生死/心理/关系/组织/角色弧线。"""
         if not character_states:
             return {"survival": 0, "psychological": 0, "relationships": 0, "org": 0, "arc": 0}
 
-        chars = (await self.db.execute(
-            select(Character).where(Character.project_id == self.project_id)
-        )).scalars().all()
+        chars = (
+            (
+                await self.db.execute(
+                    select(Character).where(Character.project_id == self.project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         char_by_name = {c.name: c for c in chars}
 
         results = {
             "survival": await self._update_survival(character_states, char_by_name, chapter_number),
-            "psychological": await self._update_psychological(character_states, char_by_name, chapter_number),
-            "relationships": await self._update_relationships(character_states, chars, chapter_number),
+            "psychological": await self._update_psychological(
+                character_states, char_by_name, chapter_number
+            ),
+            "relationships": await self._update_relationships(
+                character_states, chars, chapter_number
+            ),
             "org": await self._update_org_memberships(character_states, chars, chapter_number),
             "arc": await self._update_arc(character_states, char_by_name, chapter_number),
         }
@@ -50,23 +61,32 @@ class CharacterStateUpdateService:
             await self.db.commit()
         return results
 
-    async def _update_survival(
-        self, character_states, char_by_name: dict, chapter_number
-    ) -> int:
+    async def _update_survival(self, character_states, char_by_name: dict, chapter_number) -> int:
         """更新生死状态：active/deceased/missing/retired/destroyed。"""
         updated = 0
         # 状态值映射（AI 可能返回多种写法）
         survival_map = {
-            "death": "deceased", "dead": "deceased", "killed": "deceased", "死亡": "deceased",
-            "missing": "missing", "失踪": "missing", "消失": "missing",
-            "retired": "retired", "退隐": "retired", "隐退": "retired",
-            "alive": "alive", "active": "alive", "存活": "alive",
+            "death": "deceased",
+            "dead": "deceased",
+            "killed": "deceased",
+            "死亡": "deceased",
+            "missing": "missing",
+            "失踪": "missing",
+            "消失": "missing",
+            "retired": "retired",
+            "退隐": "retired",
+            "隐退": "retired",
+            "alive": "alive",
+            "active": "alive",
+            "存活": "alive",
         }
         for state in character_states:
             if not isinstance(state, dict):
                 continue
             name = state.get("character") or state.get("character_name") or state.get("name")
-            survival = state.get("survival_status") or state.get("status_change") or state.get("survival")
+            survival = (
+                state.get("survival_status") or state.get("status_change") or state.get("survival")
+            )
             if not name or not survival:
                 continue
             char = self._match_char(name, char_by_name)
@@ -74,9 +94,16 @@ class CharacterStateUpdateService:
                 continue
             new_status = survival_map.get(str(survival).lower().strip(), str(survival).strip())
             # 章节号防回退
-            if chapter_number and char.status_updated_chapter and chapter_number < char.status_updated_chapter:
+            if (
+                chapter_number
+                and char.status_updated_chapter
+                and chapter_number < char.status_updated_chapter
+            ):
                 continue
-            if new_status in ("deceased", "missing", "retired", "alive") and char.status != new_status:
+            if (
+                new_status in ("deceased", "missing", "retired", "alive")
+                and char.status != new_status
+            ):
                 char.status = new_status if new_status != "alive" else "alive"
                 if hasattr(char, "status_updated_chapter"):
                     char.status_updated_chapter = chapter_number
@@ -92,7 +119,12 @@ class CharacterStateUpdateService:
             if not isinstance(state, dict):
                 continue
             name = state.get("character") or state.get("character_name") or state.get("name")
-            new_state = state.get("state_after") or state.get("mental_change") or state.get("psychological_state") or state.get("current_state")
+            new_state = (
+                state.get("state_after")
+                or state.get("mental_change")
+                or state.get("psychological_state")
+                or state.get("current_state")
+            )
             if not name or not new_state:
                 continue
             char = self._match_char(name, char_by_name)
@@ -103,17 +135,21 @@ class CharacterStateUpdateService:
             updated += 1
         return updated
 
-    async def _update_relationships(
-        self, character_states, chars: list, chapter_number
-    ) -> int:
+    async def _update_relationships(self, character_states, chars: list, chapter_number) -> int:
         """更新关系亲密度。从 relation_change 推断亲密度变化。"""
         if len(chars) < 2:
             return 0
         name_map = {c.name: c for c in chars}
         # 预加载关系
-        existing = (await self.db.execute(
-            select(CharacterRelation).where(CharacterRelation.project_id == self.project_id)
-        )).scalars().all()
+        existing = (
+            (
+                await self.db.execute(
+                    select(CharacterRelation).where(CharacterRelation.project_id == self.project_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
         rel_map = {(r.from_character_id, r.to_character_id): r for r in existing}
         updated = 0
         for state in character_states:
@@ -164,16 +200,19 @@ class CharacterStateUpdateService:
                     updated += 1
         return updated
 
-    async def _update_org_memberships(
-        self, character_states, chars: list, chapter_number
-    ) -> int:
+    async def _update_org_memberships(self, character_states, chars: list, chapter_number) -> int:
         """更新组织成员状态（退隐/驱逐/死亡）。"""
         name_map = {c.name: c for c in chars}
         # 状态映射
         org_status_map = {
-            "deceased": "deceased", "death": "deceased", "killed": "deceased",
-            "retired": "retired", "expelled": "expelled", "驱逐": "expelled",
-            "left": "retired", "离开": "retired",
+            "deceased": "deceased",
+            "death": "deceased",
+            "killed": "deceased",
+            "retired": "retired",
+            "expelled": "expelled",
+            "驱逐": "expelled",
+            "left": "retired",
+            "离开": "retired",
         }
         updated = 0
         for state in character_states:
@@ -190,12 +229,18 @@ class CharacterStateUpdateService:
             if not new_status:
                 continue
             # 更新该角色的所有组织成员记录
-            memberships = (await self.db.execute(
-                select(OrganizationMember).where(
-                    OrganizationMember.character_id == char.id,
-                    OrganizationMember.status == "active",
+            memberships = (
+                (
+                    await self.db.execute(
+                        select(OrganizationMember).where(
+                            OrganizationMember.character_id == char.id,
+                            OrganizationMember.status == "active",
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             for m in memberships:
                 if new_status == "deceased":
                     m.status = "deceased"
@@ -214,7 +259,9 @@ class CharacterStateUpdateService:
                     updated += 1
         return updated
 
-    async def _update_arc(self, character_states: list, name_map: dict, chapter_number: Optional[int]) -> int:
+    async def _update_arc(
+        self, character_states: list, name_map: dict, chapter_number: int | None
+    ) -> int:
         """更新角色弧线：arc_type（变化类型）+ character_change（变化轨迹，随章节累积）。
 
         AI 返回字段（character_states[]）：
@@ -255,7 +302,7 @@ class CharacterStateUpdateService:
                 updated += 1
         return updated
 
-    def _match_char(self, name: str, char_by_name: dict) -> Optional[Character]:
+    def _match_char(self, name: str, char_by_name: dict) -> Character | None:
         """模糊匹配角色名。"""
         if name in char_by_name:
             return char_by_name[name]

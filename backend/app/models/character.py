@@ -1,6 +1,9 @@
 """角色模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Float
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -50,7 +53,9 @@ class Character(Base):
     # 职业关联（#19 增强，冗余字段便于展示）
     main_career_id = Column(Integer, nullable=True)  # 主职业 ID（关联 careers 表）
     main_career_stage = Column(Integer, default=0)  # 主职业当前阶段（旧，保留兼容）
-    main_career_stage_desc = Column(String(200), default="")  # 主职业境界文字描述（如：已臻化境、初窥门径）
+    main_career_stage_desc = Column(
+        String(200), default=""
+    )  # 主职业境界文字描述（如：已臻化境、初窥门径）
     sub_careers = Column(JSON, default=list)  # [{career_id, name, stage_desc}]
     # 状态追踪章节号（#14 防回退保护）
     status_updated_chapter = Column(Integer, nullable=True)  # 生死状态最后更新的章节
@@ -61,12 +66,17 @@ class Character(Base):
 
 class CharacterRelation(Base):
     """角色关系：A 对 B 的关系（有向）。用于关系图谱查询与自动维护。"""
+
     __tablename__ = "character_relations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    from_character_id = Column(Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
-    to_character_id = Column(Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_character_id = Column(
+        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    to_character_id = Column(
+        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     relation_type = Column(String(50), nullable=False, default="相识")  # 恋人/师徒/敌对/同门/上下级
     # 分类：family(亲情) / social(社交) / hostile(敌对) / professional(职业) / romantic(情感)
     category = Column(String(20), default="social")
@@ -79,11 +89,16 @@ class CharacterRelation(Base):
     def to_dict(self, from_name=None, to_name=None):
         """序列化，附带角色名方便前端渲染图谱"""
         return {
-            "id": self.id, "project_id": self.project_id,
+            "id": self.id,
+            "project_id": self.project_id,
             "from_character_id": self.from_character_id,
             "to_character_id": self.to_character_id,
-            "from_name": from_name, "to_name": to_name,
-            "relation_type": self.relation_type, "category": self.category,
-            "intimacy": self.intimacy, "strength": self.strength,
-            "status": self.status, "description": self.description,
+            "from_name": from_name,
+            "to_name": to_name,
+            "relation_type": self.relation_type,
+            "category": self.category,
+            "intimacy": self.intimacy,
+            "strength": self.strength,
+            "status": self.status,
+            "description": self.description,
         }

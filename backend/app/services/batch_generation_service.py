@@ -4,15 +4,16 @@
 逐章顺序生成（前一章完成后才生成下一章），跨章上下文自动传递。
 支持取消、重试、自动分析。
 """
+
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import async_session
 from app.core.ai_client import AIClient
+from app.core.database import async_session
 from app.models.batch_generation_task import BatchGenerationTask
 from app.models.chapter import Chapter
 from app.services.chapter_service import ChapterService
@@ -32,9 +33,10 @@ async def create_batch_task(
     narrative_perspective: str = "",
     start_chapter_number: int = None,
     batch_count: int = None,
-    db: Optional[AsyncSession] = None,
+    db: AsyncSession | None = None,
 ) -> BatchGenerationTask:
     """创建批量生成任务（在请求 session 内调用）。"""
+
     async def _create(session):
         task = BatchGenerationTask(
             user_id=user_id,
@@ -57,11 +59,15 @@ async def create_batch_task(
         await session.refresh(task)
         # 同步创建一条 BackgroundTask（让浮动面板能显示进度）
         from app.models.background_task import BackgroundTask
+
         bg = BackgroundTask(
-            user_id=user_id, project_id=project_id,
+            user_id=user_id,
+            project_id=project_id,
             task_type="chapter_batch",
             title=f"批量生成 {len(chapter_ids)} 章",
-            status="pending", progress=0, status_message="等待开始",
+            status="pending",
+            progress=0,
+            status_message="等待开始",
             payload={"batch_task_id": task.id},
         )
         session.add(bg)
@@ -75,24 +81,27 @@ async def create_batch_task(
         return await _create(session)
 
 
-async def get_batch_task(task_id: int) -> Optional[dict]:
+async def get_batch_task(task_id: int) -> dict | None:
     async with async_session() as db:
-        task = (await db.execute(
-            select(BatchGenerationTask).where(BatchGenerationTask.id == task_id)
-        )).scalar_one_or_none()
+        task = (
+            await db.execute(select(BatchGenerationTask).where(BatchGenerationTask.id == task_id))
+        ).scalar_one_or_none()
         return task.to_dict() if task else None
 
 
-async def _build_client_with_model(db: AsyncSession, user_id: int, model: str) -> Optional[AIClient]:
+async def _build_client_with_model(db: AsyncSession, user_id: int, model: str) -> AIClient | None:
     """用用户默认配置的 base_url/key 但替换为指定 model 构建 AIClient。"""
     try:
         from app.models.ai_model import AIModelConfig
-        cfg = (await db.execute(
-            select(AIModelConfig).where(
-                AIModelConfig.user_id == user_id,
-                AIModelConfig.is_default == True,
+
+        cfg = (
+            await db.execute(
+                select(AIModelConfig).where(
+                    AIModelConfig.user_id == user_id,
+                    AIModelConfig.is_default == True,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if cfg:
             return AIClient(
                 base_url=cfg.base_url,
@@ -110,12 +119,14 @@ async def _build_client_with_model(db: AsyncSession, user_id: int, model: str) -
 
 async def cancel_batch_task(task_id: int, user_id: int) -> bool:
     async with async_session() as db:
-        task = (await db.execute(
-            select(BatchGenerationTask).where(
-                BatchGenerationTask.id == task_id,
-                BatchGenerationTask.user_id == user_id,
+        task = (
+            await db.execute(
+                select(BatchGenerationTask).where(
+                    BatchGenerationTask.id == task_id,
+                    BatchGenerationTask.user_id == user_id,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if not task:
             return False
         if task.status in ("pending", "running"):
@@ -128,7 +139,7 @@ async def cancel_batch_task(task_id: int, user_id: int) -> bool:
         return True
 
 
-async def list_active_batch_tasks(user_id: int, project_id: Optional[int] = None) -> list[dict]:
+async def list_active_batch_tasks(user_id: int, project_id: int | None = None) -> list[dict]:
     async with async_session() as db:
         q = select(BatchGenerationTask).where(
             BatchGenerationTask.user_id == user_id,
@@ -154,9 +165,9 @@ async def run_batch_generation(task_id: int):
     3. 全部完成 → completed
     """
     async with async_session() as db:
-        task = (await db.execute(
-            select(BatchGenerationTask).where(BatchGenerationTask.id == task_id)
-        )).scalar_one_or_none()
+        task = (
+            await db.execute(select(BatchGenerationTask).where(BatchGenerationTask.id == task_id))
+        ).scalar_one_or_none()
         if not task:
             return
         if task.status not in ("pending", "running"):
@@ -184,12 +195,15 @@ async def run_batch_generation(task_id: int):
         if not style_id:
             try:
                 from app.models.writing_style import WritingStyle
-                default_ws = (await db.execute(
-                    select(WritingStyle).where(
-                        WritingStyle.user_id == user_id,
-                        WritingStyle.is_default == True,
+
+                default_ws = (
+                    await db.execute(
+                        select(WritingStyle).where(
+                            WritingStyle.user_id == user_id,
+                            WritingStyle.is_default == True,
+                        )
                     )
-                )).scalar_one_or_none()
+                ).scalar_one_or_none()
                 if default_ws:
                     style_id = default_ws.id
             except Exception:
@@ -197,9 +211,10 @@ async def run_batch_generation(task_id: int):
         if style_id:
             try:
                 from app.models.writing_style import WritingStyle
-                ws = (await db.execute(
-                    select(WritingStyle).where(WritingStyle.id == style_id)
-                )).scalar_one_or_none()
+
+                ws = (
+                    await db.execute(select(WritingStyle).where(WritingStyle.id == style_id))
+                ).scalar_one_or_none()
                 if ws:
                     style_config = ws.config or {}
                     style_name = ws.name
@@ -242,13 +257,18 @@ async def run_batch_generation(task_id: int):
     for idx, chapter_id in enumerate(chapter_ids):
         # 检查取消
         async with async_session() as check_db:
-            t = (await check_db.execute(
-                select(BatchGenerationTask.cancel_requested, BatchGenerationTask.status)
-                .where(BatchGenerationTask.id == task_id)
-            )).first()
+            t = (
+                await check_db.execute(
+                    select(BatchGenerationTask.cancel_requested, BatchGenerationTask.status).where(
+                        BatchGenerationTask.id == task_id
+                    )
+                )
+            ).first()
             if not t or t[0] or t[1] == "cancelled":
                 logger.info(f"[batch] 任务 {task_id} 已取消")
-                await _mark_status(task_id, "cancelled", f"已取消（完成 {completed}/{len(chapter_ids)}）")
+                await _mark_status(
+                    task_id, "cancelled", f"已取消（完成 {completed}/{len(chapter_ids)}）"
+                )
                 return
 
         # 独立 session 处理单章
@@ -258,21 +278,32 @@ async def run_batch_generation(task_id: int):
             try:
                 async with async_session() as chap_db:
                     # 获取章节信息
-                    chapter = (await chap_db.execute(
-                        select(Chapter).where(Chapter.id == chapter_id)
-                    )).scalar_one_or_none()
+                    chapter = (
+                        await chap_db.execute(select(Chapter).where(Chapter.id == chapter_id))
+                    ).scalar_one_or_none()
                     if not chapter:
                         last_err = f"章节 {chapter_id} 不存在"
                         break
                     ch_num = chapter.chapter_number
 
                     # 更新当前进度（生成阶段）
-                    await _update_progress(task_id, idx, chapter_id, ch_num, attempt,
-                                           f"生成第{ch_num}章" + (f"（重试 {attempt}）" if attempt else ""),
-                                           phase="generating",
-                                           sub_progress={"generation": {"done": completed, "total": len(chapter_ids)},
-                                                        "analysis": {"done": completed, "total": len(chapter_ids) if enable_analysis else 0},
-                                                        "phase": "generating"})
+                    await _update_progress(
+                        task_id,
+                        idx,
+                        chapter_id,
+                        ch_num,
+                        attempt,
+                        f"生成第{ch_num}章" + (f"（重试 {attempt}）" if attempt else ""),
+                        phase="generating",
+                        sub_progress={
+                            "generation": {"done": completed, "total": len(chapter_ids)},
+                            "analysis": {
+                                "done": completed,
+                                "total": len(chapter_ids) if enable_analysis else 0,
+                            },
+                            "phase": "generating",
+                        },
+                    )
 
                     # 若已有内容则跳过
                     if chapter.content and len(chapter.content.strip()) > 100:
@@ -284,7 +315,9 @@ async def run_batch_generation(task_id: int):
                     # 获取 AI 客户端（首次创建后复用；支持 model 覆盖）
                     if ai_client is None:
                         if model_override:
-                            ai_client = await _build_client_with_model(chap_db, user_id, model_override)
+                            ai_client = await _build_client_with_model(
+                                chap_db, user_id, model_override
+                            )
                         if ai_client is None:
                             ai_client = await AIClient.from_user_config(chap_db, user_id)
 
@@ -293,7 +326,9 @@ async def run_batch_generation(task_id: int):
                     result = await svc.generate_chapter(chapter_id, ai_client, overrides=overrides)
                     if result.get("error"):
                         last_err = result["error"]
-                        logger.warning(f"[batch] 第{ch_num}章生成失败（尝试 {attempt+1}）: {last_err}")
+                        logger.warning(
+                            f"[batch] 第{ch_num}章生成失败（尝试 {attempt + 1}）: {last_err}"
+                        )
                         await asyncio.sleep(2)  # 重试间隔
                         continue
                     success = True
@@ -304,20 +339,26 @@ async def run_batch_generation(task_id: int):
                     break
             except Exception as e:
                 last_err = str(e)
-                logger.warning(f"[batch] 第{chapter_id}章异常（尝试 {attempt+1}）: {e}")
+                logger.warning(f"[batch] 第{chapter_id}章异常（尝试 {attempt + 1}）: {e}")
                 await asyncio.sleep(2)
 
         if not success:
             # 记录失败章节
             async with async_session() as fdb:
-                ch = (await fdb.execute(select(Chapter).where(Chapter.id == chapter_id))).scalar_one_or_none()
-                failed.append({
-                    "chapter_id": chapter_id,
-                    "chapter_number": ch.chapter_number if ch else None,
-                    "error": last_err[:300],
-                })
+                ch = (
+                    await fdb.execute(select(Chapter).where(Chapter.id == chapter_id))
+                ).scalar_one_or_none()
+                failed.append(
+                    {
+                        "chapter_id": chapter_id,
+                        "chapter_number": ch.chapter_number if ch else None,
+                        "error": last_err[:300],
+                    }
+                )
                 await fdb.execute(
-                    update(BatchGenerationTask).where(BatchGenerationTask.id == task_id).values(
+                    update(BatchGenerationTask)
+                    .where(BatchGenerationTask.id == task_id)
+                    .values(
                         failed_chapters=failed,
                         completed_chapters=completed,
                         updated_at=datetime.utcnow(),
@@ -326,15 +367,21 @@ async def run_batch_generation(task_id: int):
                 await fdb.commit()
             logger.error(f"[batch] 第{chapter_id}章最终失败: {last_err}")
             # 任一章失败 → 终止后续（对标 MuMu 不跳过）
-            await _mark_status(task_id, "failed",
-                               f"第{chapter_id}章生成失败: {last_err[:200]}", error=last_err[:2000])
+            await _mark_status(
+                task_id,
+                "failed",
+                f"第{chapter_id}章生成失败: {last_err[:200]}",
+                error=last_err[:2000],
+            )
             return
 
         # 更新完成数
         async with async_session() as pdb:
             progress = int((completed / len(chapter_ids)) * 100) if chapter_ids else 100
             await pdb.execute(
-                update(BatchGenerationTask).where(BatchGenerationTask.id == task_id).values(
+                update(BatchGenerationTask)
+                .where(BatchGenerationTask.id == task_id)
+                .values(
                     completed_chapters=completed,
                     progress=min(99, progress),
                     updated_at=datetime.utcnow(),
@@ -343,29 +390,40 @@ async def run_batch_generation(task_id: int):
             await pdb.commit()
 
     # 全部完成
-    await _mark_status(task_id, "completed",
-                       f"批量完成（{completed}/{len(chapter_ids)} 章）")
+    await _mark_status(task_id, "completed", f"批量完成（{completed}/{len(chapter_ids)} 章）")
 
 
 async def _refresh_project_wc(project_id: int):
     """汇总项目所有章节字数，更新 project.current_word_count（独立 session）。"""
-    from app.models.project import Project
     from sqlalchemy import func as sa_func
+
+    from app.models.project import Project
+
     async with async_session() as db:
-        total = (await db.execute(
-            select(sa_func.coalesce(sa_func.sum(Chapter.word_count), 0)).where(Chapter.project_id == project_id)
-        )).scalar() or 0
-        proj = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        total = (
+            await db.execute(
+                select(sa_func.coalesce(sa_func.sum(Chapter.word_count), 0)).where(
+                    Chapter.project_id == project_id
+                )
+            )
+        ).scalar() or 0
+        proj = (
+            await db.execute(select(Project).where(Project.id == project_id))
+        ).scalar_one_or_none()
         if proj:
             proj.current_word_count = total
             await db.commit()
 
 
-async def _update_progress(task_id, idx, chapter_id, ch_num, attempt, message, phase="generating", sub_progress=None):
+async def _update_progress(
+    task_id, idx, chapter_id, ch_num, attempt, message, phase="generating", sub_progress=None
+):
     async with async_session() as db:
         # 更新 BatchGenerationTask
         await db.execute(
-            update(BatchGenerationTask).where(BatchGenerationTask.id == task_id).values(
+            update(BatchGenerationTask)
+            .where(BatchGenerationTask.id == task_id)
+            .values(
                 current_index=idx,
                 current_chapter_id=chapter_id,
                 current_chapter_number=ch_num,
@@ -379,24 +437,38 @@ async def _update_progress(task_id, idx, chapter_id, ch_num, attempt, message, p
     await _sync_bg_task(task_id, message, progress=None, sub_progress=sub_progress)
 
 
-async def _sync_bg_task(batch_task_id: int, message: str, progress: int = None, sub_progress: dict = None):
+async def _sync_bg_task(
+    batch_task_id: int, message: str, progress: int = None, sub_progress: dict = None
+):
     """同步更新 BackgroundTask（浮动面板查的表）。
-    
+
     sub_progress: {'generation': {'done': N, 'total': M}, 'analysis': {'done': N, 'total': M}, 'phase': 'generating'|'analyzing'}
     """
     async with async_session() as db:
         from app.models.background_task import BackgroundTask
-        bg = (await db.execute(
-            select(BackgroundTask).where(
-                BackgroundTask.payload.like(f'%"batch_task_id": {batch_task_id}%')
+
+        bg = (
+            (
+                await db.execute(
+                    select(BackgroundTask).where(
+                        BackgroundTask.payload.like(f'%"batch_task_id": {batch_task_id}%')
+                    )
+                )
             )
-        )).scalars().first()
+            .scalars()
+            .first()
+        )
         if bg:
-            values = {"status_message": message[:500], "status": "running", "updated_at": datetime.utcnow()}
+            values = {
+                "status_message": message[:500],
+                "status": "running",
+                "updated_at": datetime.utcnow(),
+            }
             if progress is not None:
                 values["progress"] = min(99, max(0, progress))
             if sub_progress is not None:
                 import json as _json
+
                 values["progress_details"] = _json.dumps(sub_progress, ensure_ascii=False)
             await db.execute(
                 update(BackgroundTask).where(BackgroundTask.id == bg.id).values(**values)
@@ -426,11 +498,18 @@ async def _mark_status(task_id, status, message, error=""):
     # 更新 BackgroundTask 的最终状态
     async with async_session() as db:
         from app.models.background_task import BackgroundTask
-        bg = (await db.execute(
-            select(BackgroundTask).where(
-                BackgroundTask.payload.like(f'%"batch_task_id": {task_id}%')
+
+        bg = (
+            (
+                await db.execute(
+                    select(BackgroundTask).where(
+                        BackgroundTask.payload.like(f'%"batch_task_id": {task_id}%')
+                    )
+                )
             )
-        )).scalars().first()
+            .scalars()
+            .first()
+        )
         if bg:
             bg.status = status
             bg.status_message = message[:500]

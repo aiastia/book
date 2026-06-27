@@ -13,12 +13,26 @@
 
 所有子模块用同一个 prefix=/api/projects，此处聚合导出单一 router。
 """
+
 from fastapi import APIRouter
 
 from app.api.routes.projects_pkg import (
-    crud, outlines, chapters, characters, worlds,
-    foreshadows, inspiration, ai_tools, relations, memories,
-    items, locations, org_members, character_careers, batch_generation, chapter_rewrite,
+    ai_tools,
+    batch_generation,
+    chapter_rewrite,
+    chapters,
+    character_careers,
+    characters,
+    crud,
+    foreshadows,
+    inspiration,
+    items,
+    locations,
+    memories,
+    org_members,
+    outlines,
+    relations,
+    worlds,
 )
 
 # 聚合路由：遍历所有子模块的 router，合并到一个

@@ -1,10 +1,10 @@
 """角色关系：CRUD / 图谱 / 自动重建（AI 解析角色间关系）"""
+
 import asyncio
-import json
 import logging
+
 from app.api.routes.projects_pkg.base import *
 from app.models.character import CharacterRelation
-
 
 router = make_router()
 logger = logging.getLogger(__name__)
@@ -12,34 +12,49 @@ logger = logging.getLogger(__name__)
 
 # ===== 关系向量同步 =====
 
+
 async def _sync_relation_memory(project_id: int, relation_id: int, user_id: int):
     """创建或更新关系对应的向量记忆。"""
     try:
         from app.models.story_memory import StoryMemory
         from app.services.memory_vector_service import MemoryVectorService, _embed_one
+
         async with async_session() as s:
             # 查关系详情 + 角色名
-            rel = (await s.execute(
-                select(CharacterRelation).where(CharacterRelation.id == relation_id, CharacterRelation.project_id == project_id)
-            )).scalar_one_or_none()
+            rel = (
+                await s.execute(
+                    select(CharacterRelation).where(
+                        CharacterRelation.id == relation_id,
+                        CharacterRelation.project_id == project_id,
+                    )
+                )
+            ).scalar_one_or_none()
             if not rel:
                 return
             names = {}
             for cid in [rel.from_character_id, rel.to_character_id]:
                 if cid:
-                    c = (await s.execute(select(Character).where(Character.id == cid))).scalar_one_or_none()
+                    c = (
+                        await s.execute(select(Character).where(Character.id == cid))
+                    ).scalar_one_or_none()
                     if c:
                         names[cid] = c.name
             from_name = names.get(rel.from_character_id, f"角色#{rel.from_character_id}")
             to_name = names.get(rel.to_character_id, f"角色#{rel.to_character_id}")
             title_prefix = f"[relation:{relation_id}]"
             # 删旧
-            old = (await s.execute(
-                select(StoryMemory).where(
-                    StoryMemory.project_id == project_id,
-                    StoryMemory.title.like(f"{title_prefix}%"),
+            old = (
+                (
+                    await s.execute(
+                        select(StoryMemory).where(
+                            StoryMemory.project_id == project_id,
+                            StoryMemory.title.like(f"{title_prefix}%"),
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             for o in old:
                 await s.delete(o)
             # 建新
@@ -47,9 +62,12 @@ async def _sync_relation_memory(project_id: int, relation_id: int, user_id: int)
             if rel.description:
                 memory_text += f"\n{rel.description}"
             m = StoryMemory(
-                project_id=project_id, user_id=user_id,
-                memory_type="relationship", title=f"{title_prefix} {from_name}与{to_name}的关系",
-                content=memory_text, importance=0.6,
+                project_id=project_id,
+                user_id=user_id,
+                memory_type="relationship",
+                title=f"{title_prefix} {from_name}与{to_name}的关系",
+                content=memory_text,
+                importance=0.6,
                 related_characters=[from_name, to_name],
             )
             s.add(m)
@@ -60,9 +78,13 @@ async def _sync_relation_memory(project_id: int, relation_id: int, user_id: int)
                 if vec:
                     vs = MemoryVectorService()
                     await vs.add_memory(
-                        user_id=user_id or 0, project_id=project_id, memory_id=m.id,
-                        content=memory_text, memory_type="relationship",
-                        title=m.title, importance=0.6,
+                        user_id=user_id or 0,
+                        project_id=project_id,
+                        memory_id=m.id,
+                        content=memory_text,
+                        memory_type="relationship",
+                        title=m.title,
+                        importance=0.6,
                     )
             except Exception:
                 pass
@@ -74,14 +96,21 @@ async def _delete_relation_memory(project_id: int, relation_id: int):
     """删除关系对应的向量记忆。"""
     try:
         from app.models.story_memory import StoryMemory
+
         async with async_session() as s:
             title_prefix = f"[relation:{relation_id}]"
-            old = (await s.execute(
-                select(StoryMemory).where(
-                    StoryMemory.project_id == project_id,
-                    StoryMemory.title.like(f"{title_prefix}%"),
+            old = (
+                (
+                    await s.execute(
+                        select(StoryMemory).where(
+                            StoryMemory.project_id == project_id,
+                            StoryMemory.title.like(f"{title_prefix}%"),
+                        )
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
             for o in old:
                 await s.delete(o)
             await s.commit()
@@ -108,10 +137,20 @@ def _map_category(relation_type: str) -> str:
 
 
 @router.get("/{project_id}/relations")
-async def list_relations(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def list_relations(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """列出所有角色关系（附带角色名，供图谱渲染）"""
     await get_user_project(db, project_id, user)
-    rels = (await db.execute(select(CharacterRelation).where(CharacterRelation.project_id == project_id))).scalars().all()
+    rels = (
+        (
+            await db.execute(
+                select(CharacterRelation).where(CharacterRelation.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     # 批量查角色名
     char_ids = set()
     for r in rels:
@@ -119,25 +158,46 @@ async def list_relations(project_id: int, db: AsyncSession = Depends(get_db), us
         char_ids.add(r.to_character_id)
     name_map = {}
     if char_ids:
-        chars = (await db.execute(select(Character).where(Character.id.in_(char_ids)))).scalars().all()
+        chars = (
+            (await db.execute(select(Character).where(Character.id.in_(char_ids)))).scalars().all()
+        )
         name_map = {c.id: c.name for c in chars}
-    return [r.to_dict(name_map.get(r.from_character_id), name_map.get(r.to_character_id)) for r in rels]
+    return [
+        r.to_dict(name_map.get(r.from_character_id), name_map.get(r.to_character_id)) for r in rels
+    ]
 
 
 @router.get("/{project_id}/relations/graph")
-async def get_relation_graph(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def get_relation_graph(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """关系图谱数据：节点(角色) + 边(关系)，供前端渲染网络图"""
     await get_user_project(db, project_id, user)
-    chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
-    rels = (await db.execute(select(CharacterRelation).where(CharacterRelation.project_id == project_id))).scalars().all()
+    chars = (
+        (await db.execute(select(Character).where(Character.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    rels = (
+        (
+            await db.execute(
+                select(CharacterRelation).where(CharacterRelation.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     char_ids = {c.id for c in chars}
     return {
         "nodes": [{"id": c.id, "name": c.name, "role": c.role} for c in chars],
         "edges": [
             {
-                "source": r.from_character_id, "target": r.to_character_id,
-                "relation_type": r.relation_type, "intimacy": r.intimacy,
-                "category": r.category, "status": r.status,
+                "source": r.from_character_id,
+                "target": r.to_character_id,
+                "relation_type": r.relation_type,
+                "intimacy": r.intimacy,
+                "category": r.category,
+                "status": r.status,
             }
             for r in rels
             if r.from_character_id in char_ids and r.to_character_id in char_ids
@@ -146,7 +206,9 @@ async def get_relation_graph(project_id: int, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/{project_id}/relations")
-async def create_relation(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_relation(
+    project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """手动创建一条关系"""
     await get_user_project(db, project_id, user)
     rel = CharacterRelation(
@@ -166,8 +228,20 @@ async def create_relation(project_id: int, req: dict, db: AsyncSession = Depends
 
 
 @router.put("/{project_id}/relations/{relation_id}")
-async def update_relation(project_id: int, relation_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    r = (await db.execute(select(CharacterRelation).where(CharacterRelation.id == relation_id, CharacterRelation.project_id == project_id))).scalar_one_or_none()
+async def update_relation(
+    project_id: int,
+    relation_id: int,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    r = (
+        await db.execute(
+            select(CharacterRelation).where(
+                CharacterRelation.id == relation_id, CharacterRelation.project_id == project_id
+            )
+        )
+    ).scalar_one_or_none()
     if not r:
         raise HTTPException(404, "关系不存在")
     for k in ["relation_type", "category", "intimacy", "status", "description"]:
@@ -178,8 +252,19 @@ async def update_relation(project_id: int, relation_id: int, req: dict, db: Asyn
 
 
 @router.delete("/{project_id}/relations/{relation_id}")
-async def delete_relation(project_id: int, relation_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    r = (await db.execute(select(CharacterRelation).where(CharacterRelation.id == relation_id, CharacterRelation.project_id == project_id))).scalar_one_or_none()
+async def delete_relation(
+    project_id: int,
+    relation_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    r = (
+        await db.execute(
+            select(CharacterRelation).where(
+                CharacterRelation.id == relation_id, CharacterRelation.project_id == project_id
+            )
+        )
+    ).scalar_one_or_none()
     if not r:
         raise HTTPException(404, "关系不存在")
     await db.delete(r)
@@ -189,33 +274,51 @@ async def delete_relation(project_id: int, relation_id: int, db: AsyncSession = 
 
 
 @router.post("/{project_id}/relations/auto-rebuild")
-async def auto_rebuild_relations(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def auto_rebuild_relations(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """AI 自动分析角色关系网并重建。
 
     流程：读取所有角色 → 让 AI 分析两两关系 → upsert 到关系表。
     移植自 MuMuAINovel 批量角色生成后的关系清理逻辑。
     """
     proj = await get_user_project(db, project_id, user)
-    chars = (await db.execute(select(Character).where(Character.project_id == project_id))).scalars().all()
+    chars = (
+        (await db.execute(select(Character).where(Character.project_id == project_id)))
+        .scalars()
+        .all()
+    )
     if len(chars) < 2:
         raise HTTPException(400, "至少需要 2 个角色才能分析关系")
 
     # 构造角色上下文给 AI
-    chars_info = "\n".join([
-        f"- ID:{c.id} 姓名:{c.name} 身份:{c.role} 性格:{c.personality[:80] or '未知'} 背景:{c.background[:80] or '未知'}"
-        for c in chars
-    ])
+    chars_info = "\n".join(
+        [
+            f"- ID:{c.id} 姓名:{c.name} 身份:{c.role} 性格:{c.personality[:80] or '未知'} 背景:{c.background[:80] or '未知'}"
+            for c in chars
+        ]
+    )
 
     engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill("character_relations_generate", ai_client, {
-        "title": proj.title,
-        "characters_info": chars_info,
-        "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
-    })
+    result = await engine.execute_skill(
+        "character_relations_generate",
+        ai_client,
+        {
+            "title": proj.title,
+            "characters_info": chars_info,
+            "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
+        },
+    )
 
     check_skill_error(result)
     data = result.get("json") or {}
-    ai_relations = data.get("relations", []) if isinstance(data, dict) else data if isinstance(data, list) else []
+    ai_relations = (
+        data.get("relations", [])
+        if isinstance(data, dict)
+        else data
+        if isinstance(data, list)
+        else []
+    )
 
     # 建立 id → character 映射，过滤无效引用
     id_set = {c.id for c in chars}
@@ -234,7 +337,15 @@ async def auto_rebuild_relations(project_id: int, db: AsyncSession = Depends(get
         valid_rels.append(rel)
 
     # 清空旧关系，写入新关系
-    old_rels = (await db.execute(select(CharacterRelation).where(CharacterRelation.project_id == project_id))).scalars().all()
+    old_rels = (
+        (
+            await db.execute(
+                select(CharacterRelation).where(CharacterRelation.project_id == project_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     for old in old_rels:
         await db.delete(old)
 
@@ -264,6 +375,7 @@ async def auto_rebuild_relations(project_id: int, db: AsyncSession = Depends(get
 
 # ============ 关系变化日志 ============
 
+
 class RelChangeLogCreate(BaseModel):
     chapter_number: int
     summary: str = ""
@@ -275,24 +387,38 @@ async def _build_relation_snapshot(db: AsyncSession, relation_id: int) -> dict:
     rel = await db.get(CharacterRelation, relation_id)
     if not rel:
         return {}
-    return {c.name: getattr(rel, c.name) for c in rel.__table__.columns
-            if c.name not in ('created_at', 'updated_at')}
+    return {
+        c.name: getattr(rel, c.name)
+        for c in rel.__table__.columns
+        if c.name not in ("created_at", "updated_at")
+    }
 
 
 @router.get("/{project_id}/relations/{relation_id}/change-logs")
 async def list_relation_change_logs(
-    project_id: int, relation_id: int,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    relation_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """列出关系的所有变化日志（按章节号升序）"""
     await get_user_project(db, project_id, user)
     from app.models.relation_change_log import RelationChangeLog
-    logs = (await db.execute(
-        select(RelationChangeLog).where(
-            RelationChangeLog.project_id == project_id,
-            RelationChangeLog.relation_id == relation_id,
-        ).order_by(RelationChangeLog.chapter_number.asc())
-    )).scalars().all()
+
+    logs = (
+        (
+            await db.execute(
+                select(RelationChangeLog)
+                .where(
+                    RelationChangeLog.project_id == project_id,
+                    RelationChangeLog.relation_id == relation_id,
+                )
+                .order_by(RelationChangeLog.chapter_number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
     # 补充关系涉及的双方角色名
     rel = await db.get(CharacterRelation, relation_id)
     char_names = {}
@@ -302,21 +428,28 @@ async def list_relation_change_logs(
                 c = await db.get(Character, cid)
                 if c:
                     char_names[cid] = c.name
-    return [{
-        **log.to_dict(),
-        "from_name": char_names.get(rel.from_character_id, "") if rel else "",
-        "to_name": char_names.get(rel.to_character_id, "") if rel else "",
-    } for log in logs]
+    return [
+        {
+            **log.to_dict(),
+            "from_name": char_names.get(rel.from_character_id, "") if rel else "",
+            "to_name": char_names.get(rel.to_character_id, "") if rel else "",
+        }
+        for log in logs
+    ]
 
 
 @router.post("/{project_id}/relations/{relation_id}/change-logs")
 async def create_relation_change_log(
-    project_id: int, relation_id: int, req: RelChangeLogCreate,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    relation_id: int,
+    req: RelChangeLogCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """添加一条关系变化日志，自动保存当前关系完整快照"""
     await get_user_project(db, project_id, user)
     from app.models.relation_change_log import RelationChangeLog
+
     rel = await db.get(CharacterRelation, relation_id)
     if not rel:
         raise HTTPException(404, "关系不存在")
@@ -337,19 +470,25 @@ async def create_relation_change_log(
 
 @router.delete("/{project_id}/relations/{relation_id}/change-logs/{log_id}")
 async def delete_relation_change_log(
-    project_id: int, relation_id: int, log_id: int,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    relation_id: int,
+    log_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """删除一条关系变化日志"""
     await get_user_project(db, project_id, user)
     from app.models.relation_change_log import RelationChangeLog
-    log = (await db.execute(
-        select(RelationChangeLog).where(
-            RelationChangeLog.id == log_id,
-            RelationChangeLog.project_id == project_id,
-            RelationChangeLog.relation_id == relation_id,
+
+    log = (
+        await db.execute(
+            select(RelationChangeLog).where(
+                RelationChangeLog.id == log_id,
+                RelationChangeLog.project_id == project_id,
+                RelationChangeLog.relation_id == relation_id,
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not log:
         raise HTTPException(404, "日志不存在")
     await db.delete(log)
@@ -357,20 +496,29 @@ async def delete_relation_change_log(
     return {"ok": True}
 
 
-async def get_relation_state_at_chapter(db: AsyncSession, project_id: int, relation_id: int, chapter_number: int) -> dict | None:
+async def get_relation_state_at_chapter(
+    db: AsyncSession, project_id: int, relation_id: int, chapter_number: int
+) -> dict | None:
     """获取关系在指定章节之前的「当时状态」快照。"""
     from app.models.relation_change_log import RelationChangeLog
-    log = (await db.execute(
-        select(RelationChangeLog).where(
-            RelationChangeLog.project_id == project_id,
-            RelationChangeLog.relation_id == relation_id,
-            RelationChangeLog.chapter_number < chapter_number,
-        ).order_by(RelationChangeLog.chapter_number.desc()).limit(1)
-    )).scalar_one_or_none()
+
+    log = (
+        await db.execute(
+            select(RelationChangeLog)
+            .where(
+                RelationChangeLog.project_id == project_id,
+                RelationChangeLog.relation_id == relation_id,
+                RelationChangeLog.chapter_number < chapter_number,
+            )
+            .order_by(RelationChangeLog.chapter_number.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     return log.snapshot if log else None
 
 
 # ============ 关系类型管理 ============
+
 
 class RenameTypeReq(BaseModel):
     old_name: str
@@ -378,21 +526,31 @@ class RenameTypeReq(BaseModel):
 
 
 @router.get("/{project_id}/relations/types")
-async def list_relation_types(project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def list_relation_types(
+    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
     """列出项目中所有已用的关系类型及其使用次数"""
     await get_user_project(db, project_id, user)
     from sqlalchemy import func
-    rows = (await db.execute(
-        select(CharacterRelation.relation_type, func.count(CharacterRelation.id))
-        .where(CharacterRelation.project_id == project_id)
-        .group_by(CharacterRelation.relation_type)
-        .order_by(func.count(CharacterRelation.id).desc())
-    )).all()
+
+    rows = (
+        await db.execute(
+            select(CharacterRelation.relation_type, func.count(CharacterRelation.id))
+            .where(CharacterRelation.project_id == project_id)
+            .group_by(CharacterRelation.relation_type)
+            .order_by(func.count(CharacterRelation.id).desc())
+        )
+    ).all()
     return [{"name": r[0], "count": r[1]} for r in rows]
 
 
 @router.put("/{project_id}/relations/types/rename")
-async def rename_relation_type(project_id: int, req: RenameTypeReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def rename_relation_type(
+    project_id: int,
+    req: RenameTypeReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """批量重命名关系类型（将所有旧名称改为新名称）"""
     await get_user_project(db, project_id, user)
     if not req.old_name.strip() or not req.new_name.strip():
@@ -415,10 +573,16 @@ async def rename_relation_type(project_id: int, req: RenameTypeReq, db: AsyncSes
 
 
 @router.delete("/{project_id}/relations/types/{type_name}")
-async def delete_relation_type(project_id: int, type_name: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def delete_relation_type(
+    project_id: int,
+    type_name: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
     """删除关系类型（将所有使用该类型的关系改为"相识"）"""
     await get_user_project(db, project_id, user)
     from urllib.parse import unquote
+
     type_name = unquote(type_name)
     result = await db.execute(
         select(CharacterRelation).where(

@@ -21,24 +21,23 @@
     if await tracker.is_cancelled():
         return
 """
-import asyncio
+
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import select, update, delete
+
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import async_session
 from app.models.background_task import BackgroundTask
 
-
 # 进度阶段机（参照 MuMu TaskProgressTracker）
 STAGE_PROGRESS = {
     "init": 0,
-    "loading": 5,        # 加载上下文
-    "preparing": 17,     # 组装提示词
-    "generating": 20,    # 调用 AI
-    "parsing": 88,       # 解析结果
-    "saving": 92,        # 落库
+    "loading": 5,  # 加载上下文
+    "preparing": 17,  # 组装提示词
+    "generating": 20,  # 调用 AI
+    "parsing": 88,  # 解析结果
+    "saving": 92,  # 落库
     "complete": 100,
 }
 
@@ -54,10 +53,10 @@ class TaskProgressTracker:
 
     async def update(
         self,
-        stage: Optional[str] = None,
-        progress: Optional[int] = None,
+        stage: str | None = None,
+        progress: int | None = None,
         message: str = "",
-        progress_details: Optional[dict] = None,
+        progress_details: dict | None = None,
     ):
         """更新任务进度。progress 可省略（按 stage 自动算）。"""
         if progress is None and stage:
@@ -81,9 +80,9 @@ class TaskProgressTracker:
             )
             await db.commit()
             # 获取完整任务数据用于 WebSocket 推送
-            task = (await db.execute(
-                select(BackgroundTask).where(BackgroundTask.id == self.task_id)
-            )).scalar_one_or_none()
+            task = (
+                await db.execute(select(BackgroundTask).where(BackgroundTask.id == self.task_id))
+            ).scalar_one_or_none()
             if task:
                 task_data = task.to_dict()
 
@@ -96,17 +95,22 @@ class TaskProgressTracker:
         task_data = None
         async with async_session() as db:
             await db.execute(
-                update(BackgroundTask).where(BackgroundTask.id == self.task_id).values(
-                    status="completed", progress=100, stage="complete",
+                update(BackgroundTask)
+                .where(BackgroundTask.id == self.task_id)
+                .values(
+                    status="completed",
+                    progress=100,
+                    stage="complete",
                     status_message=message[:500],
-                    result=result or {}, completed_at=datetime.utcnow(),
+                    result=result or {},
+                    completed_at=datetime.utcnow(),
                     updated_at=datetime.utcnow(),
                 )
             )
             await db.commit()
-            task = (await db.execute(
-                select(BackgroundTask).where(BackgroundTask.id == self.task_id)
-            )).scalar_one_or_none()
+            task = (
+                await db.execute(select(BackgroundTask).where(BackgroundTask.id == self.task_id))
+            ).scalar_one_or_none()
             if task:
                 task_data = task.to_dict()
 
@@ -118,15 +122,19 @@ class TaskProgressTracker:
         task_data = None
         async with async_session() as db:
             await db.execute(
-                update(BackgroundTask).where(BackgroundTask.id == self.task_id).values(
-                    status="failed", error=error[:5000], completed_at=datetime.utcnow(),
+                update(BackgroundTask)
+                .where(BackgroundTask.id == self.task_id)
+                .values(
+                    status="failed",
+                    error=error[:5000],
+                    completed_at=datetime.utcnow(),
                     updated_at=datetime.utcnow(),
                 )
             )
             await db.commit()
-            task = (await db.execute(
-                select(BackgroundTask).where(BackgroundTask.id == self.task_id)
-            )).scalar_one_or_none()
+            task = (
+                await db.execute(select(BackgroundTask).where(BackgroundTask.id == self.task_id))
+            ).scalar_one_or_none()
             if task:
                 task_data = task.to_dict()
 
@@ -137,6 +145,7 @@ class TaskProgressTracker:
         """通过 WebSocket 推送任务状态更新。"""
         try:
             from app.api.routes.ws_tasks import broadcast_task_update
+
             uid = task_data.get("user_id")
             if uid:
                 await broadcast_task_update(uid, task_data)
@@ -146,10 +155,13 @@ class TaskProgressTracker:
     async def is_cancelled(self) -> bool:
         """检查任务是否被取消（执行协程内调用，优雅退出）。"""
         async with async_session() as db:
-            row = (await db.execute(
-                select(BackgroundTask.cancel_requested, BackgroundTask.status)
-                .where(BackgroundTask.id == self.task_id)
-            )).first()
+            row = (
+                await db.execute(
+                    select(BackgroundTask.cancel_requested, BackgroundTask.status).where(
+                        BackgroundTask.id == self.task_id
+                    )
+                )
+            ).first()
             if not row:
                 return True
             return bool(row[0]) or row[1] == "cancelled"
@@ -157,13 +169,14 @@ class TaskProgressTracker:
 
 async def create_task(
     user_id: int,
-    project_id: Optional[int],
+    project_id: int | None,
     task_type: str,
     title: str = "",
-    payload: Optional[dict] = None,
-    db: Optional[AsyncSession] = None,
+    payload: dict | None = None,
+    db: AsyncSession | None = None,
 ) -> BackgroundTask:
     """创建一个 pending 任务记录（在请求 session 内调用）。"""
+
     async def _create(session: AsyncSession) -> BackgroundTask:
         task = BackgroundTask(
             user_id=user_id,
@@ -184,20 +197,20 @@ async def create_task(
         return await _create(session)
 
 
-async def get_task(task_id: int) -> Optional[dict]:
+async def get_task(task_id: int) -> dict | None:
     """查询单个任务（轮询用）。"""
     async with async_session() as db:
-        task = (await db.execute(
-            select(BackgroundTask).where(BackgroundTask.id == task_id)
-        )).scalar_one_or_none()
+        task = (
+            await db.execute(select(BackgroundTask).where(BackgroundTask.id == task_id))
+        ).scalar_one_or_none()
         return task.to_dict() if task else None
 
 
 async def list_user_tasks(
     user_id: int,
-    project_id: Optional[int] = None,
-    status: Optional[str] = None,
-    task_type: Optional[str] = None,
+    project_id: int | None = None,
+    status: str | None = None,
+    task_type: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
     """列出用户任务（活跃任务优先）。"""
@@ -218,7 +231,7 @@ async def list_user_tasks(
         return [t.to_dict() for t in rows]
 
 
-async def list_active_tasks(user_id: int, project_id: Optional[int] = None) -> list[dict]:
+async def list_active_tasks(user_id: int, project_id: int | None = None) -> list[dict]:
     """列出活跃任务（pending/running）。"""
     async with async_session() as db:
         stmt = select(BackgroundTask).where(
@@ -239,12 +252,14 @@ async def cancel_task(task_id: int, user_id: int) -> bool:
     若任务已是终态，直接置 cancelled。
     """
     async with async_session() as db:
-        task = (await db.execute(
-            select(BackgroundTask).where(
-                BackgroundTask.id == task_id,
-                BackgroundTask.user_id == user_id,
+        task = (
+            await db.execute(
+                select(BackgroundTask).where(
+                    BackgroundTask.id == task_id,
+                    BackgroundTask.user_id == user_id,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if not task:
             return False
         if task.status in ("pending", "running"):
@@ -261,12 +276,14 @@ async def cancel_task(task_id: int, user_id: int) -> bool:
 async def delete_task(task_id: int, user_id: int) -> bool:
     """删除任务记录（仅终态可删）。"""
     async with async_session() as db:
-        task = (await db.execute(
-            select(BackgroundTask).where(
-                BackgroundTask.id == task_id,
-                BackgroundTask.user_id == user_id,
+        task = (
+            await db.execute(
+                select(BackgroundTask).where(
+                    BackgroundTask.id == task_id,
+                    BackgroundTask.user_id == user_id,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
         if not task:
             return False
         if task.status not in ("completed", "failed", "cancelled"):
@@ -279,6 +296,7 @@ async def delete_task(task_id: int, user_id: int) -> bool:
 async def cleanup_old_tasks(days: int = 7) -> int:
     """清理 N 天前的已完成/失败/取消任务。返回删除条数。"""
     from datetime import timedelta
+
     cutoff = datetime.utcnow() - timedelta(days=days)
     async with async_session() as db:
         result = await db.execute(
@@ -295,8 +313,12 @@ async def mark_started(task_id: int):
     """任务开始执行时调用（pending → running）。"""
     async with async_session() as db:
         await db.execute(
-            update(BackgroundTask).where(BackgroundTask.id == task_id).values(
-                status="running", stage="init", started_at=datetime.utcnow(),
+            update(BackgroundTask)
+            .where(BackgroundTask.id == task_id)
+            .values(
+                status="running",
+                stage="init",
+                started_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
         )

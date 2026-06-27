@@ -1,6 +1,9 @@
 """世界观模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 

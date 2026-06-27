@@ -1,11 +1,15 @@
 """AI 模型配置"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Boolean
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+
 from app.core.database import Base
 
 
 class AIModelConfig(Base):
     """用户级 AI 模型配置"""
+
     __tablename__ = "ai_model_configs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -18,13 +22,15 @@ class AIModelConfig(Base):
     top_p = Column(Integer, default=90)
     max_tokens = Column(Integer, default=4096)
     frequency_penalty = Column(Integer, nullable=True, default=None)  # *100 存储，NULL=不发送
-    presence_penalty = Column(Integer, nullable=True, default=None)   # *100 存储，NULL=不发送
+    presence_penalty = Column(Integer, nullable=True, default=None)  # *100 存储，NULL=不发送
     # 灵感模式独立参数（NULL=跟随全局模型配置，留空即用上面的全局值）
     # 单独配置灵感模式用不同的温度/采样，不影响其它功能
     inspiration_temperature = Column(Integer, nullable=True, default=None)  # *100，NULL=跟随全局
-    inspiration_top_p = Column(Integer, nullable=True, default=None)        # *100，NULL=不发送
-    inspiration_frequency_penalty = Column(Integer, nullable=True, default=None)   # *100，NULL=不发送
-    inspiration_presence_penalty = Column(Integer, nullable=True, default=None)    # *100，NULL=不发送
+    inspiration_top_p = Column(Integer, nullable=True, default=None)  # *100，NULL=不发送
+    inspiration_frequency_penalty = Column(
+        Integer, nullable=True, default=None
+    )  # *100，NULL=不发送
+    inspiration_presence_penalty = Column(Integer, nullable=True, default=None)  # *100，NULL=不发送
     # 灵感模式自定义开关：关=用系统内置递减温度表，开=用上方 4 个自定义参数
     inspiration_custom = Column(Boolean, default=False)
     is_default = Column(Boolean, default=False)

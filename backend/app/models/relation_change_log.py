@@ -3,8 +3,11 @@
 记录角色关系在每个章节后的变化（亲密度升降、关系类型转变等），
 同时保存完整快照供回溯到任意章节。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
+
 from app.core.database import Base
 
 
@@ -13,7 +16,12 @@ class RelationChangeLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
-    relation_id = Column(Integer, ForeignKey("character_relations.id", ondelete="CASCADE"), nullable=False, index=True)
+    relation_id = Column(
+        Integer,
+        ForeignKey("character_relations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     # 发生在第几章
     chapter_number = Column(Integer, nullable=False)
     # 变更了哪些字段：{"intimacy": {"old": 20, "new": 45}, "relation_type": "宿敌→同盟"}

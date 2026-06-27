@@ -2,10 +2,12 @@
 
 CRUD + AI 批量生成。接入章节上下文（持有物品）。
 """
+
 import logging
+
 from app.api.routes.projects_pkg.base import *
-from app.models.item import Item
 from app.models.character import Character
+from app.models.item import Item
 
 logger = logging.getLogger(__name__)
 router = make_router()
@@ -42,7 +44,8 @@ async def list_items(
     rarity: str = None,
     owner_id: int = None,
     keyword: str = None,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """列出物品。支持按分类/稀有度/持有者/关键词筛选。"""
     await get_user_project(db, project_id, user)
@@ -61,15 +64,19 @@ async def list_items(
     char_ids = [i.owner_character_id for i in items if i.owner_character_id]
     char_map = {}
     if char_ids:
-        chars = (await db.execute(select(Character).where(Character.id.in_(char_ids)))).scalars().all()
+        chars = (
+            (await db.execute(select(Character).where(Character.id.in_(char_ids)))).scalars().all()
+        )
         char_map = {c.id: c.name for c in chars}
     return [{**i.to_dict(), "owner_name": _resolve_owner_name(i, char_map)} for i in items]
 
 
 @router.post("/{project_id}/items")
 async def create_item(
-    project_id: int, req: ItemCreateReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    req: ItemCreateReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     await get_user_project(db, project_id, user)
     item = Item(project_id=project_id, source="manual", **req.model_dump(exclude_none=False))
@@ -81,17 +88,32 @@ async def create_item(
 
 @router.put("/{project_id}/items/{item_id}")
 async def update_item(
-    project_id: int, item_id: int, req: dict,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    item_id: int,
+    req: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
-    item = (await db.execute(
-        select(Item).where(Item.id == item_id, Item.project_id == project_id)
-    )).scalar_one_or_none()
+    item = (
+        await db.execute(select(Item).where(Item.id == item_id, Item.project_id == project_id))
+    ).scalar_one_or_none()
     if not item:
         raise HTTPException(404, "物品不存在")
-    for k in ["name", "category", "rarity", "item_type", "description", "attributes",
-              "owner_character_id", "owner_name", "obtained_chapter", "obtained_description",
-              "status", "is_key_item", "quantity"]:
+    for k in [
+        "name",
+        "category",
+        "rarity",
+        "item_type",
+        "description",
+        "attributes",
+        "owner_character_id",
+        "owner_name",
+        "obtained_chapter",
+        "obtained_description",
+        "status",
+        "is_key_item",
+        "quantity",
+    ]:
         if k in req:
             setattr(item, k, req[k])
     await db.commit()
@@ -100,12 +122,14 @@ async def update_item(
 
 @router.delete("/{project_id}/items/{item_id}")
 async def delete_item(
-    project_id: int, item_id: int,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
-    item = (await db.execute(
-        select(Item).where(Item.id == item_id, Item.project_id == project_id)
-    )).scalar_one_or_none()
+    item = (
+        await db.execute(select(Item).where(Item.id == item_id, Item.project_id == project_id))
+    ).scalar_one_or_none()
     if not item:
         raise HTTPException(404, "物品不存在")
     await db.delete(item)
@@ -121,17 +145,21 @@ class ItemGenerateReq(BaseModel):
 
 @router.post("/{project_id}/items/generate")
 async def generate_items(
-    project_id: int, req: ItemGenerateReq,
-    db: AsyncSession = Depends(get_db), user=Depends(get_current_user),
+    project_id: int,
+    req: ItemGenerateReq,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     """AI 批量生成物品（通过 SkillEngine 使用统一模板）。"""
     proj = await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
 
     # 角色名供 AI 关联持有者
-    chars = (await db.execute(
-        select(Character).where(Character.project_id == project_id).limit(20)
-    )).scalars().all()
+    chars = (
+        (await db.execute(select(Character).where(Character.project_id == project_id).limit(20)))
+        .scalars()
+        .all()
+    )
     char_names = "、".join(c.name for c in chars) if chars else "暂无"
 
     # 构建完整世界观上下文
@@ -150,11 +178,15 @@ async def generate_items(
     if req.user_prompt:
         user_prompt += f"\n额外要求：{req.user_prompt}"
 
-    result = await engine.execute_skill("items_generate", ai_client, {
-        "title": proj.title,
-        "world_info": world_info,
-        "user_prompt": user_prompt,
-    })
+    result = await engine.execute_skill(
+        "items_generate",
+        ai_client,
+        {
+            "title": proj.title,
+            "world_info": world_info,
+            "user_prompt": user_prompt,
+        },
+    )
 
     if result.get("error"):
         raise HTTPException(500, f"AI 生成失败: {result['error']}")
@@ -164,7 +196,7 @@ async def generate_items(
         data = data.get("items") or data.get("data") or []
 
     created = []
-    for it in data[:req.count * 2]:  # 上限保护
+    for it in data[: req.count * 2]:  # 上限保护
         if not isinstance(it, dict) or not it.get("name"):
             continue
         try:
@@ -175,7 +207,9 @@ async def generate_items(
                 rarity=str(it.get("rarity", "common"))[:20],
                 item_type=str(it.get("item_type", ""))[:50],
                 description=str(it.get("description", ""))[:2000],
-                attributes=it.get("attributes", {}) if isinstance(it.get("attributes"), dict) else {},
+                attributes=it.get("attributes", {})
+                if isinstance(it.get("attributes"), dict)
+                else {},
                 is_key_item=1 if it.get("is_key_item") else 0,
                 status="stored",
                 source="ai",

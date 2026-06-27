@@ -1,8 +1,9 @@
 # ============================================================
 # Ruff 代码分析（手动触发）
-# 用途：用 ruff 对 backend/ 进行 lint + format 检查
+# 用途：用 ruff 对 backend/ 进行 lint + format 检查，
+#       并可选用 vulture 检测死代码
 # 运行：GitHub 仓库 → Actions → "Ruff 代码分析" → Run workflow
-# 本地复现：cd backend && ruff check . && ruff format --check .
+# 本地复现：cd backend && ruff check . && ruff format --check . && vulture app/
 # ============================================================
 name: Ruff 代码分析
 
@@ -19,6 +20,11 @@ on:
         required: false
         type: boolean
         default: false
+      vulture:
+        description: "是否运行 vulture 死代码检测（默认开启）"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write  # fix/format 时需要提交回仓库
@@ -39,9 +45,9 @@ jobs:
         with:
           python-version: "3.12"
 
-      # 安装指定版本 ruff，保证本地与 CI 行为一致
-      - name: 安装 Ruff
-        run: pip install "ruff==0.15.20"
+      # 安装指定版本工具，保证本地与 CI 行为一致
+      - name: 安装 Ruff + Vulture
+        run: pip install "ruff==0.15.20" "vulture==2.16"
 
       # -------------------- Lint 检查 --------------------
       - name: Ruff Check（检查）
@@ -60,6 +66,15 @@ jobs:
       - name: Ruff Format（自动格式化）
         if: ${{ github.event.inputs.format == 'true' }}
         run: ruff format .
+
+      # -------------------- Vulture 死代码检测 --------------------
+      # 检测未被引用的函数/类/变量/导入等（死代码）。
+      # 配置见 backend/pyproject.toml [tool.vulture]
+      # 说明：置信度低于阈值的报告会被过滤；装饰器/dunder 已在配置中豁免，
+      #       避免误报 FastAPI 路由、SQLAlchemy 模型字段等。
+      - name: Vulture 死代码检测
+        if: ${{ github.event.inputs.vulture == 'true' }}
+        run: vulture app/ --min-confidence 80
 
       # -------------------- 汇总报告（便于阅读） --------------------
       - name: Ruff 统计报告

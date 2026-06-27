@@ -3,13 +3,17 @@
 对标 MuMuAINovel（无独立模型，本系统为自创增强）。
 承载城市/区域/建筑/秘境等地理实体，支持层级关系（父子地点）。
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Boolean
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
 class Location(Base):
     """地点。支持自引用层级（parent_location_id）。"""
+
     __tablename__ = "locations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

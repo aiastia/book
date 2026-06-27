@@ -1,6 +1,9 @@
 """组织模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -18,7 +21,9 @@ class Organization(Base):
     territory = Column(Text, default="")  # 势力范围
     power_level = Column(String(50), default="")  # 势力等级（文本，兼容旧数据）
     # 组织树层级（#18 增强）
-    parent_org_id = Column(Integer, ForeignKey("organizations.id"), nullable=True)  # 自引用，null=顶级
+    parent_org_id = Column(
+        Integer, ForeignKey("organizations.id"), nullable=True
+    )  # 自引用，null=顶级
     tree_level = Column(Integer, default=0)  # 层级深度 0=顶级
     power_value = Column(Integer, default=50)  # 势力数值 0-100
     member_count = Column(Integer, default=0)  # 成员数（冗余，便于排序）

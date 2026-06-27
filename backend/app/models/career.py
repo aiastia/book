@@ -5,13 +5,17 @@
 - 每条职业有进阶阶段（stages JSON）
 - 角色通过 occupation 字段文本关联（保持简单，不强制外键）
 """
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, JSON
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
 class Career(Base):
     """职业/修炼体系：如「剑修」「炼丹师」「商人」及其阶段。"""
+
     __tablename__ = "careers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -33,7 +37,12 @@ class Career(Base):
 
     def to_dict(self):
         return {
-            "id": self.id, "name": self.name, "career_type": self.career_type,
-            "category": self.category, "description": self.description,
-            "stages": self.stages, "abilities": self.abilities, "attributes": self.attributes,
+            "id": self.id,
+            "name": self.name,
+            "career_type": self.career_type,
+            "category": self.category,
+            "description": self.description,
+            "stages": self.stages,
+            "abilities": self.abilities,
+            "attributes": self.attributes,
         }

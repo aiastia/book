@@ -2,10 +2,9 @@
 
 对标 MuMuAINovel 的 tasks.py。提供任务查询/取消/删除/清理入口。
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query
+
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.services import background_task_service as bg

@@ -1,6 +1,9 @@
 """故事记忆模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Float
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -12,7 +15,9 @@ class StoryMemory(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     chapter_id = Column(Integer, ForeignKey("chapters.id"), nullable=True)
     chapter_number = Column(Integer, nullable=True)
-    memory_type = Column(String(50), default="")  # plot/character/world/relationship/hook/foreshadow/scene
+    memory_type = Column(
+        String(50), default=""
+    )  # plot/character/world/relationship/hook/foreshadow/scene
     title = Column(String(200), default="")
     content = Column(Text, nullable=False)  # 记忆内容
     importance = Column(Float, default=0.5)  # 重要度 0-1

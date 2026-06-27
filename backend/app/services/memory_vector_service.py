@@ -9,17 +9,16 @@ Embedding 策略（省成本）：
 - 每个项目独立 collection（命名 u_{hash8}_p_{hash8}）
 - 提供 5 路融合检索（最近章节/语义相关/未完结伏笔/角色相关/重要情节点）
 """
+
+import asyncio
 import hashlib
 import logging
-import asyncio
-from typing import Optional
-from sqlalchemy import select, delete as sa_delete
-from sqlalchemy.ext.asyncio import AsyncSession
+
+from sqlalchemy import select
 
 from app.core.ai_client import AIClient
 from app.core.database import async_session
 from app.models.story_memory import StoryMemory
-from app.models.chapter import Chapter
 from app.services import local_embedding
 
 logger = logging.getLogger(__name__)
@@ -36,6 +35,7 @@ def _get_chroma_client():
     global _chroma_client
     if _chroma_client is None:
         import chromadb
+
         _chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
     return _chroma_client
 
@@ -85,9 +85,9 @@ class MemoryVectorService:
         memory_type: str = "plot",
         title: str = "",
         importance: float = 0.5,
-        chapter_number: Optional[int] = None,
-        metadata: Optional[dict] = None,
-    ) -> Optional[str]:
+        chapter_number: int | None = None,
+        metadata: dict | None = None,
+    ) -> str | None:
         """添加一条记忆到向量库。返回 vector_id（失败返回 None）。"""
         if not content or not content.strip():
             return None
@@ -98,7 +98,9 @@ class MemoryVectorService:
             if self.ai:
                 vec = await self.ai.embed_one(content[:2000])
             if not vec:
-                logger.warning(f"[memory] embedding 全部失败（本地+API），跳过向量入库: memory_id={memory_id}")
+                logger.warning(
+                    f"[memory] embedding 全部失败（本地+API），跳过向量入库: memory_id={memory_id}"
+                )
                 return None
         try:
             col = _get_collection(user_id, project_id)
@@ -130,10 +132,10 @@ class MemoryVectorService:
         user_id: int,
         project_id: int,
         query: str,
-        memory_types: Optional[list[str]] = None,
+        memory_types: list[str] | None = None,
         limit: int = 10,
         min_importance: float = 0.0,
-        chapter_range: Optional[tuple[int, int]] = None,
+        chapter_range: tuple[int, int] | None = None,
     ) -> list[dict]:
         """向量检索。返回 [{content, similarity, metadata}]。"""
         if not query.strip():
@@ -176,16 +178,18 @@ class MemoryVectorService:
             ch = int(meta.get("chapter_number", 0))
             if chapter_range and not (chapter_range[0] <= ch <= chapter_range[1]):
                 continue
-            out.append({
-                "content": doc,
-                "similarity": round(similarity, 3),
-                "metadata": meta,
-                "memory_id": meta.get("memory_id"),
-                "memory_type": meta.get("memory_type"),
-                "title": meta.get("title", ""),
-                "importance": importance,
-                "chapter_number": ch,
-            })
+            out.append(
+                {
+                    "content": doc,
+                    "similarity": round(similarity, 3),
+                    "metadata": meta,
+                    "memory_id": meta.get("memory_id"),
+                    "memory_type": meta.get("memory_type"),
+                    "title": meta.get("title", ""),
+                    "importance": importance,
+                    "chapter_number": ch,
+                }
+            )
             if len(out) >= limit:
                 break
         return out
@@ -260,13 +264,22 @@ class MemoryVectorService:
 
         # 1. 最近章节记忆（查 DB，按章节号倒序）
         async with async_session() as db:
-            recent = (await db.execute(
-                select(StoryMemory).where(
-                    StoryMemory.project_id == project_id,
-                    StoryMemory.chapter_number.isnot(None),
-                    StoryMemory.chapter_number < current_chapter,
-                ).order_by(StoryMemory.chapter_number.desc()).limit(top_k)
-            )).scalars().all()
+            recent = (
+                (
+                    await db.execute(
+                        select(StoryMemory)
+                        .where(
+                            StoryMemory.project_id == project_id,
+                            StoryMemory.chapter_number.isnot(None),
+                            StoryMemory.chapter_number < current_chapter,
+                        )
+                        .order_by(StoryMemory.chapter_number.desc())
+                        .limit(top_k)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             for m in recent:
                 if m.id in seen_ids:
                     continue
@@ -277,25 +290,34 @@ class MemoryVectorService:
         # 2. 语义相关（用大纲做 query）
         if chapter_outline.strip():
             results = await self.search(
-                user_id, project_id, chapter_outline[:500],
+                user_id,
+                project_id,
+                chapter_outline[:500],
                 memory_types=["plot", "character", "world"],
-                limit=top_k, min_importance=0.3,
+                limit=top_k,
+                min_importance=0.3,
             )
             await _gather(results, "语义相关")
 
         # 3. 角色相关
         if character_names.strip():
             results = await self.search(
-                user_id, project_id, character_names[:500],
+                user_id,
+                project_id,
+                character_names[:500],
                 memory_types=["character", "relationship"],
-                limit=top_k, min_importance=0.3,
+                limit=top_k,
+                min_importance=0.3,
             )
             await _gather(results, "角色相关")
 
         # 4. 重要情节点
         results = await self.search(
-            user_id, project_id, "重要 转折 高潮 关键 爆点",
-            limit=top_k, min_importance=0.7,
+            user_id,
+            project_id,
+            "重要 转折 高潮 关键 爆点",
+            limit=top_k,
+            min_importance=0.7,
         )
         await _gather(results, "重要情节")
 
@@ -303,16 +325,19 @@ class MemoryVectorService:
         # 用大纲语义 query + 时间范围过滤，专门召回近期窗口外的历史记忆
         if chapter_outline.strip() and current_chapter > 10:
             lookback_start = max(1, current_chapter - 30)  # 回溯起点
-            lookback_end = current_chapter - 10            # 回溯终点（排除最近10章，已有摘要链覆盖）
+            lookback_end = current_chapter - 10  # 回溯终点（排除最近10章，已有摘要链覆盖）
             if lookback_start < lookback_end:
                 results = await self.search(
-                    user_id, project_id, chapter_outline[:500],
+                    user_id,
+                    project_id,
+                    chapter_outline[:500],
                     memory_types=["plot", "character", "foreshadow", "conflict"],
-                    limit=top_k, min_importance=0.4,
+                    limit=top_k,
+                    min_importance=0.4,
                     chapter_range=(lookback_start, lookback_end),
                 )
                 await _gather(results, "时间线回溯")
 
         if not snippets:
             return ""
-        return "\n\n".join(snippets[:top_k * 3])
+        return "\n\n".join(snippets[: top_k * 3])

@@ -1,4 +1,5 @@
 """FastAPI 主入口"""
+
 import os
 from contextlib import asynccontextmanager
 
@@ -6,26 +7,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
+from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.compat import router as compat_router
+from app.api.routes.global_routes import router as global_router
+from app.api.routes.mcp import router as mcp_router
+from app.api.routes.project_init import router as project_init_router
 from app.api.routes.projects_pkg import router as projects_router
 from app.api.routes.prompt_templates import router as prompt_templates_router
-from app.api.routes.global_routes import router as global_router
-from app.api.routes.writing_styles import router as writing_styles_router
-from app.api.routes.project_init import router as project_init_router
 from app.api.routes.tasks import router as tasks_router
+from app.api.routes.writing_styles import router as writing_styles_router
 from app.api.routes.ws_tasks import router as ws_tasks_router
-from app.api.routes.admin import router as admin_router
-from app.api.routes.mcp import router as mcp_router
 from app.core.auth import get_password_hash
 from app.core.database import Base, async_session, engine
-from app.models.user import User
 from app.models.skill import Skill
-from app.models.character_change_log import CharacterChangeLog  # 确保表在 create_all 前注册
-from app.models.relation_change_log import RelationChangeLog
-from app.models.mcp_server import McpServer  # 确保表在 create_all 前注册
+from app.models.user import User
 from app.skills.builtin import init_builtin_skills
 
 # 默认用户配置
@@ -40,22 +38,29 @@ _DEFAULT_USER = {
 async def _cleanup_zombie_tasks():
     """清理僵尸任务：进程崩溃后残留的 running/pending 任务标记为 failed。"""
     from sqlalchemy import text
+
     async with engine.begin() as conn:
         # BackgroundTask 表
-        await conn.execute(text(
-            "UPDATE background_tasks SET status='failed', error='进程重启时自动清理（任务未正常完成）' "
-            "WHERE status IN ('pending', 'running')"
-        ))
+        await conn.execute(
+            text(
+                "UPDATE background_tasks SET status='failed', error='进程重启时自动清理（任务未正常完成）' "
+                "WHERE status IN ('pending', 'running')"
+            )
+        )
         # BatchGenerationTask 表
-        await conn.execute(text(
-            "UPDATE batch_generation_tasks SET status='failed', error='进程重启时自动清理' "
-            "WHERE status IN ('pending', 'running')"
-        ))
+        await conn.execute(
+            text(
+                "UPDATE batch_generation_tasks SET status='failed', error='进程重启时自动清理' "
+                "WHERE status IN ('pending', 'running')"
+            )
+        )
         # ProjectInitTask 表（旧 init-task）
-        await conn.execute(text(
-            "UPDATE project_init_tasks SET status='failed', error='进程重启时自动清理' "
-            "WHERE status IN ('pending', 'running')"
-        ))
+        await conn.execute(
+            text(
+                "UPDATE project_init_tasks SET status='failed', error='进程重启时自动清理' "
+                "WHERE status IN ('pending', 'running')"
+            )
+        )
 
 
 async def _ensure_default_user():
@@ -85,6 +90,7 @@ async def _auto_migrate():
     新增列时在此登记：(表名, 列定义SQL)
     """
     from sqlalchemy import text
+
     migrations = [
         # 第1批：AI 多 Provider + 记忆向量
         ("ai_model_configs", "ADD COLUMN provider VARCHAR(20) DEFAULT 'openai'"),
@@ -200,6 +206,7 @@ async def lifespan(app: FastAPI):
     async with async_session() as db:
         if os.getenv("MOYU_RESET_PROMPTS") == "1":
             from app.skills.builtin import force_reset_all_skills
+
             await force_reset_all_skills(db)
             print("[启动] ✅ 已清除所有用户自定义提示词，恢复为系统默认")
         else:
@@ -209,13 +216,14 @@ async def lifespan(app: FastAPI):
     # 同步 Skill 表到 PromptTemplate 版本管理表（首次部署 + 新增 Skill 自动同步）
     async with async_session() as db:
         from app.models.prompt_template import PromptTemplate, PromptVersion
+
         synced = 0
         all_skills = (await db.execute(select(Skill))).scalars().all()
         for skill in all_skills:
             pt_name = skill.name.upper()
-            existing_pt = (await db.execute(
-                select(PromptTemplate).where(PromptTemplate.name == pt_name)
-            )).scalar_one_or_none()
+            existing_pt = (
+                await db.execute(select(PromptTemplate).where(PromptTemplate.name == pt_name))
+            ).scalar_one_or_none()
             if not existing_pt:
                 pt = PromptTemplate(
                     name=pt_name,
@@ -242,9 +250,17 @@ async def lifespan(app: FastAPI):
                 # 兜底修复：旧数据可能存在 PromptTemplate 但无 PromptVersion（current_version_id 为 NULL，
                 # 版本表为空），导致「提示词模板」页面点开后右侧空白。这里自动补建一个 v1 激活版本。
                 if not existing_pt.current_version_id:
-                    existing_versions = (await db.execute(
-                        select(PromptVersion).where(PromptVersion.template_id == existing_pt.id)
-                    )).scalars().all()
+                    existing_versions = (
+                        (
+                            await db.execute(
+                                select(PromptVersion).where(
+                                    PromptVersion.template_id == existing_pt.id
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
                     if not existing_versions:
                         ver = PromptVersion(
                             template_id=existing_pt.id,
@@ -261,9 +277,13 @@ async def lifespan(app: FastAPI):
                         synced += 1
                         continue
                 if existing_pt.current_version_id:
-                    active_ver = (await db.execute(
-                        select(PromptVersion).where(PromptVersion.id == existing_pt.current_version_id)
-                    )).scalar_one_or_none()
+                    active_ver = (
+                        await db.execute(
+                            select(PromptVersion).where(
+                                PromptVersion.id == existing_pt.current_version_id
+                            )
+                        )
+                    ).scalar_one_or_none()
                     if active_ver and active_ver.system_prompt != skill.system_prompt:
                         active_ver.system_prompt = skill.system_prompt or ""
                         active_ver.variables = skill.parameters or {}
@@ -319,7 +339,9 @@ if os.path.exists(frontend_dir):
         # API 路由不走前端
         if path.startswith("api/"):
             return {"error": "not found"}
-        file_path = os.path.join(frontend_dir, path) if path else os.path.join(frontend_dir, "index.html")
+        file_path = (
+            os.path.join(frontend_dir, path) if path else os.path.join(frontend_dir, "index.html")
+        )
         if os.path.isfile(file_path):
             return FileResponse(file_path)
         return FileResponse(os.path.join(frontend_dir, "index.html"))

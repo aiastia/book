@@ -1,10 +1,12 @@
 """认证路由"""
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.auth import create_access_token, get_current_user, get_password_hash, verify_password
 from app.core.database import get_db
-from app.core.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
@@ -47,7 +49,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
-        user={"id": user.id, "username": user.username, "nickname": user.nickname, "is_admin": user.is_admin},
+        user={
+            "id": user.id,
+            "username": user.username,
+            "nickname": user.nickname,
+            "is_admin": user.is_admin,
+        },
     )
 
 
@@ -60,13 +67,24 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(
         access_token=token,
-        user={"id": user.id, "username": user.username, "nickname": user.nickname, "is_admin": user.is_admin},
+        user={
+            "id": user.id,
+            "username": user.username,
+            "nickname": user.nickname,
+            "is_admin": user.is_admin,
+        },
     )
 
 
 @router.get("/me")
 async def get_me(user=Depends(get_current_user)):
-    return {"id": user.id, "username": user.username, "nickname": user.nickname, "is_admin": user.is_admin, "settings": user.settings}
+    return {
+        "id": user.id,
+        "username": user.username,
+        "nickname": user.nickname,
+        "is_admin": user.is_admin,
+        "settings": user.settings,
+    }
 
 
 class ChangePasswordRequest(BaseModel):

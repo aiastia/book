@@ -1,14 +1,16 @@
 import asyncio
+import logging
 import os
 import re
-import logging
+
 """Skill 执行引擎"""
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
-from app.models.skill import Skill, SkillConfig
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.ai_client import AIClient
 from app.core.config import settings
+from app.models.skill import Skill, SkillConfig
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,9 @@ logger = logging.getLogger(__name__)
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
 
-def _resolve_includes(text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None) -> str:
+def _resolve_includes(
+    text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None
+) -> str:
     """解析提示词中的 @include:filename 指令，替换为文件内容。
 
     支持嵌套 include（最多 5 层），自动检测循环引用。
@@ -45,7 +49,7 @@ def _resolve_includes(text: str, base_dir: str = None, seen: set = None, user_ov
             return f"[@include 文件不存在: {fname}]"
         seen.add(fname)
         try:
-            with open(inc_path, "r", encoding="utf-8") as f:
+            with open(inc_path, encoding="utf-8") as f:
                 content = f.read()
         except Exception:
             return f"[@include 读取失败: {fname}]"
@@ -77,8 +81,9 @@ _COND_RE = re.compile(
 _COND_FN = {
     # style_traits 非空且 traits 开关开启时，认为该维度已由 style_traits 承担，
     # 模板里与之重叠的条目删除，避免重复注入。
-    "has_style_traits": lambda ctx: bool(ctx.get("style_traits"))
-    and ctx.get("style_enable_traits", True),
+    "has_style_traits": lambda ctx: (
+        bool(ctx.get("style_traits")) and ctx.get("style_enable_traits", True)
+    ),
 }
 
 
@@ -88,6 +93,7 @@ def _apply_conditional_blocks(text: str, context: dict) -> str:
     满足条件 → 整段删除（标记 + 内容）。
     不满足   → 只保留块内文本（去掉标记）。
     """
+
     def _replace(m: re.Match) -> str:
         cond = m.group(1)
         inner = m.group(2)
@@ -100,123 +106,205 @@ def _apply_conditional_blocks(text: str, context: dict) -> str:
 
 # ===== 上下文自动注入 =====
 
+
 def _fmt_project(ctx: dict) -> str:
     parts = []
-    if ctx.get("title"): parts.append(f"书名：{ctx['title']}")
-    if ctx.get("genre"): parts.append(f"题材：{ctx['genre']}")
-    if ctx.get("synopsis"): parts.append(f"简介：{ctx['synopsis']}")
+    if ctx.get("title"):
+        parts.append(f"书名：{ctx['title']}")
+    if ctx.get("genre"):
+        parts.append(f"题材：{ctx['genre']}")
+    if ctx.get("synopsis"):
+        parts.append(f"简介：{ctx['synopsis']}")
     # 叙事视角不在此处输出——已由 <writing_style> 的 pov 字段唯一承载，避免重复
     cnt = ctx.get("chapter_count", "")
-    if cnt: parts.append(f"章节数：{cnt}")
+    if cnt:
+        parts.append(f"章节数：{cnt}")
     return "\n".join(parts)
+
 
 def _fmt_previous(ctx: dict) -> str:
     parts = []
     prev = ctx.get("continuation_point", "")
-    if prev: parts.append(f"上章结尾：{prev[:500]}")
+    if prev:
+        parts.append(f"上章结尾：{prev[:500]}")
     content = ctx.get("previous_chapter_content", "")
-    if content: parts.append(f"上章正文：{content[:800]}")
+    if content:
+        parts.append(f"上章正文：{content[:800]}")
     summary = ctx.get("previous_chapter_summary") or ctx.get("previous_summary", "")
-    if summary: parts.append(f"上章摘要：{summary[:300]}")
+    if summary:
+        parts.append(f"上章摘要：{summary[:300]}")
     return "\n".join(parts) if parts else ""
+
 
 def _mk(label, keys, fn):
     return (label, fn, keys)
 
+
 _CONTEXT_BLOCKS = {
-    "project":    _mk("【小说信息】", ["title","genre","synopsis","narrative_perspective","narrative_pov","chapter_count"], _fmt_project),
-    "world":      _mk("【世界观】", ["world_info"], lambda c: str(c.get("world_info",""))),
-    "characters": _mk("【角色信息】", ["characters_info"], lambda c: str(c.get("characters_info",""))),
-    "orgs":       _mk("【组织与势力】", ["organizations_info","chapter_careers"], lambda c: str(c.get("organizations_info") or c.get("chapter_careers",""))),
-    "outline":    _mk("【本章大纲】", ["chapter_outline","expansion_plan"], lambda c: str(c.get("chapter_outline") or c.get("expansion_plan",""))),
-    "previous":   _mk("【前章衔接】", ["continuation_point","previous_chapter_content","previous_chapter_summary","previous_summary"], _fmt_previous),
-    "foreshadow": _mk("【伏笔提醒】", ["foreshadow_reminders","pending_foreshadows"], lambda c: str(c.get("foreshadow_reminders") or c.get("pending_foreshadows",""))),
-    "memory":     _mk("【相关记忆】", ["relevant_memories","recalled_memories"], lambda c: str(c.get("relevant_memories") or c.get("recalled_memories",""))),
-    "recent":     _mk("【近期脉络】", ["recent_outlines","recent_expansion_plans","recent_chapters_context"], lambda c: str(c.get("recent_outlines") or c.get("recent_expansion_plans") or c.get("recent_chapters_context",""))),
-    "quality":    _mk("【质量趋势】", ["quality_trends","quality_trends_detail"], lambda c: str(c.get("quality_trends_detail") or c.get("quality_trends",""))),
-    "past_outlines": _mk("【已有大纲】", ["recent_outlines_json","existing_chapters"], lambda c: str(c.get("recent_outlines_json") or c.get("existing_chapters",""))),
-    "foreshadow_ctx": _mk("【伏笔上下文】", ["foreshadow_context"], lambda c: str(c.get("foreshadow_context",""))),
+    "project": _mk(
+        "【小说信息】",
+        ["title", "genre", "synopsis", "narrative_perspective", "narrative_pov", "chapter_count"],
+        _fmt_project,
+    ),
+    "world": _mk("【世界观】", ["world_info"], lambda c: str(c.get("world_info", ""))),
+    "characters": _mk(
+        "【角色信息】", ["characters_info"], lambda c: str(c.get("characters_info", ""))
+    ),
+    "orgs": _mk(
+        "【组织与势力】",
+        ["organizations_info", "chapter_careers"],
+        lambda c: str(c.get("organizations_info") or c.get("chapter_careers", "")),
+    ),
+    "outline": _mk(
+        "【本章大纲】",
+        ["chapter_outline", "expansion_plan"],
+        lambda c: str(c.get("chapter_outline") or c.get("expansion_plan", "")),
+    ),
+    "previous": _mk(
+        "【前章衔接】",
+        [
+            "continuation_point",
+            "previous_chapter_content",
+            "previous_chapter_summary",
+            "previous_summary",
+        ],
+        _fmt_previous,
+    ),
+    "foreshadow": _mk(
+        "【伏笔提醒】",
+        ["foreshadow_reminders", "pending_foreshadows"],
+        lambda c: str(c.get("foreshadow_reminders") or c.get("pending_foreshadows", "")),
+    ),
+    "memory": _mk(
+        "【相关记忆】",
+        ["relevant_memories", "recalled_memories"],
+        lambda c: str(c.get("relevant_memories") or c.get("recalled_memories", "")),
+    ),
+    "recent": _mk(
+        "【近期脉络】",
+        ["recent_outlines", "recent_expansion_plans", "recent_chapters_context"],
+        lambda c: str(
+            c.get("recent_outlines")
+            or c.get("recent_expansion_plans")
+            or c.get("recent_chapters_context", "")
+        ),
+    ),
+    "quality": _mk(
+        "【质量趋势】",
+        ["quality_trends", "quality_trends_detail"],
+        lambda c: str(c.get("quality_trends_detail") or c.get("quality_trends", "")),
+    ),
+    "past_outlines": _mk(
+        "【已有大纲】",
+        ["recent_outlines_json", "existing_chapters"],
+        lambda c: str(c.get("recent_outlines_json") or c.get("existing_chapters", "")),
+    ),
+    "foreshadow_ctx": _mk(
+        "【伏笔上下文】", ["foreshadow_context"], lambda c: str(c.get("foreshadow_context", ""))
+    ),
 }
 
 # skill → 注入的上下文块（前缀匹配，长前缀优先）
 # 标记：🔵=初始化管线使用  🟢=页面手动使用  ⚪=内部自动调用
 _SKILL_BLOCKS = {
     # 🔵 世界观生成（初始化 step1 + 页面手动）
-    "world_core_generate":     ["project","world"],
-    "world_detail_generate":   ["project","world"],
-    "world_generate":          ["project","world"],
+    "world_core_generate": ["project", "world"],
+    "world_detail_generate": ["project", "world"],
+    "world_generate": ["project", "world"],
     # 🔵🟢 地点/物品生成（初始化 step4-5 + 页面手动）
-    "locations_generate":      ["project","world"],
-    "items_generate":          ["project","world"],
+    "locations_generate": ["project", "world"],
+    "items_generate": ["project", "world"],
     # 🔵 职业体系生成（初始化 step2）
-    "career_system_generation":["project","world"],
+    "career_system_generation": ["project", "world"],
     # 🔵 组织生成（初始化 step6 + 页面手动）
-    "organization_generate":   ["project","world","characters"],
-    "single_organization_":    ["project","world","characters"],
-    "auto_organization_":      ["project","world","characters"],
+    "organization_generate": ["project", "world", "characters"],
+    "single_organization_": ["project", "world", "characters"],
+    "auto_organization_": ["project", "world", "characters"],
     # 🔵 角色批量生成（初始化 step3）
-    "characters_batch_generation": ["project","world","orgs"],
-    "character_generate":      ["project","world","orgs"],
+    "characters_batch_generation": ["project", "world", "orgs"],
+    "character_generate": ["project", "world", "orgs"],
     # 🔵 角色关系生成（初始化 step7）
     "character_relations_generate": ["project"],  # characters_info 已在模板中通过变量注入，不再重复
     # 🔵 大纲生成/续写（初始化 step8 + 页面手动）
-    "outline_create":          ["project","world","characters","orgs","past_outlines","foreshadow_ctx"],
-    "outline_continue":        ["project","world","characters","orgs","recent","past_outlines","foreshadow_ctx"],
-    "outline_expand_":         ["project","world","orgs","outline"],  # characters_info 已在模板中通过变量注入
+    "outline_create": ["project", "world", "characters", "orgs", "past_outlines", "foreshadow_ctx"],
+    "outline_continue": [
+        "project",
+        "world",
+        "characters",
+        "orgs",
+        "recent",
+        "past_outlines",
+        "foreshadow_ctx",
+    ],
+    "outline_expand_": [
+        "project",
+        "world",
+        "orgs",
+        "outline",
+    ],  # characters_info 已在模板中通过变量注入
     # ⚪ 角色职业/组织分配（初始化内部调用 + 页面手动触发）
-    "career_assign":           ["project","characters"],
-    "org_member_assign":       ["project","characters","orgs"],
+    "career_assign": ["project", "characters"],
+    "org_member_assign": ["project", "characters", "orgs"],
     # 🟢 章节生成（页面逐章/批量生成）
     # characters_info 和 chapter_careers 已在模板中通过变量注入，不再重复
     # outline/foreshadow/memory 也在模板中注入，此处仅保留额外 context
-    "chapter_generation_":     ["project","world","previous","recent","quality"],
-    "chapter_generate_":       ["project","world","previous","recent","quality"],
+    "chapter_generation_": ["project", "world", "previous", "recent", "quality"],
+    "chapter_generate_": ["project", "world", "previous", "recent", "quality"],
     # ⚪ 章节后处理（自动摘要/分析）
-    "chapter_summary":         ["project","outline"],
-    "plot_analysis":           ["project","outline","foreshadow"],
-    "volume_summary":          ["project","recent"],
+    "chapter_summary": ["project", "outline"],
+    "plot_analysis": ["project", "outline", "foreshadow"],
+    "volume_summary": ["project", "recent"],
     # 🟢 灵感模式/导入
-    "inspire":                 ["project"],
-    "inspiration_":            ["project"],
-    "book_import_":            ["project"],
+    "inspire": ["project"],
+    "inspiration_": ["project"],
+    "book_import_": ["project"],
     # 🟢 伏笔规划/去AI味/章节重写
-    "foreshadow_plan":         ["project","outline","foreshadow"],  # characters_info 已在模板中通过变量注入
-    "ai_denoising":            ["project","outline"],
-    "chapter_planner":         ["project"],
-    "partial_regenerate":      ["project","outline","characters"],
-    "chapter_regeneration_":   ["project","outline","characters"],
+    "foreshadow_plan": [
+        "project",
+        "outline",
+        "foreshadow",
+    ],  # characters_info 已在模板中通过变量注入
+    "ai_denoising": ["project", "outline"],
+    "chapter_planner": ["project"],
+    "partial_regenerate": ["project", "outline", "characters"],
+    "chapter_regeneration_": ["project", "outline", "characters"],
     # ⚪ 兜底
-    "_default_":               ["project"],
+    "_default_": ["project"],
 }
+
 
 def _get_blocks(skill_name: str) -> list[str]:
     for prefix, blocks in _SKILL_BLOCKS.items():
-        if prefix == "_default_": continue
+        if prefix == "_default_":
+            continue
         if skill_name == prefix or skill_name.startswith(prefix):
             return blocks
     return _SKILL_BLOCKS["_default_"]
+
 
 def _inject_context_blocks(context: dict, skill_name: str = "") -> list[dict]:
     needed = _get_blocks(skill_name)
     msgs = []
     for bn in needed:
-        if bn not in _CONTEXT_BLOCKS: continue
+        if bn not in _CONTEXT_BLOCKS:
+            continue
         label, fn, keys = _CONTEXT_BLOCKS[bn]
-        if not any(str(context.get(k,"")).strip() for k in keys):
+        if not any(str(context.get(k, "")).strip() for k in keys):
             continue
         content = fn(context).strip()
         if content:
-            msgs.append({"role":"system","content":f"{label}\n{content}"})
+            msgs.append({"role": "system", "content": f"{label}\n{content}"})
     return msgs
 
 
-async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tokens, tools, tool_executor) -> dict:
+async def _chat_with_tools_json(
+    ai_client, messages, model, temperature, max_tokens, tools, tool_executor
+) -> dict:
     """带工具调用的 JSON 输出：先用 chat_with_tools 让 AI 按需查询，再解析最终输出为 JSON。
-    
+
     不再退回无工具模式重试——重试会重新发送完整请求浪费大量 token。
     工具调用已提供充足上下文，解析失败说明 AI 输出本身有问题，直接返回错误即可。
     """
-    import json as _json
     raw = await ai_client.chat_with_tools(
         messages=messages,
         tools=tools,
@@ -231,27 +319,40 @@ async def _chat_with_tools_json(ai_client, messages, model, temperature, max_tok
     content = raw.get("content", "")
     # 尝试解析 JSON
     from app.services.json_helper import clean_json_response, parse_json
+
     try:
         cleaned = clean_json_response(content)
         parsed = parse_json(cleaned)
         if parsed is not None:
-            return {"json": parsed, "content": content, "model": raw.get("model", ""),
-                    "input_tokens": raw.get("input_tokens", 0),
-                    "output_tokens": raw.get("output_tokens", 0),
-                    "duration_ms": raw.get("duration_ms", 0)}
+            return {
+                "json": parsed,
+                "content": content,
+                "model": raw.get("model", ""),
+                "input_tokens": raw.get("input_tokens", 0),
+                "output_tokens": raw.get("output_tokens", 0),
+                "duration_ms": raw.get("duration_ms", 0),
+            }
     except Exception as e:
         return {"json": None, "error": f"工具调用后JSON解析异常: {e}", "content": content}
     # parse_json 返回 None（非异常），也视为失败
-    return {"json": None, "error": "工具调用后无法解析JSON（AI未返回有效JSON结构）", "content": content}
+    return {
+        "json": None,
+        "error": "工具调用后无法解析JSON（AI未返回有效JSON结构）",
+        "content": content,
+    }
 
 
 _SKILL_TO_THINKING_MODE = {
     # 世界观生成
-    "world_core_generate": "world", "world_detail_generate": "world", "world_generate": "world",
+    "world_core_generate": "world",
+    "world_detail_generate": "world",
+    "world_generate": "world",
     # 角色生成
-    "character_generate": "character", "characters_batch_generation": "character",
+    "character_generate": "character",
+    "characters_batch_generation": "character",
     # 大纲
-    "outline_create": "outline", "outline_continue": "outline",
+    "outline_create": "outline",
+    "outline_continue": "outline",
     # 剧情展开
     "outline_expand_single": "expand",
     # 章节正文（1-1 / 1-N 首章和续章）
@@ -261,6 +362,7 @@ _SKILL_TO_THINKING_MODE = {
     # 剧情分析
     "plot_analysis": "analysis",
 }
+
 
 def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict) -> dict:
     """返回需要覆盖的参数 dict（temperature / reasoning），供 execute_skill 合并。"""
@@ -316,6 +418,7 @@ class SkillEngine:
             return self._user_ai_defaults_cache
         try:
             from app.models.ai_model import AIModelConfig
+
             result = await self.db.execute(
                 select(AIModelConfig).where(
                     AIModelConfig.user_id == self.user_id,
@@ -338,7 +441,7 @@ class SkillEngine:
             pass
         return self._user_ai_defaults_cache
 
-    async def get_skill(self, skill_name: str) -> Optional[Skill]:
+    async def get_skill(self, skill_name: str) -> Skill | None:
         result = await self.db.execute(select(Skill).where(Skill.name == skill_name))
         skill = result.scalar_one_or_none()
         if skill:
@@ -361,18 +464,21 @@ class SkillEngine:
         result = await self.db.execute(q)
         return list(result.scalars().all())
 
-    async def get_user_config(self, skill_id: int) -> Optional[dict]:
+    async def get_user_config(self, skill_id: int) -> dict | None:
         if not self.user_id:
             return None
         result = await self.db.execute(
             select(SkillConfig).where(
-                SkillConfig.skill_id == skill_id,
-                SkillConfig.user_id == self.user_id
+                SkillConfig.skill_id == skill_id, SkillConfig.user_id == self.user_id
             )
         )
         cfg = result.scalar_one_or_none()
         if cfg:
-            return {"is_enabled": cfg.is_enabled, "is_customized": cfg.is_customized, "config": cfg.config}
+            return {
+                "is_enabled": cfg.is_enabled,
+                "is_customized": cfg.is_customized,
+                "config": cfg.config,
+            }
         return None
 
     async def _get_user_include_overrides(self) -> dict:
@@ -384,7 +490,9 @@ class SkillEngine:
             return {}
         # 查所有 shared 类型的 skill，且用户有自定义 system_prompt
         result = await self.db.execute(
-            select(SkillConfig).join(Skill, SkillConfig.skill_id == Skill.id).where(
+            select(SkillConfig)
+            .join(Skill, SkillConfig.skill_id == Skill.id)
+            .where(
                 SkillConfig.user_id == self.user_id,
                 Skill.category == "shared",
                 SkillConfig.is_customized == True,
@@ -397,7 +505,9 @@ class SkillEngine:
             if not custom_prompt:
                 continue
             # 查对应的 skill 名，构造 @include 文件名
-            skill = (await self.db.execute(select(Skill).where(Skill.id == cfg.skill_id))).scalar_one_or_none()
+            skill = (
+                await self.db.execute(select(Skill).where(Skill.id == cfg.skill_id))
+            ).scalar_one_or_none()
             if skill:
                 # @include 引用的是 .md 文件名
                 fname = skill.name + ".md"
@@ -431,7 +541,11 @@ class SkillEngine:
 
         system_prompt = skill.system_prompt
         # 只有当用户主动开启了自定义（is_customized=True）且提供了 system_prompt 时才使用用户版本
-        if user_cfg and user_cfg.get("is_customized") and user_cfg.get("config", {}).get("system_prompt"):
+        if (
+            user_cfg
+            and user_cfg.get("is_customized")
+            and user_cfg.get("config", {}).get("system_prompt")
+        ):
             system_prompt = user_cfg["config"]["system_prompt"]
 
         # 解析 @include 指令（支持提示词复用共享片段，用户自定义共享模块优先于文件）
@@ -472,7 +586,9 @@ class SkillEngine:
             _style_prefix = str(context["writing_style_block"])
             logger.info(f"[skill] 写作风格前置注入成功，长度={len(_style_prefix)}")
         else:
-            logger.warning(f"[skill] writing_style_block 为空，写作风格未前置注入。context keys: {list(context.keys())}")
+            logger.warning(
+                f"[skill] writing_style_block 为空，写作风格未前置注入。context keys: {list(context.keys())}"
+            )
 
         messages = []
         if _style_prefix:
@@ -488,7 +604,19 @@ class SkillEngine:
         all_blocks = _inject_context_blocks(context, skill_name)
         info_blocks = []
         write_blocks = []
-        info_markers = ["角色", "世界观", "小说信息", "组织", "伏笔", "大纲", "章节", "前章", "data", "人物", "地点"]
+        info_markers = [
+            "角色",
+            "世界观",
+            "小说信息",
+            "组织",
+            "伏笔",
+            "大纲",
+            "章节",
+            "前章",
+            "data",
+            "人物",
+            "地点",
+        ]
         for m in all_blocks:
             content = m.get("content", "")
             if any(marker in content for marker in info_markers):
@@ -545,7 +673,12 @@ class SkillEngine:
             temperature = _thinking_override["temperature"]
 
         # skill/思考模式都未配置的参数 → 回退到用户的 AI 模型默认值
-        if temperature is None or top_p is None or frequency_penalty is None or presence_penalty is None:
+        if (
+            temperature is None
+            or top_p is None
+            or frequency_penalty is None
+            or presence_penalty is None
+        ):
             user_defaults = await self._get_user_ai_defaults()
             if temperature is None:
                 temperature = user_defaults.get("temperature")
@@ -585,15 +718,17 @@ class SkillEngine:
                     )
                 else:
                     result = await ai_client.chat_stream_collect(
-                        messages=messages, model=model,
-                        temperature=temperature, top_p=top_p,
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        top_p=top_p,
                         max_tokens=max_tokens,
                         frequency_penalty=frequency_penalty,
                         presence_penalty=presence_penalty,
                     )
                 if not result.get("error"):
                     break
-                err = result.get("error","")
+                err = result.get("error", "")
                 if "Connection" in err or "connection" in err or "Timeout" in err:
                     await asyncio.sleep(2 * (attempt + 1))
                     continue
@@ -601,8 +736,10 @@ class SkillEngine:
                 if tools and tool_executor and attempt < 2:
                     logger.warning(f"[skill] 工具调用失败({err[:100]}), 降级为无工具模式重试")
                     result = await ai_client.chat_stream_collect(
-                        messages=messages, model=model,
-                        temperature=temperature, top_p=top_p,
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        top_p=top_p,
                         max_tokens=max_tokens,
                         frequency_penalty=frequency_penalty,
                         presence_penalty=presence_penalty,
@@ -612,19 +749,25 @@ class SkillEngine:
             # JSON 输出技能：如果有工具，走 chat_with_tools 后解析 JSON
             if tools and tool_executor:
                 result = await _chat_with_tools_json(
-                    ai_client, messages, model, temperature, max_tokens,
-                    tools, tool_executor,
+                    ai_client,
+                    messages,
+                    model,
+                    temperature,
+                    max_tokens,
+                    tools,
+                    tool_executor,
                 )
             else:
                 result = await ai_client.chat_json_retry(
-                    messages=messages, model=model,
+                    messages=messages,
+                    model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     frequency_penalty=frequency_penalty,
                     presence_penalty=presence_penalty,
                 )
 
-        for hook in (skill.post_hooks or []):
+        for hook in skill.post_hooks or []:
             hook_type = hook.get("type")
             if hook_type == "parse_json" and result.get("content"):
                 pass
@@ -638,14 +781,16 @@ class SkillEngine:
         result = []
         for s in skills:
             user_cfg = await self.get_user_config(s.id)
-            result.append({
-                "id": s.id,
-                "name": s.name,
-                "display_name": s.display_name,
-                "description": s.description,
-                "category": s.category,
-                "skill_type": s.skill_type,
-                "is_enabled": user_cfg["is_enabled"] if user_cfg else s.is_enabled,
-                "parameters": s.parameters,
-            })
+            result.append(
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "display_name": s.display_name,
+                    "description": s.description,
+                    "category": s.category,
+                    "skill_type": s.skill_type,
+                    "is_enabled": user_cfg["is_enabled"] if user_cfg else s.is_enabled,
+                    "parameters": s.parameters,
+                }
+            )
         return result

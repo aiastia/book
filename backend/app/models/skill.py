@@ -1,6 +1,9 @@
 """Skill 插件模型"""
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Text, Boolean
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+
 from app.core.database import Base
 
 
@@ -26,6 +29,7 @@ class Skill(Base):
 
 class SkillConfig(Base):
     """用户级 Skill 配置（覆盖系统默认）"""
+
     __tablename__ = "skill_configs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
