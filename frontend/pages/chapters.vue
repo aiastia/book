@@ -76,8 +76,9 @@ async function onRewriteWithSuggestions(suggestions: string[]) {
   rewriteCompareOpen.value = false
 
   // 调重写 API
+  let hide: any = null
   try {
-    msg.loading('正在根据建议重写...')
+    hide = msg.loading('正在根据建议重写...')
     const r = await api.regenerateChapter(ch.id, {
       modification_instructions: instructions,
       focus_areas: [],
@@ -86,15 +87,15 @@ async function onRewriteWithSuggestions(suggestions: string[]) {
       target_word_count: null,
       version_note: '根据分析建议重写',
     })
+    hide()
     rewriteNew.value = r?.regenerated_content || ''
-    msg.destroyAll()
     if (rewriteNew.value) {
       rewriteCompareOpen.value = true
     } else {
       msg.warning('重写未返回内容')
     }
   } catch (e: any) {
-    msg.destroyAll()
+    if (hide) hide()
     msg.error('重写失败：' + formatError(e))
   }
 }

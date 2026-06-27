@@ -54,6 +54,7 @@ class RegenerationTask(Base):
             "target_word_count": self.target_word_count,
             "original_word_count": self.original_word_count or 0,
             "regenerated_word_count": self.regenerated_word_count or 0,
+            "regenerated_content": self.regenerated_content or "",
             "version_number": self.version_number or 1,
             "version_note": self.version_note or "",
             "is_applied": self.is_applied or 0,
