@@ -1493,16 +1493,20 @@ class ChapterService:
             # 文本后处理：机械规则清理 AI 口癖
             from app.services.text_cleaner import clean_generated_text, _strip_xml_like_tags
 
+            # 获取 AI 响应元信息（在 result 被遮蔽前取出）
+            skill_result = result  # 保存 execute_skill 返回的原始 dict
+
             # 保存原始输出（清理前），供前端对比
             # 先剥离 DSML/XML 工具调用标签，防止工具调用内容污染 raw_output
             raw_for_save, _dsml_removed = _strip_xml_like_tags(content)
             chapter.raw_output = raw_for_save
-            result = clean_generated_text(content)
-            content = result.cleaned_text
-            if result.stats:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"[cleaner] 第{chapter.chapter_number}章指纹清理: {result.stats}")
+            clean_result = clean_generated_text(content)
+            content = clean_result.cleaned_text
+
+            import logging
+            logger = logging.getLogger(__name__)
+            if clean_result.stats:
+                logger.info(f"[cleaner] 第{chapter.chapter_number}章指纹清理: {clean_result.stats}")
 
             # Diff Rewrite：用小模型改写 cleaner 改不了的句式（如果用户配置了润色 API）
             try:
@@ -1554,10 +1558,10 @@ class ChapterService:
                 project_id=self.project_id,
                 chapter_id=chapter.id,
                 prompt_name=skill_name,
-                model_used=result.get("model", ""),
-                input_tokens=result.get("input_tokens", 0),
-                output_tokens=result.get("output_tokens", 0),
-                duration_ms=result.get("duration_ms", 0),
+                model_used=skill_result.get("model", ""),
+                input_tokens=skill_result.get("input_tokens", 0),
+                output_tokens=skill_result.get("output_tokens", 0),
+                duration_ms=skill_result.get("duration_ms", 0),
                 response_preview=content[:500],
             )
             self.db.add(history)

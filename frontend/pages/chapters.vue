@@ -5,6 +5,7 @@ import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
+import RewriteSuggestionModal from '~/components/RewriteSuggestionModal.vue'
 
 useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
@@ -59,55 +60,46 @@ function openAnalysis(c: any) {
   })
 }
 
-// ===== 分析建议 → 重写 → 对比 =====
+// ===== 分析建议 → 改写弹窗 → 对比 =====
+const rewriteSuggestOpen = ref(false)
+const rewriteSuggestChapter = ref<any>(null)
+const rewriteSuggestList = ref<string[]>([])
 const rewriteCompareOpen = ref(false)
+const rewriteCompareChapter = ref<any>(null)
 const rewriteOriginal = ref('')
 const rewriteNew = ref('')
 
-async function onRewriteWithSuggestions(suggestions: string[]) {
+function onRewriteWithSuggestions(suggestions: string[]) {
   if (!analysisPanelChapter.value) return
-  const ch = analysisPanelChapter.value
-  // 把建议拼成修改指令
-  const instructions = suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')
-  // 获取原文内容
-  const full = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${ch.id}`).catch(() => null)
-  rewriteOriginal.value = full?.content || ''
-  rewriteNew.value = ''
-  rewriteCompareOpen.value = false
+  rewriteSuggestChapter.value = analysisPanelChapter.value
+  rewriteSuggestList.value = suggestions
+  rewriteSuggestOpen.value = true
+}
 
-  // 调重写 API
-  let hide: any = null
+async function onRewriteSuggestionComplete(newContent: string) {
+  const ch = rewriteSuggestChapter.value
+  if (!ch) return
   try {
-    hide = msg.loading('正在根据建议重写...')
-    const r = await api.regenerateChapter(ch.id, {
-      modification_instructions: instructions,
-      focus_areas: [],
-      preserve_elements: [],
-      length_mode: 'similar',
-      target_word_count: null,
-      version_note: '根据分析建议重写',
-    })
-    hide()
-    rewriteNew.value = r?.regenerated_content || ''
-    if (rewriteNew.value) {
-      rewriteCompareOpen.value = true
-    } else {
-      msg.warning('重写未返回内容')
-    }
-  } catch (e: any) {
-    if (hide) hide()
-    msg.error('重写失败：' + formatError(e))
+    const full = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${ch.id}`)
+    rewriteOriginal.value = full?.content || ''
+  } catch {
+    rewriteOriginal.value = ch.content || ''
   }
+  rewriteNew.value = newContent
+  rewriteCompareChapter.value = ch
+  rewriteCompareOpen.value = true
+  // 关闭分析面板
+  analysisPanelChapter.value = null
 }
 
 async function onApplyRewriteCompare() {
-  if (!analysisPanelChapter.value) return
-  const ch = analysisPanelChapter.value
+  const ch = rewriteCompareChapter.value
+  if (!ch) return
   try {
     await api.updateChapter(ch.id, { content: rewriteNew.value })
     msg.success('已应用新内容')
     rewriteCompareOpen.value = false
-    analysisPanelChapter.value = null
+    rewriteCompareChapter.value = null
     await refreshList()
   } catch (e: any) {
     msg.error('应用失败：' + formatError(e))
@@ -1110,7 +1102,7 @@ async function onPlanSaved() {
       </div>
     </a-modal>
 
-    <!-- ===== 重写对比弹窗（分析建议 → 重写 → 对比） ===== -->
+    <!-- ===== 重写对比弹窗（分析建议 → 改写 → 对比） ===== -->
     <ContentComparisonModal
       v-model:visible="rewriteCompareOpen"
       title="重写前后对比"
@@ -1118,6 +1110,15 @@ async function onPlanSaved() {
       :new-content="rewriteNew"
       show-actions
       @apply="onApplyRewriteCompare"
+    />
+
+    <!-- ===== 改写方向设置弹窗 ===== -->
+    <RewriteSuggestionModal
+      v-model:visible="rewriteSuggestOpen"
+      :chapter-id="rewriteSuggestChapter?.id ?? null"
+      :suggestions="rewriteSuggestList"
+      :chapter-content="rewriteSuggestChapter?.content || ''"
+      @rewrite-complete="onRewriteSuggestionComplete"
     />
 
     <!-- ===== 修改弹窗 ===== -->
