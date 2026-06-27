@@ -1,61 +1,125 @@
-"""AI 生成正文的后处理管道：机械规则清理 AI 口癖。
-按顺序执行——删除类先删，替换类再改，最后做残留清理。
-扩展只需往 DELETIONS / REPLACEMENTS 加正则即可。
+"""AI 生成正文的后处理管道：多层流水线去 AI 指纹。
+
+设计原则：
+  - 会改变剧情信息的规则 → 不自动删，只统计
+  - 削弱 AI 套话/连接词/重复表达 → 自动处理
+  - 低频词不动，超阈值才降频
+
+模式：
+  safe      — 只做安全替换（词级 + 统计）
+  normal    — 安全 + 句式变换（默认）
+  aggressive — 全部启用，含叙事去重
 """
 
 import re
+from collections import Counter
+from dataclasses import dataclass, field
 
-# 统一角色代词
 _R = r"[他她它]"
 
+
+@dataclass
+class CleanResult:
+    cleaned_text: str
+    stats: dict = field(default_factory=dict)
+
+
 # ====================================================================
-# 删除类：匹配到的文本直接删除（句尾标点保留）
+# 第一层：Lexical（词级）— 仅替换不删除，避免改变语义强度
 # ====================================================================
-DELETIONS: list[tuple[str, str]] = [
-    # ---- 感官声明：角色已经在感受，不需要再声明 ----
-    (rf"{_R}(?:感觉得到|感觉到|能感到)[，。]", ""),
-    # ---- 意识/发现/觉得 → 删句末声明（句中整句不删，留给 cleaner 不敢动的边界） ----
-    (rf"{_R}(?:意识到|发现|觉得|认为|猜想)[，。]", ""),
-    # ---- 引语前缀：对话直接起，不先声明"开口" ----
-    (rf"{_R}开口[，。]", ""),
-    # ---- AI 解释自己的比喻 ----
-    (r"不是比喻[，。]", ""),
-    # ---- 叙事捷径："当然知道" = 作者偷懒 ----
-    (rf"{_R}当然知道[。，]", ""),
-    # ---- 动作的意图解释：只删抽象意图（"借着思考"），保留具体动作（"借着斜面"） ----
-    (rf"{_R}在借着[^，。]{{2,12}}(?:思考|判断|观察|确认|打量|计算)[，。]", ""),
-    # ---- 叙事自评 → 删 ----
-    (rf"{_R}做了一件更(?:疯|蠢|危险)的事[。，]", ""),
-    # ---- "现在不是X的时候" → 删 ----
-    (r"现在不是(?:回忆|感慨|犹豫|害怕)的时候[。，]", ""),
-    # ---- 场景定位句：AI 喜欢放一句"X就在Y"作为锚点 ----
-    (rf"就?在{_R}(?:脚边|手边)[，。]", ""),
-    # ---- 元评论：角色/旁白评价自己的叙事 ----
-    (r"那是?世界上最荒谬的[^。]{2,30}[。]", ""),
+LEXICAL_SAFE: list[tuple[str, str]] = [
+    # "突然/忽然" → 删（动作自身已表达急迫，删掉不影响语义）
+    (r"[，。]?突然[，]?", ""),
+    (r"[，。]?忽然[，]?", ""),
+    # "某种" → 删
+    (r"某种([^，。；]{1,10})", r"\1"),
 ]
 
-# ====================================================================
-# "不是A，是B" → 只保留 B
-# ====================================================================
-NOT_A_BUT_B_PATTERN = re.compile(
-    r"不是([^，。；]{2,20})(?:[，。]*(?:而是?|是))\s*([^，。]{2,50})"
-)
+LEXICAL_NORMAL: list[tuple[str, str]] = [
+    # "甚至" → 删
+    (r"[，]?甚至[，]?", "，"),
+    # "像是" → "像"
+    (r"像是([一一一个只条根片阵股把张座])", r"像\1"),
+]
 
-def _remove_not_a_but_b(text: str) -> str:
-    return NOT_A_BUT_B_PATTERN.sub(r"\2", text)
+LEXICAL_AGGRESSIVE: list[tuple[str, str]] = [
+    # "几乎" → 删（aggressive 才做，safe/normal 只统计）
+    (r"[，]?几乎[，]?", ""),
+    # "完全" → 删（aggressive 才做）
+    (r"完全([^，。]{2,8})", r"\1"),
+    # "整个" → "整"（可能不自然，aggressive 才做）
+    (r"整个([^，。]{1,8})", r"整\1"),
+]
 
 
 # ====================================================================
-# 同义词轮换池：同一章内同部位多次出现时，自动换下一个
+# 第二层：Pattern（句式）— 识别并缩短 AI 句式
+# ====================================================================
+PATTERNS_SAFE: list[tuple[str, str]] = [
+    # "不是A，而是B" → 只保留 B
+    (r"不是([^，。；]{2,20})[，。]*而是\s*([^，。]{2,50})", r"\2"),
+    (r"并不是([^，。；]{2,20})[，。]*而是\s*([^，。]{2,50})", r"\2"),
+    # "直到这一刻/这一瞬/现在" → 删
+    (r"[，。]直到(?:这一刻|这一瞬|现在|此时)[，。]?", "。"),
+    # "那一刻/这一瞬/这一刻" → 删
+    (r"[，。](?:那一刻|这一瞬|这一刻)[，。]?", ""),
+    # 引语前缀 → 删
+    (rf"{_R}开口[，。]", ""),
+    # "不是比喻" → 删
+    (r"不是比喻[，。]", ""),
+    # "现在不是X的时候" → 删
+    (r"现在不是(?:回忆|感慨|犹豫|害怕)的时候[，。]", ""),
+    # 逻辑连接词 → 删（真人写作很少用）
+    (r"[，。]因此[，]?", "。"),
+    (r"[，。]于是[，]?", "。"),
+    (r"[，。]所以[，]?", "。"),
+]
+
+PATTERNS_NORMAL: list[tuple[str, str]] = [
+    # "这意味着/这说明/这代表" → 删整句
+    (r"[，。]这(?:意味着|说明|代表|表示)[^。]{5,40}[。]", "。"),
+    # 感官声明 → 删
+    (rf"{_R}(?:感觉得到|感觉到|能感到)[，。]", ""),
+    # 叙事捷径 → 删
+    (rf"{_R}当然知道[。，]", ""),
+    # "仿佛" → "像"
+    (r"仿佛连([^，。]{3,20})", r"像连\1"),
+    (r"仿佛整个([^，。]{3,20})", r"像整个\1"),
+    (r"仿佛([^，。]{2,20})", r"像\1"),
+    # "像是" → "像"
+    (r"像是([^，。]{2,25})", r"像\1"),
+]
+
+PATTERNS_AGGRESSIVE: list[tuple[str, str]] = [
+    # "不是因为X——而是因为Y" → "因为Y"
+    (r"不是因为(.{2,20})[，。]*而是因为\s*([^，。]{2,50})", r"因为\2"),
+    # "现在不是X的时候"
+    (r"现在不是(?:回忆|感慨|犹豫|害怕)的时候[，。]", ""),
+]
+
+
+# ====================================================================
+# 同义词轮换池
 # ====================================================================
 _BODY_PATTERNS: list[tuple[re.Pattern, list[str]]] = []
 _body_counts: dict[str, int] = {}
 
+_BODY_TRIGGERS: dict[str, list[str]] = {
+    "打了个冷战":   ["后颈一紧", "尾椎一麻", "肩胛一僵"],
+    "打了个颤":     ["小臂绷紧", "虎口发麻", "指尖发凉"],
+    "指节发白":     ["指节泛青", "虎口发麻", "指尖用力"],
+    "呼吸一滞":     ["呼吸顿住", "喉头发紧", "胸口一闷"],
+    "心跳漏了一拍": ["心跳重了一拍", "太阳穴一跳", "胃里一沉"],
+    "喉结滚动":     ["喉头轻轻一动", "咽了一下", "喉间微动"],
+    "瞳孔微缩":     ["瞳孔一敛", "目光收紧", "眼神一闪"],
+    "后背发凉":     ["脊背一寒", "背脊绷紧", "后颈一麻"],
+    "头皮发麻":     ["头皮一紧", "颅顶发凉", "发根倒竖"],
+    "太阳穴突突直跳": ["太阳穴一胀", "额角一跳", "鬓边发紧"],
+}
+
 
 def _rotate_body_word(match: re.Match) -> str:
-    """同义词轮换：归一化 key（去代词），按出现次数轮换。"""
     raw = match.group(0)
-    # 去代词：统一计数，不因"她/他/它"分家
     key = re.sub(rf"^{_R}", "", raw)
     for pat, pool in _BODY_PATTERNS:
         if pat.fullmatch(raw):
@@ -66,17 +130,8 @@ def _rotate_body_word(match: re.Match) -> str:
 
 
 def _init_body_patterns():
-    """初始化身体反应词的正则 + 轮换池。"""
-    triggers: dict[str, list[str]] = {
-        "打了个冷战": ["后颈一紧", "尾椎一麻", "肩胛一僵"],
-        "打了个颤":   ["小臂绷紧", "虎口发麻", "指尖发凉"],
-        "指节发白":   ["指节泛青", "虎口发麻", "指尖用力"],
-        "呼吸一滞":   ["呼吸顿住", "喉头发紧", "胸口一闷"],
-        "心跳漏了一拍": ["心跳重了一拍", "太阳穴跳了一下", "胃里一沉"],
-    }
     _BODY_PATTERNS.clear()
-    for trigger, pool in triggers.items():
-        # 匹配"她打了个冷战"、"他打了个冷战"、"打了个冷战" 三种形式
+    for trigger, pool in _BODY_TRIGGERS.items():
         pat = re.compile(rf"(?:{_R})?{re.escape(trigger)}")
         _BODY_PATTERNS.append((pat, pool))
 
@@ -85,82 +140,163 @@ def _reset_body_counts():
     _body_counts.clear()
 
 
-# 模块加载时初始化
 _init_body_patterns()
 
+# ====================================================================
+# 第三层：Narrative（叙事模式）— 连续同类项去重
+# ====================================================================
+def _dedupe_consecutive_likes(text: str) -> str:
+    """连续比喻去重：2 段留 1，3+ 段只留最后一段。
+    只匹配句首或逗号后的"像"，不匹配"画像/雕像/像素/好像"。"""
+    lines = text.split("\n")
+    like_streak = 0
+    like_indices = []
+    for i, line in enumerate(lines):
+        # 只匹配句首或逗号后的"像"（比喻），排除"画像/雕像/像素/好像"
+        if re.match(r"^(?:[，。]?\s*|[^，。]{0,3}[，。]\s*)像", line) and "好像" not in line[:5]:
+            like_streak += 1
+            like_indices.append(i)
+        else:
+            if like_streak >= 3:
+                for j in like_indices[:-1]:
+                    lines[j] = ""
+            elif like_streak == 2:
+                lines[like_indices[0]] = ""
+            like_streak = 0
+            like_indices = []
+    if like_streak >= 3:
+        for j in like_indices[:-1]:
+            lines[j] = ""
+    elif like_streak == 2:
+        lines[like_indices[0]] = ""
+    return "\n".join(l for l in lines if l.strip() or l == "")
+
+
+def _dedupe_consecutive_negations(text: str) -> str:
+    """连续'X没有Y'句式 → 只保留第一个。"""
+    return re.sub(
+        rf"({_R}没有[^。]{{5,40}}[。])\s*({_R}没有[^。]{{5,40}}[。])",
+        r"\1",
+        text,
+    )
+
+
+def _dedupe_consecutive_psych(text: str) -> dict:
+    """检测连续心理说明句（意识到/发现/知道/明白/觉得），返回统计。"""
+    pattern = rf"({_R}(?:意识到|发现|知道|明白|觉得|认为)[^。]{{3,60}}[。])"
+    matches = [m.group(1) for m in re.finditer(pattern, text)]
+    streaks = []
+    streak = 0
+    for i in range(len(matches)):
+        if i > 0 and text.index(matches[i]) - text.index(matches[i - 1]) < 800:
+            streak += 1
+        else:
+            if streak >= 3:
+                streaks.append(streak)
+            streak = 1
+    if streak >= 3:
+        streaks.append(streak)
+    return {"count": len(matches), "max_streak": max(streaks) if streaks else 0}
+
 
 # ====================================================================
-# 替换类：(pattern, replacement)
+# 第四层：Statistics（频率统计）— 超阈值才降频
 # ====================================================================
-REPLACEMENTS: list[tuple[str, str]] = [
-    # ---- "某种" → 删 ----
-    (r"某种([^，。；]{1,10})", r"\1"),
-    # ---- "发出X的Y" → 压缩 ----
-    (r"发出无声的尖叫", "无声尖叫"),
-    (r"发出一声(?:闷响|脆响|巨响|低吼|嘶鸣|尖叫|哀鸣)", r"\1一声"),
-    (r"发出一声([^，。；]{1,4})", r"\1一声"),
-    # ---- "突然/忽然意识到" → 删"突然/忽然" ----
-    (rf"{_R}(?:突然|忽然)意识到", rf"{_R}意识到"),
-    # ---- "莫名想起" → "想起" ----
-    (rf"{_R}莫名想起", rf"{_R}想起"),
-    # ---- "X没Y。X的Z。" → "X的Z。" ----
-    (rf"{_R}没(?:抬头|回头|动|说话|转身|否认|回答)[。]", ""),
-    # ---- 动作总结 → 同义词轮换（见 _ROTATE_BODY 编译） ----
-    # (r"打了个冷战", ...),  # 改为 _ROTATE_BODY 动态替换
-    # ---- 对话打断标记 ----
-    (rf"[，。]{_R}(?:还)?没说完[。]", "。"),
-    # ---- "两个人都X" → "两人X" ----
-    (r"两个人(?:都|同时)(.{2,20})", r"两人\1"),
-    # ---- "X的余光已经瞥见" → "X余光瞥见" ----
-    (rf"{_R}的余光已经瞥见了", rf"{_R}余光瞥见"),
-    # ---- "像A，像B，像C" → "像C"（三连保留最后一个） ----
-    (r"像[^，]{2,20}，像[^，]{2,20}，像", "像"),
-    # ---- "想起A，想起B" → "想起A——B" ----
-    (r"想起([^，]{3,30})，想起([^，]{3,50})", r"想起\1——\2"),
-    # ---- "不是因为X——虽然Y——而是因为Z" → "不是因为X，而是因为Z" ----
-    (r"不是因为(.{2,20})——虽然.{2,30}——而是因为", r"不是因为\1，而是因为"),
-    # ---- "太X了。X得不正常。" → "X得不正常。" ----
-    (r"太(.{1,6})了[。，]\1得不正常[。]", r"\1得不正常。"),
-    # ---- "开始" + 动作动词 → 删"开始" ----
-    (r"开始([跑跳走看说想握抓踩踏推拉])", r"\1"),
-    # ---- "然后"句首 → 删 ----
-    (r"然后[，。]", ""),
-]
+_STATS_THRESHOLD: dict[str, int] = {
+    "仿佛": 5,  "似乎": 5,  "好像": 5,  "像是": 5,
+    "几乎": 5,  "完全": 4,  "彻底": 3,  "整个": 4,
+    "无比": 3,  "前所未有": 1, "突然": 5, "忽然": 5,
+    "甚至": 6,  "意识到": 6, "发现": 8,  "试图": 5,
+    "表示": 5,  "那一刻": 3, "这一瞬": 3, "这一刻": 3,
+}
 
-# ====================================================================
-# 单词级替换（暂空）
-# ====================================================================
-WORD_REPLACEMENTS: list[tuple[str, str]] = []
+_STATS_REPLACEMENTS: dict[str, str] = {
+    "仿佛": "像",   "似乎": "像",   "好像": "像",   "像是": "像",
+    "几乎": "",      "完全": "",     "彻底": "",     "整个": "整",
+    "无比": "极",   "前所未有": "", "突然": "",     "忽然": "",
+    "甚至": "",      "那一刻": "",  "这一瞬": "",   "这一刻": "",
+}
 
-# ====================================================================
-# TODO: 标记类（暂不启用，后续接前端面板再用）
-# def mark_issues(text: str) -> list[dict]:
-#     ...
-# ====================================================================
+
+def _apply_stats(text: str) -> tuple[str, dict]:
+    """统计高频 AI 词，超阈值时按比例替换。返回 (cleaned_text, stats_report)。"""
+    report = {}
+    for word, threshold in _STATS_THRESHOLD.items():
+        # 用 finditer 避免匹配子串（"像"不匹配"画像/雕像/像素"）
+        pattern = re.compile(rf"(?<!\w){re.escape(word)}(?!\w)")
+        matches = list(pattern.finditer(text))
+        count = len(matches)
+        report[word] = count
+        if count <= threshold:
+            continue
+        replacement = _STATS_REPLACEMENTS.get(word, "")
+        kept = 0
+        def _replace(m):
+            nonlocal kept
+            kept += 1
+            if kept <= threshold:
+                return m.group(0)
+            return replacement
+        text = pattern.sub(_replace, text)
+    return text, report
 
 
 # ====================================================================
 # 主清理函数
 # ====================================================================
-def clean_generated_text(text: str) -> str:
+def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
+    """对 AI 生成的正文执行多层清理管道。
+
+    mode: safe | normal | aggressive
+    """
     if not text:
-        return text
+        return CleanResult(cleaned_text=text, stats={})
 
     _reset_body_counts()
+    stats_report: dict = {}
 
-    for pattern, replacement in DELETIONS:
+    # ---- 第一层：Lexical ----
+    for pattern, replacement in LEXICAL_SAFE:
         text = re.sub(pattern, replacement, text)
+    if mode in ("normal", "aggressive"):
+        for pattern, replacement in LEXICAL_NORMAL:
+            text = re.sub(pattern, replacement, text)
+    if mode == "aggressive":
+        for pattern, replacement in LEXICAL_AGGRESSIVE:
+            text = re.sub(pattern, replacement, text)
 
-    text = _remove_not_a_but_b(text)
-
-    for pattern, replacement in REPLACEMENTS:
+    # ---- 第二层：Pattern ----
+    for pattern, replacement in PATTERNS_SAFE:
         text = re.sub(pattern, replacement, text)
+    if mode in ("normal", "aggressive"):
+        for pattern, replacement in PATTERNS_NORMAL:
+            text = re.sub(pattern, replacement, text)
+    if mode == "aggressive":
+        for pattern, replacement in PATTERNS_AGGRESSIVE:
+            text = re.sub(pattern, replacement, text)
 
-    # 同义词轮换（每章重置计数，自动换下一个）
+    # ---- 第三层：Narrative ----
+    if mode == "aggressive":
+        text = _dedupe_consecutive_likes(text)
+        text = _dedupe_consecutive_negations(text)
+    psych = _dedupe_consecutive_psych(text)
+    if psych["max_streak"] >= 3:
+        stats_report["连续心理说明"] = f"×{psych['max_streak']}（共计{psych['count']}次）"
+
     for pat, _ in _BODY_PATTERNS:
         text = pat.sub(_rotate_body_word, text)
+    rotated = sum(1 for v in _body_counts.values() if v > 0)
+    if rotated:
+        stats_report["身体反应轮换"] = rotated
 
-    # 残留清理
+    # ---- 第四层：Statistics ----
+    text, freq_report = _apply_stats(text)
+    for word, count in freq_report.items():
+        threshold = _STATS_THRESHOLD.get(word, 999)
+        if count > threshold:
+            stats_report[word] = f"{count}→{threshold}"
+
+    # ---- 残留清理 ----
     text = re.sub(r"，{2,}", "，", text)
     text = re.sub(r"。{2,}", "。", text)
     text = re.sub(r" {2,}", " ", text)
@@ -168,4 +304,4 @@ def clean_generated_text(text: str) -> str:
     text = re.sub(r"——{2,}", "——", text)
     text = re.sub(r"^\s*[，。]", "", text, flags=re.MULTILINE)
 
-    return text.strip()
+    return CleanResult(cleaned_text=text.strip(), stats=stats_report)
