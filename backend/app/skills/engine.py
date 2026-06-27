@@ -705,7 +705,8 @@ class SkillEngine:
         is_text_output = skill_name.startswith("chapter_generation") or skill_name == "ai_denoising"
         if is_text_output:
             result = None
-            for attempt in range(3):
+            max_attempts = 3
+            for attempt in range(max_attempts):
                 if tools and tool_executor:
                     result = await ai_client.chat_with_tools(
                         messages=messages,
@@ -733,7 +734,12 @@ class SkillEngine:
                 err_lower = err.lower()
                 if ("connection" in err_lower or "timeout" in err_lower
                     or "time-out" in err_lower or "gateway" in err_lower or "504" in err_lower):
-                    await asyncio.sleep(2 * (attempt + 1))
+                    # 504/gateway 错误需要更长冷却，指数退避：30s, 60s, 90s
+                    delay = min(30 * (attempt + 1), 120)
+                    await asyncio.sleep(delay)
+                    # 连接错误允许更多重试（最多 5 次）
+                    if attempt + 1 >= max_attempts and max_attempts < 5:
+                        max_attempts += 1
                     continue
                 # 非连接错误（如 Bad Request）→ 不带工具重试一次
                 if tools and tool_executor and attempt < 2:

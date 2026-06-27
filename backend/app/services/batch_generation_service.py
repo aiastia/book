@@ -329,7 +329,11 @@ async def run_batch_generation(task_id: int):
                         logger.warning(
                             f"[batch] 第{ch_num}章生成失败（尝试 {attempt + 1}）: {last_err}"
                         )
-                        await asyncio.sleep(2)  # 重试间隔
+                        # 504/超时错误需要更长冷却时间，否则立刻重试大概率继续失败
+                        delay = 2
+                        if any(k in str(last_err).lower() for k in ("504", "timeout", "gateway", "time-out")):
+                            delay = min(30 * (attempt + 1), 120)
+                        await asyncio.sleep(delay)
                         continue
                     success = True
                     completed += 1
@@ -340,7 +344,10 @@ async def run_batch_generation(task_id: int):
             except Exception as e:
                 last_err = str(e)
                 logger.warning(f"[batch] 第{chapter_id}章异常（尝试 {attempt + 1}）: {e}")
-                await asyncio.sleep(2)
+                delay = 2
+                if any(k in last_err.lower() for k in ("504", "timeout", "gateway", "time-out")):
+                    delay = min(30 * (attempt + 1), 120)
+                await asyncio.sleep(delay)
 
         if not success:
             # 记录失败章节
