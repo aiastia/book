@@ -14,6 +14,32 @@
 2. 在这一章的结尾，让读者想翻下一页。
 </task>
 
+@include:_shared_writing_rules.md
+
+<constraints>
+一、地基（这个不能崩）
+
+这是第一章，你得让读者在读完前三段之后，脑子里有三样东西：谁、在哪儿、什么处境。不用全交代清楚，但得有个底。
+
+这一章必须有一个让人读得下去的"钩子"——一个冲突、一个目标或者一个危机，随便什么都行，但不能没有。所有内容都得围着这个钩子转。第一章可以先把响往后放，但得让人感觉到会有响。
+
+@include:_shared_one_to_one_body.md
+
+【 爆款首章三铁律】
+
+@include:_shared_first_chapter_rules.md
+
+五、坚决要守住的事
+
+大方向跟着大纲走，但走路的步子是你自己的
+
+人物的内核别崩，别写着写着就换了个人
+
+字数别太离谱，心里有个数
+
+伏笔该埋的埋，该推的推进
+</constraints>
+
 <data>
 {chapter_data}
 </data>
@@ -28,33 +54,7 @@
 @include:_shared_commercial_core.md
 </commercial_design>
 
-<constraints>
-一、地基（这个不能崩）
-
-这是第一章，你得让读者在读完前三段之后，脑子里有三样东西：谁、在哪儿、什么处境。不用全交代清楚，但得有个底。
-
-这一章必须有一个让人读得下去的"钩子"——一个冲突、一个目标或者一个危机，随便什么都行，但不能没有。所有内容都得围着这个钩子转。第一章可以先把响往后放，但得让人感觉到会有响。
-
-38	@include:_shared_one_to_one_body.md
-
-【 爆款首章三铁律】
-
-@include:_shared_first_chapter_rules.md
-
-40	五、坚决要守住的事
-
-大方向跟着大纲走，但走路的步子是你自己的
-
-人物的内核别崩，别写着写着就换了个人
-
-字数别太离谱，心里有个数
-
-伏笔该埋的埋，该推的推进
-</constraints>
-
 @include:_shared_narrative_techniques.md
-
-@include:_shared_writing_rules.md
 
 <self_check>
 输出正文前，心里过一遍（不要在正文里写检查结果）：

@@ -12,20 +12,30 @@
 这一章里，至少有一个角色会因为上一章的事而做出点什么——可能是一个选择，也可能是一个做了一半停下来的动作，也可能是一句说了一半咽回去的话。不需要每个人都有反应，有一个人有就够了。
 </task>
 
+@include:_shared_writing_rules.md
+
+<constraints>
+@include:_shared_one_to_one_body.md
+
+【续章专属要求】
+
+别重复上一章已经写完的内容。稳稳接住上一章的尾巴。大方向跟着大纲走，但允许角色在细节处偏离。人物的内核别崩，别写着写着就换了个人。字数别太离谱。
+</constraints>
+
 <data>
 {chapter_data}
 </data>
 
-<quality priority="P3">
-{quality_trends}
-</quality>
+@include:_shared_chapter_context.md
 
 <recent_context priority="P1">
 【最近章节脉络 - 参考】
 {relevant_memories}
 </recent_context>
 
-@include:_shared_chapter_context.md
+<quality priority="P3">
+{quality_trends}
+</quality>
 
 <commercial_design priority="P0">
 【 续章专属：推进与维护】
@@ -43,17 +53,7 @@
 @include:_shared_commercial_core.md
 </commercial_design>
 
-<constraints>
-@include:_shared_one_to_one_body.md
-
-【续章专属要求】
-
-别重复上一章已经写完的内容。稳稳接住上一章的尾巴。大方向跟着大纲走，但允许角色在细节处偏离。人物的内核别崩，别写着写着就换了个人。字数别太离谱。
-</constraints>
-
 @include:_shared_narrative_techniques.md
-
-@include:_shared_writing_rules.md
 
 <self_check>
 输出正文前，心里过一遍（不要在正文里写检查结果）：

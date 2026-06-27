@@ -10,17 +10,12 @@
 - 参考字数：{target_word_count}字。不要刻意凑字数——把场景写透、动作写细、对话写活，字数自然就够了。
 </task>
 
+@include:_shared_writing_rules.md
+
 <outline priority="P0">
 【本章大纲 - 必须遵循】
 {chapter_outline}
 </outline>
-
-{expansion_rich}
-
-<recent_context priority="P1">
-【最近章节脉络 - 故事脉络参考】
-{relevant_memories}
-</recent_context>
 
 <continuation priority="P0">
 【衔接锚点 - 必须承接】
@@ -32,34 +27,6 @@
 
 ⚠️ 以上是已写过的内容，本章直接从衔接锚点推进，禁止重述。
 </continuation>
-
-<characters priority="P1">
-【本章角色 - 请严格遵循角色设定】
-{characters_info}
-</characters>
-
-<items_locations priority="P2">
-【 可用道具】
-{items_info}
-
-【 可用地点】
-{locations_info}
-</items_locations>
-
-@include:_shared_chapter_context.md
-
-<foreshadow_reminders priority="P1">
-【 伏笔提醒 - 需关注】
-{foreshadow_reminders}
-</foreshadow_reminders>
-
-<quality_feedback priority="P3">
-{quality_trends}
-</quality_feedback>
-
-<commercial_design priority="P0">
-@include:_shared_commercial_core.md
-</commercial_design>
 
 <constraints>
 @include:_shared_one_to_many_narrative.md
@@ -82,7 +49,40 @@
 		@include:_shared_constraints.md
 </constraints>
 
-@include:_shared_writing_rules.md
+{expansion_rich}
+
+<characters priority="P1">
+【本章角色 - 请严格遵循角色设定】
+{characters_info}
+</characters>
+
+@include:_shared_chapter_context.md
+
+<recent_context priority="P1">
+【最近章节脉络 - 故事脉络参考】
+{relevant_memories}
+</recent_context>
+
+<foreshadow_reminders priority="P1">
+【 伏笔提醒 - 需关注】
+{foreshadow_reminders}
+</foreshadow_reminders>
+
+<items_locations priority="P2">
+【 可用道具】
+{items_info}
+
+【 可用地点】
+{locations_info}
+</items_locations>
+
+<quality_feedback priority="P3">
+{quality_trends}
+</quality_feedback>
+
+<commercial_design priority="P0">
+@include:_shared_commercial_core.md
+</commercial_design>
 
 <self_check>
 输出正文前，心里过一遍（不要在正文里写检查结果）：
