@@ -29,13 +29,26 @@ _TOP_LEVEL_TAGS = [
 # 工具模式下应移到 post_tool 的标签（工具调用结束后才注入）
 _POST_TOOL_TAGS = {"commercial_design", "constraints", "output"}
 
-# 消息角色分配：system = 永久指令（怎么写），user = 本章输入（写什么）
-_SYSTEM_TAGS = {
-    "system", "tone_rules", "constraints", "commercial_design",
-    "self_check", "output",
+# ============================================================
+# Prompt 架构：指令 vs 知识（Instruction vs Knowledge）
+# ============================================================
+# Instruction（指令）：「你应该怎么做」——永久稳定，不改
+#   system, task, tone_rules, constraints, commercial_design,
+#   self_check, output
+#
+# Knowledge（知识）：「这是事实和资料」——随章节变化，可被 RAG/Tool 动态替换
+#   outline, continuation, data, characters, items_locations,
+#   scene_anchor, character_intents, recent_context, quality,
+#   foreshadow_reminders, expansion_rich, memory
+# ============================================================
+
+# 消息角色映射：Instruction → system，Knowledge → user
+_INSTRUCTION_TAGS = {
+    "system", "task", "tone_rules", "constraints",
+    "commercial_design", "self_check", "output",
 }
-_USER_TAGS = {
-    "task", "outline", "continuation", "data", "characters",
+_KNOWLEDGE_TAGS = {
+    "outline", "continuation", "data", "characters",
     "items_locations", "scene_anchor", "character_intents",
     "recent_context", "quality", "foreshadow_reminders",
     "expansion_rich", "memory",
@@ -137,9 +150,9 @@ _TAG_RE = re.compile(r"</?([a-z_]+)(?:\s[^>]*)?>")
 def _split_system_prompt_by_tags(content: str) -> list[dict]:
     """将已解析的 system prompt 按顶级 XML 标签拆成多条消息，自动分配角色。
 
-    system 标签 → role=system（永久写作指令）
-    user 标签   → role=user（本章特定输入）
-    裸文本      → role=user（默认为输入材料）
+    Instruction 标签 → role=system（永久写作指令，不改）
+    Knowledge 标签  → role=user（本章事实和资料，可被 RAG/Tool 动态替换）
+    裸文本         → role=user（默认为输入材料）
     嵌套标签不拆分。
     """
     if not content.strip():
@@ -151,11 +164,11 @@ def _split_system_prompt_by_tags(content: str) -> list[dict]:
         return [{"role": "system", "content": content.strip()}]
 
     def _role_for_tag(name: str) -> str:
-        if name in _SYSTEM_TAGS:
+        if name in _INSTRUCTION_TAGS:
             return "system"
-        if name in _USER_TAGS:
+        if name in _KNOWLEDGE_TAGS:
             return "user"
-        return "system"  # 未知标签默认 system
+        return "system"  # 未知标签默认 instruction
 
     messages = []
     depth = 0
@@ -699,11 +712,14 @@ class SkillEngine:
             messages.append({"role": "system", "content": f"叙事视角：{_pov}"})
         # 按 XML 标签拆分为独立消息（每个标签一个消息，裸文本保留）
         split_msgs = _split_system_prompt_by_tags(system_prompt)
-        messages.extend(split_msgs)
+        # 稳定性重排：所有 instruction 消息在前，knowledge 在后
+        instr_msgs = [m for m in split_msgs if m["role"] == "system"]
+        knowl_msgs = [m for m in split_msgs if m["role"] == "user"]
+        messages.extend(instr_msgs)
+        messages.extend(knowl_msgs)
         logger.warning(
-            f"[skill] 系统提示词已拆分为 {len(split_msgs)} 条消息 "
-            f"({sum(1 for m in split_msgs if m['role']=='system')} system + "
-            f"{sum(1 for m in split_msgs if m['role']=='user')} user)"
+            f"[skill] Prompt 已拆分: {len(split_msgs)} 条消息 "
+            f"({len(instr_msgs)} instruction + {len(knowl_msgs)} knowledge)"
         )
 
         # ===== 自动注入上下文（按 skill 类型选择性注入）=====
