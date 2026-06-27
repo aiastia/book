@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = "https://api.openai.com/v1"
     AI_API_KEY: str = ""
     AI_MODEL: str = "gpt-4o"
-    AI_TEMPERATURE: float = 0.7
+    AI_TEMPERATURE: float = 0.85
     AI_TOP_P: float = 0.9
     AI_MAX_TOKENS: int = 200000             # 单次请求最大输出 token 数（全局上限，覆盖 skill 配置）
     AI_DEFAULT_MAX_TOKENS: int = 26384      # 默认输出 token 数（skill 未配置时使用）

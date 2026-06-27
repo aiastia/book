@@ -72,12 +72,10 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
                 insp_kwargs["top_p"] = cfg.inspiration_top_p / 100
             # frequency_penalty
             if cfg.inspiration_frequency_penalty is not None:
-                fp = cfg.inspiration_frequency_penalty
-                insp_kwargs["frequency_penalty"] = fp / 100 if abs(fp) > 2 else fp
+                insp_kwargs["frequency_penalty"] = cfg.inspiration_frequency_penalty / 100
             # presence_penalty
             if cfg.inspiration_presence_penalty is not None:
-                pp = cfg.inspiration_presence_penalty
-                insp_kwargs["presence_penalty"] = pp / 100 if abs(pp) > 2 else pp
+                insp_kwargs["presence_penalty"] = cfg.inspiration_presence_penalty / 100
     except Exception:
         pass
 

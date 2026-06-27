@@ -292,7 +292,7 @@ def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict) -> 
         ai_client.reasoning_model = False
     t = cfg.get("temperature")
     if t is not None:
-        result["temperature"] = t / 100 if t > 2 else t
+        result["temperature"] = t / 100
     return result
 
 
@@ -324,20 +324,16 @@ class SkillEngine:
             )
             cfg = result.scalar_one_or_none()
             if cfg:
-                # temperature: 存储为 *100, >2 时视为百分制
+                # 所有参数一律按 *100 整数存储，读取时统一 /100
                 t = cfg.temperature
                 if t is not None:
-                    self._user_ai_defaults_cache["temperature"] = t / 100 if t > 2 else t
-                # top_p: 存储为 *100
+                    self._user_ai_defaults_cache["temperature"] = t / 100
                 if cfg.top_p is not None:
                     self._user_ai_defaults_cache["top_p"] = cfg.top_p / 100
-                # frequency_penalty: 存储为 *100, |v|>2 时视为百分制
                 if cfg.frequency_penalty is not None:
-                    fp = cfg.frequency_penalty
-                    self._user_ai_defaults_cache["frequency_penalty"] = fp / 100 if abs(fp) > 2 else fp
+                    self._user_ai_defaults_cache["frequency_penalty"] = cfg.frequency_penalty / 100
                 if cfg.presence_penalty is not None:
-                    pp = cfg.presence_penalty
-                    self._user_ai_defaults_cache["presence_penalty"] = pp / 100 if abs(pp) > 2 else pp
+                    self._user_ai_defaults_cache["presence_penalty"] = cfg.presence_penalty / 100
         except Exception:
             pass
         return self._user_ai_defaults_cache
@@ -531,10 +527,10 @@ class SkillEngine:
         model = merged_config.get("model")
         temperature = merged_config.get("temperature")
         if temperature is not None:
-            temperature = temperature / 100 if temperature > 2 else temperature
+            temperature = temperature / 100
         top_p = merged_config.get("top_p")
         if top_p is not None:
-            top_p = top_p / 100 if top_p > 1 else top_p
+            top_p = top_p / 100
         max_tokens = merged_config.get("max_tokens")
         if max_tokens is not None:
             max_tokens = min(max_tokens, settings.AI_MAX_TOKENS)
@@ -553,28 +549,6 @@ class SkillEngine:
                 frequency_penalty = user_defaults.get("frequency_penalty")
             if presence_penalty is None:
                 presence_penalty = user_defaults.get("presence_penalty")
-
-        # 章节正文生成的参数钳制：长文本场景对温度和 penalty 敏感
-        # 高温度 + penalty 累积 → 2000字后模型在低概率区域采样 → 退化成英文/乱码
-        is_chapter_writing = skill_name.startswith("chapter_generation") or skill_name.startswith("chapter_generate")
-        if is_chapter_writing:
-            # skill 模板可能未配置 model，兜底使用 AI 客户端当前模型名
-            _model_lower = ((model or ai_client.model) or "").lower()
-            _is_kimi = "kimi" in _model_lower or "k2" in _model_lower
-            # Kimi K2.6 只接受 temperature=1
-            if _is_kimi:
-                temperature = 1.0
-            # top_p：下限 0.9（<0.9 会截断太多创意词；=1.0 配合高温度会跑飞）
-            if top_p is not None and (top_p > 0.98 or top_p < 0.9):
-                logger.info(f"[skill] 章节生成 top_p 钳制：{top_p} → 0.95")
-                top_p = 0.95
-            # penalty：长文本累积效应强，限制在合理范围
-            if frequency_penalty is not None and abs(frequency_penalty) > 0.5:
-                logger.info(f"[skill] 章节生成 frequency_penalty 钳制：{frequency_penalty} → 0.3")
-                frequency_penalty = 0.3 if frequency_penalty > 0 else -0.3
-            if presence_penalty is not None and abs(presence_penalty) > 0.5:
-                logger.info(f"[skill] 章节生成 presence_penalty 钳制：{presence_penalty} → 0.3")
-                presence_penalty = 0.3 if presence_penalty > 0 else -0.3
 
         if stream:
             _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)

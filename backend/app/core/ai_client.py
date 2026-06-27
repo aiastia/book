@@ -118,8 +118,8 @@ class AIClient:
         return dict(
             default_temperature=cfg.temperature / 100 if cfg.temperature is not None else None,
             default_top_p=cfg.top_p / 100 if cfg.top_p is not None else None,
-            default_frequency_penalty=cfg.frequency_penalty / 100 if (cfg.frequency_penalty is not None and abs(cfg.frequency_penalty) > 2) else cfg.frequency_penalty,
-            default_presence_penalty=cfg.presence_penalty / 100 if (cfg.presence_penalty is not None and abs(cfg.presence_penalty) > 2) else cfg.presence_penalty,
+            default_frequency_penalty=cfg.frequency_penalty / 100 if cfg.frequency_penalty is not None else None,
+            default_presence_penalty=cfg.presence_penalty / 100 if cfg.presence_penalty is not None else None,
                     default_max_tokens=cfg.max_tokens,
         )
 

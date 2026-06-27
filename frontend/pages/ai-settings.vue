@@ -10,7 +10,7 @@ const showAdd = ref(false)
 const editing = ref<any>(null)
 const form = reactive({
   id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
-  temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+  temperature: 85, top_p: 90, max_tokens: 8192, is_default: false,
   reasoning_model: false,
   reasoning_effort: 'low',
   frequency_penalty: null as number | null, presence_penalty: null as number | null,
@@ -64,7 +64,7 @@ function openAdd() {
   editing.value = null
   Object.assign(form, {
     id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
-    temperature: 70, top_p: 90, max_tokens: 8192, is_default: false,
+    temperature: 85, top_p: 90, max_tokens: 8192, is_default: false,
     reasoning_model: false,
     frequency_penalty: null, presence_penalty: null,
     inspiration_temperature: null, inspiration_top_p: null,
