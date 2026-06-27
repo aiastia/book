@@ -112,7 +112,7 @@ _BODY_TRIGGERS: dict[str, list[str]] = {
     "指节发白":     ["指节泛青", "虎口发麻", "指尖用力"],
     "呼吸一滞":     ["呼吸顿住", "喉头发紧", "胸口一闷"],
     "心跳漏了一拍": ["心跳重了一拍", "太阳穴一跳", "胃里一沉"],
-    "喉结滚动":     ["喉头轻轻一动", "咽了一下", "喉间微动"],
+    "喉结滚动":     ["喉头微动", "咽了一下", "喉间一紧"],
     "瞳孔微缩":     ["瞳孔一敛", "目光收紧", "眼神一闪"],
     "后背发凉":     ["脊背一寒", "背脊绷紧", "后颈一麻"],
     "头皮发麻":     ["头皮一紧", "颅顶发凉", "发根倒竖"],
@@ -122,9 +122,9 @@ _BODY_TRIGGERS: dict[str, list[str]] = {
 
 def _rotate_body_word(match: re.Match) -> str:
     raw = match.group(0)
-    # 去掉尾随的"了一下/了起来/了一下子"等
+    # 去掉尾随的"了一下/了起来/了一下子/了/着"等
     suffix = ""
-    raw_stripped = re.sub(r"(?:了一[下子]|了起[来]|了一[下子]|了一下子|[了着])$", "", raw)
+    raw_stripped = re.sub(r"(?:了一[下子]|了起[来]|了一下子|[了着])$", "", raw)
     if raw_stripped != raw:
         suffix = raw[len(raw_stripped):]
     raw = raw_stripped
@@ -133,7 +133,11 @@ def _rotate_body_word(match: re.Match) -> str:
         if pat.fullmatch(raw):
             idx = _body_counts.get(key, 0) % len(pool)
             _body_counts[key] = _body_counts.get(key, 0) + 1
-            return pool[idx] + suffix
+            replacement = pool[idx]
+            # 替换词若以"动"等动词结尾，suffix 里的"了"可接；但避免"一动了"
+            if suffix and suffix.startswith("了") and replacement.endswith("动"):
+                suffix = ""
+            return replacement + suffix
     return match.group(0)
 
 
@@ -252,6 +256,51 @@ def _apply_stats(text: str) -> tuple[str, dict]:
 # ====================================================================
 # 主清理函数
 # ====================================================================
+def _dedupe_repeated_paragraphs(text: str) -> tuple[str, dict]:
+    """检测并删除连续重复的大段文字（AI 偶尔会复制粘贴整段）。
+    策略：按空行分段，检测相邻段是否高度相似（>80% 相同）。"""
+    paragraphs = re.split(r"\n\s*\n", text)
+    if len(paragraphs) < 2:
+        return text, {}
+    kept = []
+    removed = 0
+    for para in paragraphs:
+        para_stripped = para.strip()
+        if not para_stripped:
+            kept.append(para)
+            continue
+        # 和上一段比对
+        is_dup = False
+        if kept:
+            prev = kept[-1].strip()
+            if prev and len(prev) > 30:
+                # 取两段较短的那个长度的 80% 作为阈值
+                min_len = min(len(prev), len(para_stripped))
+                threshold = min_len * 0.8
+                # 简单方法：短段是否是长段的子串，或长段包含短段 80% 的字符
+                if para_stripped in prev or prev in para_stripped:
+                    is_dup = True
+                elif _text_similarity(prev, para_stripped) > 0.8:
+                    is_dup = True
+        if is_dup:
+            removed += 1
+        else:
+            kept.append(para)
+    result = "\n\n".join(kept)
+    stats = {"删除重复段落": removed} if removed else {}
+    return result, stats
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """简单相似度：公共字符占比（Jaccard 系数，基于 3-gram）。"""
+    def _grams(s):
+        return set(s[i:i+3] for i in range(max(0, len(s) - 2)))
+    ga, gb = _grams(a), _grams(b)
+    if not ga or not gb:
+        return 0.0
+    return len(ga & gb) / len(ga | gb)
+
+
 def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
     """对 AI 生成的正文执行多层清理管道。
 
@@ -262,6 +311,10 @@ def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
 
     _reset_body_counts()
     stats_report: dict = {}
+
+    # ---- 第零层：删除连续重复段落（最严重的硬伤，先于一切处理） ----
+    text, dup_stats = _dedupe_repeated_paragraphs(text)
+    stats_report.update(dup_stats)
 
     # ---- 第一层：Lexical ----
     for pattern, replacement in LEXICAL_SAFE:

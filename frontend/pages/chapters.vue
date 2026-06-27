@@ -965,9 +965,9 @@ async function onPlanSaved() {
       :destroy-on-close="true"
     >
       <div v-if="editing" class="editor">
-        <!-- 标题 + 生成按钮行 -->
+        <!-- 标题 + 操作按钮 -->
         <div class="editor-bar">
-          <a-input v-model:value="editingTitle" size="large" style="flex: 1; font-weight: 600" />
+          <a-input v-model:value="editingTitle" size="large" style="flex: 1; font-weight: 600; font-family: 'Noto Serif SC', serif;" />
           <a-button
             type="primary"
             :loading="generating"
@@ -986,59 +986,79 @@ async function onPlanSaved() {
           <a-button @click="clearContent">清空</a-button>
         </div>
 
-        <!-- 高级选项行1：写作风格 + 叙事人称 -->
-        <div class="editor-opts">
-          <span>风格：
-            <a-select v-model:value="selectedStyleId" size="small" style="width: 160px" placeholder="项目默认风格" allow-clear>
-              <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id">{{ s.name }}{{ s.id === projectDefaultStyleId ? ' (项目默认)' : '' }}</a-select-option>
+        <!-- 创作设置 -->
+        <div class="editor-settings">
+          <div class="settings-row">
+            <span class="settings-label">🎨 风格</span>
+            <a-select v-model:value="selectedStyleId" size="small" style="width: 160px" placeholder="项目默认" allow-clear>
+              <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id">{{ s.name }}{{ s.id === projectDefaultStyleId ? ' ★' : '' }}</a-select-option>
             </a-select>
-          </span>
-          <span>视角：
-            <a-select v-model:value="narrativePov" size="small" style="width: 130px" :placeholder="`按小说设定（${projectDefaultPov}）`" allow-clear>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">👁️ 视角</span>
+            <a-select v-model:value="narrativePov" size="small" style="width: 140px" allow-clear>
+              <a-select-option :value="''">默认（{{ projectDefaultPov }}）</a-select-option>
               <a-select-option value="第三人称">第三人称</a-select-option>
               <a-select-option value="第一人称">第一人称</a-select-option>
               <a-select-option value="全知视角">全知视角</a-select-option>
             </a-select>
-          </span>
-          <span>目标字数：
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">📏 字数</span>
             <a-input-number v-model:value="targetWords" :min="500" :max="10000" :step="100" size="small" style="width: 110px" />
-          </span>
-        </div>
-
-        <!-- 高级选项行2：Skill + 模型 + 思考模式 -->
-        <div class="editor-opts">
-          <span>Skill：
-              <a-select v-model:value="selectedSkillKey" size="small" style="width: 160px" placeholder="不注入" allow-clear>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">🧩 Skill</span>
+            <a-select v-model:value="selectedSkillKey" size="small" style="width: 150px" placeholder="不注入" allow-clear>
               <a-select-option v-for="s in availableSkills" :key="s.name || s.template_key" :value="s.name || s.template_key">
                 {{ s.display_name || s.template_name || s.name }}
               </a-select-option>
             </a-select>
-          </span>
-          <span>模型：
-            <a-select v-model:value="selectedModel" size="small" style="width: 180px" :placeholder="defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型'" allow-clear>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">🤖 模型</span>
+            <a-select v-model:value="selectedModel" size="small" style="width: 180px" allow-clear>
+              <a-select-option :value="''">{{ defaultModelName ? `默认（${defaultModelName}）` : '使用默认模型' }}</a-select-option>
               <a-select-option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</a-select-option>
             </a-select>
-          </span>
-          <span>思考：
-            <a-select v-model:value="skillThinkingMode" size="small" style="width: 110px" placeholder="默认" allow-clear>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">🧠 思考</span>
+            <a-select v-model:value="skillThinkingMode" size="small" style="width: 120px" allow-clear>
+              <a-select-option :value="''">默认</a-select-option>
+              <a-select-option value="none">关闭</a-select-option>
               <a-select-option value="low">浅思考</a-select-option>
               <a-select-option value="medium">深思考</a-select-option>
               <a-select-option value="high">深度思考</a-select-option>
             </a-select>
-          </span>
+          </div>
         </div>
 
-        <!-- RAW 原始输出（diff 对比） -->
+        <!-- RAW 原始输出（左右对比） -->
         <div v-if="rawOutput" style="margin-bottom:12px">
           <a-button size="small" type="link" @click="showRaw = !showRaw" style="padding:0">
             {{ showRaw ? '收起对比' : '📄 查看清理前后对比' }}
           </a-button>
-          <div v-if="showRaw" class="raw-output-panel">
-            <template v-for="(part, idx) in rawDiff" :key="idx">
-              <span v-if="part.added" class="diff-added">{{ part.value }}</span>
-              <span v-else-if="part.removed" class="diff-removed">{{ part.value }}</span>
-              <span v-else>{{ part.value }}</span>
-            </template>
+          <div v-if="showRaw" class="diff-split">
+            <div class="diff-side diff-side-left">
+              <div class="diff-side-title">原始输出（清理前）</div>
+              <div class="diff-side-content">
+                <template v-for="(part, idx) in rawDiff" :key="idx">
+                  <span v-if="part.removed" class="diff-removed">{{ part.value }}</span>
+                  <span v-else-if="!part.added">{{ part.value }}</span>
+                </template>
+              </div>
+            </div>
+            <div class="diff-divider"></div>
+            <div class="diff-side diff-side-right">
+              <div class="diff-side-title">清理后（当前正文）</div>
+              <div class="diff-side-content">
+                <template v-for="(part, idx) in rawDiff" :key="idx">
+                  <span v-if="part.added" class="diff-added">{{ part.value }}</span>
+                  <span v-else-if="!part.removed">{{ part.value }}</span>
+                </template>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1288,14 +1308,28 @@ async function onPlanSaved() {
 .ch-row-actions { display: flex; gap: 2px; flex-shrink: 0; align-items: center; }
 
 /* 编辑器 */
-.editor { display: flex; flex-direction: column; gap: 10px; }
-.editor-bar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.editor { display: flex; flex-direction: column; gap: 12px; }
+.editor-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.editor-settings {
+  display: flex; flex-wrap: wrap; gap: 16px 24px;
+  padding: 14px 16px;
+  background: #f7f6f2; border-radius: 10px; border: 1px solid #ebe7df;
+}
+.settings-row { display: flex; flex-direction: column; gap: 4px; }
+.settings-label { font-size: 12px; color: #8C8C8C; font-weight: 500; }
 .editor-opts { display: flex; gap: 20px; font-size: 13px; color: #595959; flex-wrap: wrap; }
 .editor-foot { font-size: 12px; color: #8C8C8C; text-align: right; }
 .ch-editor textarea { font-family: 'Noto Serif SC', serif; font-size: 15px; line-height: 2; }
 .raw-output-panel { max-height:300px; overflow:auto; background:#fffbe6; border:1px solid #ffe58f; border-radius:6px; padding:12px; font-size:13px; white-space:pre-wrap; color:#8c6d1f; margin-top:4px; }
 .diff-added { background:#d4edda; color:#155724; padding:0 2px; border-radius:2px; }
 .diff-removed { background:#f8d7da; color:#721c24; text-decoration:line-through; padding:0 2px; border-radius:2px; }
+.diff-split { display: flex; gap: 0; margin-top: 8px; border: 1px solid #ebe7df; border-radius: 8px; overflow: hidden; }
+.diff-side { flex: 1; overflow-y: auto; max-height: 350px; }
+.diff-side-left { background: #fff5f5; }
+.diff-side-right { background: #f0fff4; }
+.diff-side-title { font-size: 12px; font-weight: 600; padding: 6px 12px; border-bottom: 1px solid #ebe7df; color: #595959; position: sticky; top: 0; background: #faf9f6; z-index: 1; }
+.diff-side-content { padding: 10px 14px; font-size: 13px; line-height: 1.9; white-space: pre-wrap; word-break: break-all; }
+.diff-divider { width: 1px; background: #ebe7df; flex-shrink: 0; }
 
 /* 阅读器 */
 .reader-layout { display: grid; grid-template-columns: 1fr 280px; gap: 14px; height: calc(100vh - 160px); }

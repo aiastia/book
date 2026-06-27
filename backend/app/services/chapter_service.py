@@ -1502,6 +1502,33 @@ class ChapterService:
                 logger = logging.getLogger(__name__)
                 logger.info(f"[cleaner] 第{chapter.chapter_number}章指纹清理: {result.stats}")
 
+            # Diff Rewrite：用小模型改写 cleaner 改不了的句式（如果用户配置了润色 API）
+            try:
+                from app.models.ai_model import AIModelConfig as _Cfg
+
+                cfg = None
+                if self.user_id:
+                    cfg = (
+                        await self.db.execute(
+                            select(_Cfg).where(
+                                _Cfg.user_id == self.user_id,
+                                _Cfg.is_default == True,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                if cfg and (cfg.rewrite_base_url or cfg.rewrite_api_key or cfg.rewrite_model):
+                    from app.services.diff_rewrite_service import diff_rewrite
+
+                    rw_base = cfg.rewrite_base_url or cfg.base_url
+                    rw_key = cfg.rewrite_api_key or cfg.api_key
+                    rw_model = cfg.rewrite_model or "gpt-4o-mini"
+                    content, rw_stats = await diff_rewrite(content, rw_base, rw_key, rw_model)
+                    if rw_stats:
+                        logger.info(f"[rewrite] 第{chapter.chapter_number}章 Diff Rewrite: {rw_stats}")
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[rewrite] Diff Rewrite 失败（不影响章节）: {e}")
+
             # 内容退化检测：防止模型吐出垃圾内容（英文词典/元评论/碎片分隔符）
             degrade_reason = _check_content_degradation(content)
             if degrade_reason:
