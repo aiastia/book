@@ -33,22 +33,21 @@ _POST_TOOL_TAGS = {"commercial_design", "constraints", "output"}
 # Prompt 架构：指令 vs 知识（Instruction vs Knowledge）
 # ============================================================
 # Instruction（指令）：「你应该怎么做」——永久稳定，不改
-#   system, task, tone_rules, constraints, commercial_design,
-#   self_check, output
+#   system, tone_rules, constraints, commercial_design, self_check, output
 #
-# Knowledge（知识）：「这是事实和资料」——随章节变化，可被 RAG/Tool 动态替换
-#   outline, continuation, data, characters, items_locations,
+# Knowledge（知识）：「你要做什么 + 这是事实」——随章节变化，可被 RAG/Tool 动态替换
+#   task, outline, continuation, data, characters, items_locations,
 #   scene_anchor, character_intents, recent_context, quality,
 #   foreshadow_reminders, expansion_rich, memory
 # ============================================================
 
 # 消息角色映射：Instruction → system，Knowledge → user
 _INSTRUCTION_TAGS = {
-    "system", "task", "tone_rules", "constraints",
+    "system", "tone_rules", "constraints",
     "commercial_design", "self_check", "output",
 }
 _KNOWLEDGE_TAGS = {
-    "outline", "continuation", "data", "characters",
+    "task", "outline", "continuation", "data", "characters",
     "items_locations", "scene_anchor", "character_intents",
     "recent_context", "quality", "foreshadow_reminders",
     "expansion_rich", "memory",
