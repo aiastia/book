@@ -3,7 +3,7 @@
 让 AI 在写作过程中按需主动查询数据库——查角色档案、伏笔状态、物品归属、前文剧情等。
 对标 MuMu 的 MCP 工具架构，但查询的是本地 DB 而非外部服务。
 
-工具列表（12个）：
+工具列表（13个）：
 1. query_character - 查角色完整档案
 2. query_character_relations - 查角色关系网络
 3. query_foreshadows - 查伏笔状态
@@ -16,6 +16,7 @@
 10. query_plot_timeline - 查剧情演进时间线（跨章因果链追溯）
 11. query_outline - 查大纲规划（计划 vs 实际对比）
 12. list_available_entities - 列出项目中所有可查询的实体概要（角色/组织/地点/物品）
+13. query_memory - 向量语义检索历史记忆（已写章节的剧情/角色变化/伏笔/重要情节）
 """
 
 import json
@@ -230,6 +231,34 @@ def get_chapter_tools() -> list[dict]:
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "query_memory",
+                "description": "向量语义检索项目的历史记忆（已写章节的剧情/角色变化/伏笔/重要情节）。传入要查询的场景或主题描述，返回语义最接近的历史记忆片段。用于回顾前文细节、确认伏笔进展、或查找某段剧情是否已写过。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "查询描述——可以是场景描述、角色名、关键事件、或任何你想确认的历史信息（如'矿壁心跳共振'、'裴昭珩前世记忆'、'容照微日记'）",
+                        },
+                        "memory_type": {
+                            "type": "string",
+                            "enum": ["plot", "character", "foreshadow", "world", "all"],
+                            "description": "过滤记忆类型。plot=剧情, character=角色变化, foreshadow=伏笔, world=世界观, all=全部",
+                            "default": "all",
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "返回条数上限",
+                            "default": 5,
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
     ]
 
 
@@ -291,6 +320,14 @@ def make_tool_executor(db: AsyncSession, project_id: int, chapter_number: int = 
 
             elif tool_name == "list_available_entities":
                 return await _list_available_entities(db, project_id)
+
+            elif tool_name == "query_memory":
+                return await _query_memory(
+                    db, project_id, chapter_number,
+                    query=arguments.get("query", ""),
+                    memory_type=arguments.get("memory_type", "all"),
+                    limit=arguments.get("limit", 5),
+                )
 
             else:
                 return json.dumps({"error": f"未知工具: {tool_name}"}, ensure_ascii=False)
@@ -1007,3 +1044,73 @@ async def _query_world_setting(db: AsyncSession, project_id: int, keyword: str) 
             }
         )
     return json.dumps(results, ensure_ascii=False)
+
+
+async def _query_memory(
+    db, project_id: int, current_chapter: int,
+    query: str, memory_type: str = "all", limit: int = 5,
+) -> str:
+    """向量语义检索项目历史记忆。"""
+    if not query.strip():
+        return json.dumps({"error": "请提供查询描述"}, ensure_ascii=False)
+
+    # 获取 user_id（从 project 关联）
+    from app.models.project import Project
+    proj = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if not proj:
+        return json.dumps({"error": "项目不存在"}, ensure_ascii=False)
+    user_id = proj.user_id
+
+    # 检查是否有向量化的记忆
+    from app.models.story_memory import StoryMemory
+    has_vec = await db.scalar(
+        select(func.count(StoryMemory.id)).where(
+            StoryMemory.project_id == project_id,
+            StoryMemory.vector_id != "",
+        )
+    )
+    if not has_vec:
+        return json.dumps({"message": "暂无向量化记忆（系统尚未对历史章节建立向量索引）"}, ensure_ascii=False)
+
+    try:
+        from app.core.ai_client import AIClient
+        from app.services.memory_vector_service import MemoryVectorService
+
+        ai_client = await AIClient.from_user_config(db, user_id)
+        vs = MemoryVectorService(ai_client)
+
+        types = None if memory_type == "all" else [memory_type]
+        ch_range = (1, current_chapter - 1) if current_chapter > 1 else None
+
+        results = await vs.search(
+            user_id=user_id,
+            project_id=project_id,
+            query=query,
+            memory_types=types,
+            limit=limit,
+            chapter_range=ch_range,
+        )
+
+        if not results:
+            return json.dumps({"message": f"未找到与「{query}」相关的历史记忆"}, ensure_ascii=False)
+
+        formatted = []
+        for r in results:
+            formatted.append({
+                "chapter": r.get("chapter_number", "?"),
+                "type": r.get("memory_type", "?"),
+                "title": r.get("title", ""),
+                "similarity": r.get("similarity", 0),
+                "content": (r.get("content", "") or "")[:400],
+            })
+
+        return json.dumps({
+            "query": query,
+            "type_filter": memory_type,
+            "found": len(formatted),
+            "results": formatted,
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        logger.warning(f"[tools] query_memory 失败: {e}")
+        return json.dumps({"error": f"记忆检索失败: {str(e)[:200]}"}, ensure_ascii=False)
