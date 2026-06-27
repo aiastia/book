@@ -3,12 +3,14 @@
 所有子模块从此导入，避免重复。保持本文件只放"共享"内容，不放业务路由。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.ai_client import AIClient
+from app.core.auth import get_current_user
+from app.core.database import get_db
 from app.models.project import Project
 from app.skills.engine import SkillEngine
 
