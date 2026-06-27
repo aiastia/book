@@ -43,5 +43,9 @@ class AIModelConfig(Base):
     provider = Column(String(20), default="openai")
     # embedding 模型（用于记忆向量检索，可选）
     embedding_model = Column(String(100), default="")
+    # Diff Rewrite 润色用 API（独立于章节生成，可选；不填则降级为章节生成 API）
+    rewrite_base_url = Column(String(500), default="")
+    rewrite_api_key = Column(String(500), default="")
+    rewrite_model = Column(String(100), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -49,6 +49,10 @@ class AIModelCreate(BaseModel):
     backend_type: str = "openai"
     provider: str = "openai"
     embedding_model: str = ""
+    # Diff Rewrite 润色 API（独立，可选）
+    rewrite_base_url: str = ""
+    rewrite_api_key: str = ""
+    rewrite_model: str = ""
 
 
 class AIModelUpdate(BaseModel):
@@ -73,6 +77,10 @@ class AIModelUpdate(BaseModel):
     backend_type: str | None = None
     provider: str | None = None
     embedding_model: str | None = None
+    # Diff Rewrite 润色 API
+    rewrite_base_url: str | None = None
+    rewrite_api_key: str | None = None
+    rewrite_model: str | None = None
 
 
 @router.get("/ai-models")
@@ -104,6 +112,9 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
             "backend_type": m.backend_type or "openai",
             "provider": m.provider or m.backend_type or "openai",
             "embedding_model": m.embedding_model or "",
+            "rewrite_base_url": m.rewrite_base_url or "",
+            "rewrite_api_key": m.rewrite_api_key or "",
+            "rewrite_model": m.rewrite_model or "",
             "created_at": m.created_at.isoformat() if m.created_at else "",
         }
         for m in models

@@ -23,6 +23,10 @@ const form = reactive({
   backend_type: 'openai' as string,
   provider: 'openai' as 'openai' | 'anthropic' | 'gemini',
   embedding_model: '' as string,
+  // Diff Rewrite 润色 API（独立，可选）
+  rewrite_base_url: '' as string,
+  rewrite_api_key: '' as string,
+  rewrite_model: '' as string,
 })
 const testing = ref<number | null>(null)
 // 模型测试结果持久化到 localStorage，刷新页面也能看到上次的测试状态
@@ -71,6 +75,7 @@ function openAdd() {
     inspiration_frequency_penalty: null, inspiration_presence_penalty: null,
     inspiration_custom: false,
     backend_type: 'openai', provider: 'openai', embedding_model: '',
+    rewrite_base_url: '', rewrite_api_key: '', rewrite_model: '',
   })
   remoteModels.value = []
   modelSearch.value = ''
@@ -498,6 +503,24 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
       <div v-if="embedResult" class="test-result" :class="{ ok: embedResult.startsWith('✅'), err: embedResult.startsWith('❌') }">
         {{ embedResult }}
       </div>
+
+      <!-- Diff Rewrite 润色 API -->
+      <a-divider orientation="left">🖊️ 润色用 API（可选，独立于章节生成）</a-divider>
+      <a-alert
+        message="用于「去 AI 指纹」的 Diff Rewrite。留空则降级使用上方的模型。建议用便宜小模型（如 gpt-4o-mini）。"
+        type="info" show-icon :closable="false" style="margin-bottom:12px;"
+      />
+      <div class="form-row-2">
+        <a-form-item label="Base URL">
+          <a-input v-model:value="form.rewrite_base_url" placeholder="留空=用上方 Base URL" />
+        </a-form-item>
+        <a-form-item label="API Key">
+          <a-input v-model:value="form.rewrite_api_key" placeholder="留空=用上方 API Key" />
+        </a-form-item>
+      </div>
+      <a-form-item label="模型">
+        <a-input v-model:value="form.rewrite_model" placeholder="gpt-4o-mini" />
+      </a-form-item>
 
       <!-- 参数设置 -->
       <a-divider orientation="left">模型参数</a-divider>
