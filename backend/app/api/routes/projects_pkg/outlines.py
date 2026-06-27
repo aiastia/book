@@ -545,6 +545,108 @@ def _build_collected_data_summary(tool_call_history: list[dict], final_content: 
     return "\n".join(lines) if lines else "（已查询信息）"
 
 
+async def _auto_fill_items_and_locations(
+    db, project, outlines: list, tracker,
+) -> None:
+    """大纲生成后：扫描大纲中的物品/地点名，对 DB 中缺失的自动用 AI 生成描述并入库。"""
+    import re
+
+    from app.core.ai_client import AIClient
+    from app.models.item import Item
+    from app.models.location import Location
+
+    # 收集所有大纲文本
+    outline_texts = []
+    for o in outlines:
+        parts = [o.title or ""]
+        if o.summary:
+            parts.append(o.summary[:500])
+        if o.key_points:
+            kps = o.key_points if isinstance(o.key_points, list) else [o.key_points]
+            parts.append(" ".join(str(k) for k in kps[:5]))
+        outline_texts.append(" ".join(parts))
+    all_text = "\n".join(outline_texts)
+
+    if len(all_text) < 200:
+        return  # 太短，不值得分析
+
+    try:
+        ai = await AIClient.from_user_config(db, project.user_id)
+    except Exception:
+        return
+
+    await tracker.update(stage="filling", message="扫描缺失的物品和地点...")
+
+    extract_prompt = (
+        "从以下小说大纲中，提取所有提到的【物品/道具】和【地点/场景】名称。\n"
+        "规则：\n"
+        "- 只提取对剧情有实际作用的，跳过泛称（如'一把刀''某个房间'）\n"
+        "- 每个一行，格式：名称 | 类型 | 一句话描述\n"
+        "- 物品类型：装备/消耗品/材料/关键道具/杂物\n"
+        "- 地点类型：建筑/自然景观/秘境/城市/室内\n"
+        "- 如果大纲中没有需要单独记录的新物品或地点，输出 无\n\n"
+        f"大纲内容：\n{all_text[:4000]}"
+    )
+
+    try:
+        result = await ai.chat_json(
+            messages=[{"role": "user", "content": extract_prompt}],
+            model="gpt-4o-mini",
+            temperature=0.3,
+            max_tokens=1000,
+        )
+    except Exception:
+        return
+
+    content = result.get("content", "")
+    if not content or "无" in str(content)[:50]:
+        return
+
+    # 解析并入库
+    existing_items = {
+        i.name for i in (await db.execute(select(Item).where(Item.project_id == project.id))).scalars().all()
+    }
+    existing_locs = {
+        l.name for l in (await db.execute(select(Location).where(Location.project_id == project.id))).scalars().all()
+    }
+    created_items = 0
+    created_locs = 0
+
+    for line in str(content).strip().split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 2:
+            continue
+        name, entity_type = parts[0], parts[1]
+        desc = parts[2] if len(parts) > 2 else ""
+
+        if entity_type in ("装备", "消耗品", "材料", "关键道具", "杂物"):
+            if name in existing_items:
+                continue
+            db.add(Item(
+                project_id=project.id, name=name, category=entity_type,
+                rarity="普通", item_type="道具", description=desc,
+                status="available",
+            ))
+            existing_items.add(name)
+            created_items += 1
+        elif entity_type in ("建筑", "自然景观", "秘境", "城市", "室内"):
+            if name in existing_locs:
+                continue
+            db.add(Location(
+                project_id=project.id, name=name, location_type=entity_type,
+                description=desc, atmosphere="", danger_level="safe",
+            ))
+            existing_locs.add(name)
+            created_locs += 1
+
+    if created_items or created_locs:
+        await db.commit()
+        logger.warning(f"[outline] 自动补充: {created_items} 物品 + {created_locs} 地点")
+
+
 @router.post("/{project_id}/outlines/generate-async")
 async def generate_outlines_async(
     project_id: int,
@@ -656,6 +758,10 @@ async def generate_outlines_async(
                             )
                             task_db.add(ch)
                     await task_db.commit()
+                    # 大纲生成后自动补充缺失的物品和地点
+                    await _auto_fill_items_and_locations(
+                        task_db, proj, created_objs, tracker
+                    )
                 await tracker.complete(message=f"大纲生成完成（{len(outlines_data)}章）")
                 return
 
