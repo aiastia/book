@@ -3,27 +3,32 @@
 import { message, Modal } from 'ant-design-vue'
 
 export function useMessage() {
-  function success(msg: string) {
-    message.success(msg)
+  function success(text: string) {
+    message.success(text)
   }
 
-  function error(msg: string) {
-    message.error(msg)
+  function error(text: string) {
+    message.error(text)
   }
 
-  function warning(msg: string) {
-    message.warning(msg)
+  function warning(text: string) {
+    message.warning(text)
   }
 
-  function info(msg: string) {
-    message.info(msg)
+  function info(text: string) {
+    message.info(text)
   }
 
-  async function confirm(msg: string, title = '确认操作'): Promise<boolean> {
+  /** 加载中提示，返回关闭函数 */
+  function loading(text: string, duration = 0) {
+    return message.loading(text, duration)
+  }
+
+  async function confirm(text: string, title = '确认操作'): Promise<boolean> {
     return new Promise((resolve) => {
       Modal.confirm({
         title,
-        content: msg,
+        content: text,
         okText: '确认',
         cancelText: '取消',
         onOk: () => resolve(true),
@@ -32,5 +37,5 @@ export function useMessage() {
     })
   }
 
-  return { success, error, warning, info, confirm }
+  return { success, error, warning, info, loading, confirm }
 }
