@@ -548,103 +548,70 @@ def _build_collected_data_summary(tool_call_history: list[dict], final_content: 
 async def _auto_fill_items_and_locations(
     db, project, outlines: list, tracker,
 ) -> None:
-    """大纲生成后：扫描大纲中的物品/地点名，对 DB 中缺失的自动用 AI 生成描述并入库。"""
-    import re
-
-    from app.core.ai_client import AIClient
+    """从大纲输出中收集 new_items / new_locations，去重后入库。"""
     from app.models.item import Item
     from app.models.location import Location
 
-    # 收集所有大纲文本
-    outline_texts = []
+    # 收集大纲中声明的所有新物品/地点（从 structure JSON 中读取）
+    all_items: dict[str, dict] = {}
+    all_locs: dict[str, dict] = {}
+
     for o in outlines:
-        parts = [o.title or ""]
-        if o.summary:
-            parts.append(o.summary[:500])
-        if o.key_points:
-            kps = o.key_points if isinstance(o.key_points, list) else [o.key_points]
-            parts.append(" ".join(str(k) for k in kps[:5]))
-        outline_texts.append(" ".join(parts))
-    all_text = "\n".join(outline_texts)
+        raw = o.structure or {}
+        for ni in raw.get("new_items") or []:
+            if isinstance(ni, dict) and ni.get("name"):
+                name = ni["name"].strip()
+                if name and name not in all_items:
+                    all_items[name] = {
+                        "category": ni.get("category", "杂物"),
+                        "description": ni.get("description", "")[:200],
+                    }
+        for nl in raw.get("new_locations") or []:
+            if isinstance(nl, dict) and nl.get("name"):
+                name = nl["name"].strip()
+                if name and name not in all_locs:
+                    all_locs[name] = {
+                        "location_type": nl.get("location_type", "其他"),
+                        "description": nl.get("description", "")[:200],
+                    }
 
-    if len(all_text) < 200:
-        return  # 太短，不值得分析
-
-    try:
-        ai = await AIClient.from_user_config(db, project.user_id)
-    except Exception:
+    if not all_items and not all_locs:
         return
 
-    await tracker.update(stage="filling", message="扫描缺失的物品和地点...")
+    await tracker.update(stage="filling", message="补充新物品和地点...")
 
-    extract_prompt = (
-        "从以下小说大纲中，提取所有提到的【物品/道具】和【地点/场景】名称。\n"
-        "规则：\n"
-        "- 只提取对剧情有实际作用的，跳过泛称（如'一把刀''某个房间'）\n"
-        "- 每个一行，格式：名称 | 类型 | 一句话描述\n"
-        "- 物品类型：装备/消耗品/材料/关键道具/杂物\n"
-        "- 地点类型：建筑/自然景观/秘境/城市/室内\n"
-        "- 如果大纲中没有需要单独记录的新物品或地点，输出 无\n\n"
-        f"大纲内容：\n{all_text[:4000]}"
-    )
-
-    try:
-        result = await ai.chat_json(
-            messages=[{"role": "user", "content": extract_prompt}],
-            model="gpt-4o-mini",
-            temperature=0.3,
-            max_tokens=1000,
-        )
-    except Exception:
-        return
-
-    content = result.get("content", "")
-    if not content or "无" in str(content)[:50]:
-        return
-
-    # 解析并入库
     existing_items = {
         i.name for i in (await db.execute(select(Item).where(Item.project_id == project.id))).scalars().all()
     }
     existing_locs = {
         l.name for l in (await db.execute(select(Location).where(Location.project_id == project.id))).scalars().all()
     }
-    created_items = 0
-    created_locs = 0
 
-    for line in str(content).strip().split("\n"):
-        line = line.strip()
-        if not line or line.startswith("#"):
+    created = 0
+    for name, info in all_items.items():
+        if name in existing_items:
             continue
-        parts = [p.strip() for p in line.split("|")]
-        if len(parts) < 2:
+        db.add(Item(
+            project_id=project.id, name=name,
+            category=info["category"], rarity="普通",
+            item_type="道具", description=info["description"],
+            status="available",
+        ))
+        created += 1
+    for name, info in all_locs.items():
+        if name in existing_locs:
             continue
-        name, entity_type = parts[0], parts[1]
-        desc = parts[2] if len(parts) > 2 else ""
+        db.add(Location(
+            project_id=project.id, name=name,
+            location_type=info["location_type"],
+            description=info["description"],
+            atmosphere="", danger_level="safe",
+        ))
+        created += 1
 
-        if entity_type in ("装备", "消耗品", "材料", "关键道具", "杂物"):
-            if name in existing_items:
-                continue
-            db.add(Item(
-                project_id=project.id, name=name, category=entity_type,
-                rarity="普通", item_type="道具", description=desc,
-                status="available",
-            ))
-            existing_items.add(name)
-            created_items += 1
-        elif entity_type in ("建筑", "自然景观", "秘境", "城市", "室内"):
-            if name in existing_locs:
-                continue
-            db.add(Location(
-                project_id=project.id, name=name, location_type=entity_type,
-                description=desc, atmosphere="", danger_level="safe",
-            ))
-            existing_locs.add(name)
-            created_locs += 1
-
-    if created_items or created_locs:
+    if created:
         await db.commit()
-        logger.warning(f"[outline] 自动补充: {created_items} 物品 + {created_locs} 地点")
+        logger.warning(f"[outline] 大纲附带新实体: {len(all_items)} 物品 + {len(all_locs)} 地点 → 入库 {created}")
 
 
 @router.post("/{project_id}/outlines/generate-async")

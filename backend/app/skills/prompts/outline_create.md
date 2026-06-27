@@ -76,6 +76,10 @@
     "reader_hook": "（可选）读者钩子",
     "foreshadow_plant": "（可选）伏笔埋设",
     "scene_anchor": "（推荐）场景锚点，50-80字感官细节",
-    "character_intents": [{"character": "角色名", "this_chapter_goal": "本章目标", "immediate_want": "此刻最想要的"}]
+    "character_intents": [{"character": "角色名", "this_chapter_goal": "本章目标", "immediate_want": "此刻最想要的"}],
+    "new_items": [{"name": "新物品名", "category": "装备/消耗品/材料/关键道具/杂物", "description": "一句话描述"}],
+    "new_locations": [{"name": "新地点名", "location_type": "建筑/自然景观/秘境/城市/室内", "description": "一句话描述"}]
   }
 ]
+
+如果本章引入了新的物品或地点（已有列表中不存在的），在对应章节的 new_items / new_locations 中列出。同一物品/地点只在首次出现的章节声明，后续章节不需要重复。
