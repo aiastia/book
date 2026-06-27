@@ -166,6 +166,13 @@ async def generate_chapter_async(project_id: int, chapter_id: int, req: dict = {
             overrides[k] = v
             has_style = True
 
+    # 叙事视角 / 目标字数覆盖（空值=按小说设定）
+    if isinstance(req, dict):
+        if req.get("narrative_pov"):
+            overrides["narrative_pov"] = req["narrative_pov"]
+        if req.get("target_word_count"):
+            overrides["target_word_count"] = req["target_word_count"]
+
     # 未传写作风格时，自动加载用户默认风格
     if not has_style:
         try:

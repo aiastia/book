@@ -105,7 +105,7 @@ export function useProjectApi() {
   function generateChapter(chapterId: number) {
     return apiPost<any>(`/api/projects/${pid()}/chapters/${chapterId}/generate`, {}, { timeout: 300000 })
   }
-  function generateChapterAsync(chapterId: number, skillName?: string, style?: any) {
+  function generateChapterAsync(chapterId: number, skillName?: string, style?: any, opts?: { narrative_pov?: string; target_word_count?: number }) {
     return apiPost<{ task_id: number }>(`/api/projects/${pid()}/chapters/${chapterId}/generate-async`, {
       skill_name: skillName,
       style_config: style?.config,
@@ -113,6 +113,8 @@ export function useProjectApi() {
       style_custom_prompt: style?.custom_prompt,
       style_traits: style?.style_traits,
       style_reference_text: style?.reference_text,
+      narrative_pov: opts?.narrative_pov,
+      target_word_count: opts?.target_word_count,
     }, { timeout: 10000 })
   }
 

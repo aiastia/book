@@ -350,6 +350,7 @@ async function onGenerate() {
       editing.value.id,
       selectedSkillKey.value || undefined,
       styleObj,
+      { narrative_pov: narrativePov.value, target_word_count: targetWords.value },
     )
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })
