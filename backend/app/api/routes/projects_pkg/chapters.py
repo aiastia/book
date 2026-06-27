@@ -988,3 +988,16 @@ async def partial_regenerate_chapter(
     check_skill_error(result)
     rewritten = (result.get("json") or {}).get("rewritten_text", "") or result.get("content", "")
     return {"rewritten_text": rewritten}
+
+
+@router.post("/{project_id}/chapters/cleanup-duplicate-analyses")
+async def cleanup_duplicate_analyses(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """清理重复的 PlotAnalysis 记录（每个章节只保留最新一条）"""
+    await get_user_project(db, project_id, user)
+    service = ChapterService(db, project_id, user.id)
+    deleted = await service.cleanup_duplicate_analyses()
+    return {"ok": True, "deleted": deleted}

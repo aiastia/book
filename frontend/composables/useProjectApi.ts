@@ -257,6 +257,9 @@ export function useProjectApi() {
   function analyzeAllUnanalyzed() {
     return apiPost<{ task_id: number | null; analyzed: number; total: number; total_chapters: number; status: string }>(`/api/projects/${pid()}/chapters/analyze-all`, {}, { timeout: 10000 })
   }
+  function cleanupDuplicateAnalyses() {
+    return apiPost<{ ok: boolean; deleted: number }>(`/api/projects/${pid()}/chapters/cleanup-duplicate-analyses`, {})
+  }
   function getNavigation(chapterId: number) {
     return apiGet<{ current: { id: number; chapter_number: number; title: string }; previous: any | null; next: any | null }>(`/api/projects/${pid()}/chapters/${chapterId}/navigation`)
   }
@@ -895,6 +898,7 @@ export function useProjectApi() {
     triggerAnalysisAsync,
     getAnalysisTaskStatus,
     analyzeAllUnanalyzed,
+    cleanupDuplicateAnalyses,
     getNavigation,
     // 灵感
     globalInspirationStep,

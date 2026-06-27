@@ -2856,3 +2856,38 @@ class ChapterService:
         await self.cleanup_chapters_data(cleared_ids)
         await self.db.commit()
         return chapter, cleared
+
+    async def cleanup_duplicate_analyses(self) -> int:
+        """清理重复的 PlotAnalysis 记录：每个章节只保留最新一条，删掉旧的。
+        返回删除的条数。
+        """
+        from sqlalchemy import func as _func
+
+        # 找出每个 chapter_id 的最新 id
+        sub = (
+            select(
+                PlotAnalysis.chapter_id,
+                _func.max(PlotAnalysis.id).label("max_id"),
+            )
+            .where(PlotAnalysis.project_id == self.project_id)
+            .group_by(PlotAnalysis.chapter_id)
+            .subquery()
+        )
+        # 删除不是最新且不是分析失败的记录（保留最新 + 失败记录便于调试）
+        stale = (
+            await self.db.execute(
+                select(PlotAnalysis)
+                .join(sub, PlotAnalysis.chapter_id == sub.c.chapter_id)
+                .where(
+                    PlotAnalysis.project_id == self.project_id,
+                    PlotAnalysis.id < sub.c.max_id,
+                )
+            )
+        ).scalars().all()
+
+        count = len(stale)
+        for a in stale:
+            await self.db.delete(a)
+        if count:
+            await self.db.commit()
+        return count

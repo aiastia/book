@@ -230,6 +230,15 @@ onTaskCompleted('init', () => {
   setTimeout(() => refreshList(), 2000)
 })
 const batchAnalyzing = ref(false)
+const cleaningUp = ref(false)
+async function onCleanupAnalyses() {
+  cleaningUp.value = true
+  try {
+    const res = await api.cleanupDuplicateAnalyses()
+    msg.success(`已清理 ${res?.deleted ?? 0} 条重复分析记录`)
+  } catch (e: any) { msg.error('清理失败：' + formatError(e)) }
+  finally { cleaningUp.value = false }
+}
 async function onBatchAnalyze() {
   batchAnalyzing.value = true
   try {
@@ -799,6 +808,9 @@ async function onPlanSaved() {
         >
           ⚡ 一键分析{{ batchAnalyzableCount > 0 ? ` (${batchAnalyzableCount})` : '' }}
         </a-button>
+        <a-popconfirm title="清理重复的分析记录（每个章节只保留最新一份）" @confirm="onCleanupAnalyses">
+          <a-button :loading="cleaningUp" style="font-size:12px">🧹 清理旧分析</a-button>
+        </a-popconfirm>
         <BatchGeneratePanel :chapters="chapters || []" @done="refreshList" />
         <a-button :disabled="!chapters?.length" @click="onExportTxt">📥 导出TXT</a-button>
       </div>
