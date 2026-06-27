@@ -228,17 +228,6 @@ async def generate_chapter_async(project_id: int, chapter_id: int, req: dict = {
     return {"task_id": task_id, "chapter_id": chapter_id}
 
 
-@router.post("/{project_id}/chapters/{chapter_id}/generate-stream")
-async def generate_chapter_stream(project_id: int, chapter_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    service = ChapterService(db, project_id, user.id)
-
-    async def event_generator():
-        async for chunk in service.generate_chapter_stream(chapter_id):
-            yield f"data: {chunk}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
 @router.post("/{project_id}/chapters/batch-generate-range")
 async def batch_generate_chapters(project_id: int, req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """批量生成章节（按章节号范围，同步阻塞版）。

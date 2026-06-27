@@ -13,13 +13,16 @@ export async function fetchSkills(): Promise<any[]> {
   return Array.isArray(res) ? res : []
 }
 
-/** 获取可用 AI 模型列表 */
-export async function fetchRemoteModels(): Promise<Array<{ value: string; label: string }>> {
+/** 获取可用 AI 模型列表 + 默认模型名 */
+export async function fetchRemoteModels(): Promise<{ models: Array<{ value: string; label: string }>; default_model: string }> {
   try {
     const res = await apiGet<any>('/api/ai-models/default/remote-models')
     if (res?.models) {
-      return res.models.map((m: any) => ({ value: m.id, label: m.id }))
+      return {
+        models: res.models.map((m: any) => ({ value: m.id, label: m.id })),
+        default_model: res.default_model || '',
+      }
     }
   } catch {}
-  return []
+  return { models: [], default_model: '' }
 }

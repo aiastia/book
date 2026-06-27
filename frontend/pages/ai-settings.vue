@@ -507,7 +507,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <label>Temperature（随机性）</label>
           <a-tag color="default">{{ tempDisplay }}</a-tag>
         </div>
-        <a-slider v-model:value="form.temperature" :min="0" :max="200" :step="1" />
+        <a-slider v-model:value="form.temperature" :min="0" :max="200" :step="1" :disabled="form.reasoning_model" />
         <div class="slider-range"><span>0 (精确)</span><span>2 (创造)</span></div>
       </div>
       <div class="slider-group">
@@ -515,7 +515,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <label>Top P（核采样）</label>
           <a-tag color="default">{{ topPDisplay }}</a-tag>
         </div>
-        <a-slider v-model:value="form.top_p" :min="0" :max="100" :step="1" />
+        <a-slider v-model:value="form.top_p" :min="0" :max="100" :step="1" :disabled="form.reasoning_model" />
         <div class="slider-range"><span>0</span><span>1</span></div>
       </div>
       <div class="slider-group">
@@ -535,7 +535,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <label>频率惩罚（减少重复用词）</label>
           <a-tag :color="form.frequency_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.frequency_penalty) }}</a-tag>
         </div>
-        <a-slider :value="penaltySliderVal(form.frequency_penalty)" :min="-200" :max="200" :step="1"
+        <a-slider :value="penaltySliderVal(form.frequency_penalty)" :min="-200" :max="200" :step="1" :disabled="form.reasoning_model"
           @change="(v: number) => form.frequency_penalty = v" />
         <div class="slider-range"><span>-2.0 (鼓励重复)</span><span>0</span><span>2.0 (禁止重复)</span></div>
         <a-button size="small" type="link" @click="form.frequency_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>
@@ -545,7 +545,7 @@ const defaultModel = computed(() => (models.value || []).find((m: any) => m.is_d
           <label>存在惩罚（鼓励新话题）</label>
           <a-tag :color="form.presence_penalty == null ? 'default' : 'blue'">{{ penaltyDisplay(form.presence_penalty) }}</a-tag>
         </div>
-        <a-slider :value="penaltySliderVal(form.presence_penalty)" :min="-200" :max="200" :step="1"
+        <a-slider :value="penaltySliderVal(form.presence_penalty)" :min="-200" :max="200" :step="1" :disabled="form.reasoning_model"
           @change="(v: number) => form.presence_penalty = v" />
         <div class="slider-range"><span>-2.0 (聚焦主题)</span><span>0</span><span>2.0 (鼓励发散)</span></div>
         <a-button size="small" type="link" @click="form.presence_penalty = null" style="padding:0;margin-top:4px;">重置为不发送</a-button>

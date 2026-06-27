@@ -1,0 +1,68 @@
+[project]
+name = "moyu-backend"
+version = "0.1.0"
+description = "墨语 - 网文创作后端"
+requires-python = ">=3.12"
+
+# ============================================================
+# Ruff 配置
+# 文档: https://docs.astral.sh/ruff/configuration/
+# 本地使用: cd backend && ruff check . && ruff format --check .
+# ============================================================
+[tool.ruff]
+# 目标 Python 版本（影响语法现代化建议，如 UP 规则）
+target-version = "py312"
+# 行宽（与 Black 默认一致）
+line-length = 100
+# 包根目录，ruff 会据此解析 first-party import
+src = ["app"]
+# 包含的文件（默认就是 *.py，这里显式声明更清晰）
+include = ["app/**/*.py", "tests/**/*.py"]
+# 排除的目录
+extend-exclude = [
+    "venv",
+    ".venv",
+    "data",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.db",
+]
+
+# ------------------------------------------------------------
+# Lint 规则集（check）
+# 规则说明见: https://docs.astral.sh/ruff/rules/
+# ------------------------------------------------------------
+[tool.ruff.lint]
+# 启用的规则前缀:
+#   E   pycodestyle 错误（基础风格）
+#   W   pycodestyle 警告
+#   F   Pyflakes（未使用变量/导入、重复定义等逻辑错误）
+#   I   isort（import 排序）
+#   UP  pyupgrade（现代化 Python 语法）
+#   B   flake8-bugbear（常见陷阱与坏味道）
+#   C4  flake8-comprehensions（列表/字典推导优化）
+#   SIM flake8-simplify（可简化的写法）
+#   N   pep8-naming（命名规范）
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM", "N"]
+
+# 暂时忽略的规则（分析时不过度打扰，可按需收紧）:
+#   E501 行太长 —— format 会处理大部分，长字符串/URL 不强求
+#   B008 函数默认参数中调用函数 —— FastAPI Depends() 的标准用法
+ignore = [
+    "E501",
+    "B008",
+]
+
+# 每条规则默认最多显示的修复建议数量
+[tool.ruff.lint.per-file-ignores]
+# 测试文件放宽部分规则
+"tests/**" = ["B011"]  # assert False 在测试中是合法的
+
+# ------------------------------------------------------------
+# 格式化配置（format，兼容 Black 风格）
+# ------------------------------------------------------------
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false

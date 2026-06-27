@@ -538,7 +538,13 @@ class SkillEngine:
         frequency_penalty = merged_config.get("frequency_penalty")
         presence_penalty = merged_config.get("presence_penalty")
 
-        # skill 未配置的参数 → 回退到用户的 AI 模型默认值
+        # 思考模式覆盖（推理深度 + 温度）：优先级最高，直接覆盖 skill 配置。
+        # 必须在「用户默认回退」之前应用——否则用户默认温度（几乎总有值）会挡住思考模式温度。
+        _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)
+        if _thinking_override.get("temperature") is not None:
+            temperature = _thinking_override["temperature"]
+
+        # skill/思考模式都未配置的参数 → 回退到用户的 AI 模型默认值
         if temperature is None or top_p is None or frequency_penalty is None or presence_penalty is None:
             user_defaults = await self._get_user_ai_defaults()
             if temperature is None:
@@ -551,9 +557,6 @@ class SkillEngine:
                 presence_penalty = user_defaults.get("presence_penalty")
 
         if stream:
-            _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)
-            if _thinking_override.get("temperature") is not None and temperature is None:
-                temperature = _thinking_override["temperature"]
             return {
                 "stream": ai_client.chat_stream(
                     messages=messages,
@@ -566,10 +569,6 @@ class SkillEngine:
             }
 
         is_text_output = skill_name.startswith("chapter_generation") or skill_name == "ai_denoising"
-        # 思考模式覆盖（推理深度 + 温度）
-        _thinking_override = _apply_thinking_mode_override(ai_client, skill_name, context)
-        if _thinking_override.get("temperature") is not None and temperature is None:
-            temperature = _thinking_override["temperature"]
         if is_text_output:
             result = None
             for attempt in range(3):

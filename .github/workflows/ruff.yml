@@ -1,0 +1,83 @@
+# ============================================================
+# Ruff 代码分析（手动触发）
+# 用途：用 ruff 对 backend/ 进行 lint + format 检查
+# 运行：GitHub 仓库 → Actions → "Ruff 代码分析" → Run workflow
+# 本地复现：cd backend && ruff check . && ruff format --check .
+# ============================================================
+name: Ruff 代码分析
+
+on:
+  workflow_dispatch:
+    inputs:
+      fix:
+        description: "是否自动修复（ruff check --fix）并提交"
+        required: false
+        type: boolean
+        default: false
+      format:
+        description: "是否自动格式化（ruff format）并提交"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # fix/format 时需要提交回仓库
+
+jobs:
+  ruff-analyze:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: 安装 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # 安装指定版本 ruff，保证本地与 CI 行为一致
+      - name: 安装 Ruff
+        run: pip install "ruff==0.15.20"
+
+      # -------------------- Lint 检查 --------------------
+      - name: Ruff Check（检查）
+        if: ${{ github.event.inputs.fix != 'true' }}
+        run: ruff check .
+
+      - name: Ruff Check（自动修复）
+        if: ${{ github.event.inputs.fix == 'true' }}
+        run: ruff check --fix .
+
+      # -------------------- 格式化 --------------------
+      - name: Ruff Format（检查）
+        if: ${{ github.event.inputs.format != 'true' }}
+        run: ruff format --check .
+
+      - name: Ruff Format（自动格式化）
+        if: ${{ github.event.inputs.format == 'true' }}
+        run: ruff format .
+
+      # -------------------- 汇总报告（便于阅读） --------------------
+      - name: Ruff 统计报告
+        if: always()
+        run: ruff check . --output-format=github --statistics || true
+
+      # -------------------- 提交修复（仅在 fix/format 时） --------------------
+      - name: 提交修复结果
+        if: ${{ github.event.inputs.fix == 'true' || github.event.inputs.format == 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add -A
+            git commit -m "chore: ruff 自动修复/格式化 [skip ci]"
+            git push
+            echo "✅ 已提交 ruff 修复"
+          else
+            echo "ℹ️ 没有需要提交的变更"
+          fi
+        working-directory: .

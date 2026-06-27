@@ -28,7 +28,8 @@ const editingTitle = ref('')
 const generating = ref(false)
 const saving = ref(false)
 const targetWords = ref(4000)
-const narrativePov = ref('第三人称')
+const narrativePov = ref('')  // 空 = 按小说设定
+const projectDefaultPov = ref('第三人称')  // 项目默认叙事视角（用于 placeholder 显示）
 if (import.meta.client) {
   const s = localStorage.getItem('moyu_chapter_words')
   if (s) targetWords.value = Number(s)
@@ -37,10 +38,12 @@ if (import.meta.client) {
 // ===== 编辑器高级选项 =====
 const writingStyles = ref<any[]>([])
 const selectedStyleId = ref<number | undefined>()
+const projectDefaultStyleId = ref<number | undefined>()  // 项目默认风格 ID（用于选项标记）
 const availableSkills = ref<any[]>([])
 const selectedSkillKey = ref<string | undefined>()
 const availableModels = ref<Array<{ value: string; label: string }>>([])
 const selectedModel = ref<string | undefined>()
+const defaultModelName = ref('')  // 默认模型名（用于 placeholder 显示）
 const skillThinkingMode = ref<string | undefined>()
 
 // ===== 章节分析 =====
@@ -274,7 +277,9 @@ async function openEditor(c: any) {
   editing.value = c
   editingTitle.value = c.title || `第${c.chapter_number}章`
   editingContent.value = ''
-  narrativePov.value = projectData.value?.narrative_pov || '第三人称'
+  narrativePov.value = ''  // 空 = 按小说设定
+  projectDefaultPov.value = projectData.value?.narrative_pov || '第三人称'
+  projectDefaultStyleId.value = projectData.value?.writing_style?.style_id
 
   // 加载章节内容
   const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`).catch(() => null)
@@ -332,7 +337,9 @@ async function loadSkillsIfEmpty() {
 async function loadModelsIfEmpty() {
   if (availableModels.value.length > 0) return
   try {
-    availableModels.value = await fetchRemoteModels()
+    const r = await fetchRemoteModels()
+    availableModels.value = r.models
+    defaultModelName.value = r.default_model
   } catch {}
 }
 
@@ -351,7 +358,7 @@ async function onGenerate() {
       selectedSkillKey.value || undefined,
       styleObj,
       {
-        narrative_pov: narrativePov.value,
+        narrative_pov: narrativePov.value || undefined,
         target_word_count: targetWords.value,
         model: selectedModel.value || undefined,
         thinking_mode: skillThinkingMode.value || undefined,
@@ -965,12 +972,12 @@ async function onPlanSaved() {
         <!-- 高级选项行1：写作风格 + 叙事人称 -->
         <div class="editor-opts">
           <span>风格：
-            <a-select v-model:value="selectedStyleId" size="small" style="width: 140px" placeholder="选择风格" allow-clear>
-              <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id">{{ s.name }}</a-select-option>
+            <a-select v-model:value="selectedStyleId" size="small" style="width: 160px" placeholder="项目默认风格" allow-clear>
+              <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id">{{ s.name }}{{ s.id === projectDefaultStyleId ? ' (项目默认)' : '' }}</a-select-option>
             </a-select>
           </span>
           <span>视角：
-            <a-select v-model:value="narrativePov" size="small" style="width: 110px">
+            <a-select v-model:value="narrativePov" size="small" style="width: 130px" :placeholder="`按小说设定（${projectDefaultPov}）`" allow-clear>
               <a-select-option value="第三人称">第三人称</a-select-option>
               <a-select-option value="第一人称">第一人称</a-select-option>
               <a-select-option value="全知视角">全知视角</a-select-option>
@@ -991,7 +998,7 @@ async function onPlanSaved() {
             </a-select>
           </span>
           <span>模型：
-            <a-select v-model:value="selectedModel" size="small" style="width: 180px" placeholder="默认模型" allow-clear>
+            <a-select v-model:value="selectedModel" size="small" style="width: 180px" :placeholder="defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型'" allow-clear>
               <a-select-option v-for="m in availableModels" :key="m.value" :value="m.value">{{ m.label }}</a-select-option>
             </a-select>
           </span>
