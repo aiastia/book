@@ -57,7 +57,6 @@
 {quality_trends}
 </quality_feedback>
 
-
 <commercial_design priority="P0">
 @include:_shared_commercial_core.md
 </commercial_design>
@@ -84,8 +83,6 @@
 </constraints>
 
 @include:_shared_writing_rules.md
-
-@include:_shared_chunqiu_brush.md
 
 <output>
 【输出规范】

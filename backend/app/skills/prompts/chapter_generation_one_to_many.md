@@ -55,7 +55,6 @@
 	@include:_shared_constraints.md
 </constraints>
 @include:_shared_writing_rules.md
-@include:_shared_chunqiu_brush.md
 <output>
 【输出规范】
 直接输出小说正文内容，从一个正在进行的事件开始。

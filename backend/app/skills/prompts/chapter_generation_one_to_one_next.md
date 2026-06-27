@@ -55,8 +55,6 @@
 
 @include:_shared_writing_rules.md
 
-@include:_shared_chunqiu_brush.md
-
 <output>
 从上一章结尾的那个场景、那个动作、那个氛围直接起笔。别铺垫，别说"在……之后"，直接进入。
 
