@@ -1490,6 +1490,11 @@ class ChapterService:
                 await self.db.commit()
                 return {"error": "AI 生成内容为空"}
 
+            # 文本后处理：机械规则清理 AI 口癖
+            from app.services.text_cleaner import clean_generated_text
+
+            content = clean_generated_text(content)
+
             # 内容退化检测：防止模型吐出垃圾内容（英文词典/元评论/碎片分隔符）
             degrade_reason = _check_content_degradation(content)
             if degrade_reason:
