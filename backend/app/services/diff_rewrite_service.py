@@ -165,6 +165,72 @@ def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
     return extra_hits
 
 
+# 句式重复扫描：连续 3 句以上以同一人称代词开头
+def _scan_repeated_subject(text: str, existing_hits: list[dict]) -> list[dict]:
+    """扫描连续「她...她...她...」句式。连续 ≥3 句时，标记第 3 句及以后。"""
+    # 手动拆句
+    sentences = []
+    buf = []
+    for ch in text:
+        buf.append(ch)
+        if ch in "。！？\n":
+            sent = "".join(buf).strip()
+            if sent:
+                sentences.append(sent)
+            buf = []
+    if buf:
+        sent = "".join(buf).strip()
+        if sent:
+            sentences.append(sent)
+
+    # 找连续同代词开头块
+    pronoun_runs = []  # [(start_idx, end_idx, pronoun)]
+    i = 0
+    while i < len(sentences):
+        s = sentences[i]
+        first_char = s[0] if s else ""
+        if first_char not in "他她它":
+            i += 1
+            continue
+        j = i + 1
+        while j < len(sentences) and sentences[j] and sentences[j][0] == first_char:
+            j += 1
+        if j - i >= 3:
+            pronoun_runs.append((i, j, first_char))
+        i = j
+
+    if not pronoun_runs:
+        return []
+
+    # 构建位置映射：句子 → 原文位置
+    sent_positions = []
+    pos = 0
+    for s in sentences:
+        start = text.find(s, pos)
+        if start == -1:
+            sent_positions.append((pos, pos + len(s)))
+            pos += len(s)
+        else:
+            sent_positions.append((start, start + len(s)))
+            pos = start + len(s)
+
+    extra_hits = []
+    seen = {(h["start"], h["end"]) for h in existing_hits}
+    for start_i, end_i, pronoun in pronoun_runs:
+        for k in range(start_i + 2, end_i):  # 第 3 句及以后
+            sp = sent_positions[k]
+            key = (sp[0], sp[1])
+            if key not in seen:
+                seen.add(key)
+                extra_hits.append({
+                    "start": sp[0],
+                    "end": sp[1],
+                    "sentence": sentences[k],
+                    "reason": f"句式重复-连续{end_i-start_i}句'{pronoun}'开头",
+                })
+    return extra_hits
+
+
 # ====================================================================
 # 打包：带上下文
 # ====================================================================
@@ -303,6 +369,12 @@ async def diff_rewrite(
     if not_a_but_b_hits:
         logger.warning(f"[rewrite] 「不是A是B」密度过高: 全文 {len(not_a_but_b_hits) + 4}+ 次，标记 {len(not_a_but_b_hits)} 句改写")
         hits.extend(not_a_but_b_hits)
+        hits.sort(key=lambda h: h["start"])
+    # 1c. 句式重复扫描（连续 "她...她...她..."）
+    repeated_subject_hits = _scan_repeated_subject(text, hits)
+    if repeated_subject_hits:
+        logger.warning(f"[rewrite] 句式重复: 标记 {len(repeated_subject_hits)} 句改写")
+        hits.extend(repeated_subject_hits)
         hits.sort(key=lambda h: h["start"])
     if not hits:
         logger.warning(f"[rewrite] 未命中任何 AI 指纹句，跳过 API 调用（无请求发出）")
