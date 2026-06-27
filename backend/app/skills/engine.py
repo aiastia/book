@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 # 提示词文件目录
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
+# 顶级 XML 标签——拆分 system prompt 时按标签边界切为独立消息
+_TOP_LEVEL_TAGS = [
+    "system", "task", "outline", "continuation", "data",
+    "characters", "items_locations", "scene_anchor", "character_intents",
+    "recent_context", "quality", "commercial_design", "constraints",
+    "tone_rules", "self_check", "output", "foreshadow_reminders",
+    "expansion_rich", "memory", "prose_style", "dialogue",
+    "information_control", "density_control",
+]
+# 工具模式下应移到 post_tool 的标签（工具调用结束后才注入）
+_POST_TOOL_TAGS = {"commercial_design", "constraints", "output"}
+
 
 def _resolve_includes(
     text: str, base_dir: str = None, seen: set = None, user_overrides: dict = None, depth: int = 0
@@ -103,6 +115,68 @@ def _apply_conditional_blocks(text: str, context: dict) -> str:
         return "" if skip else inner
 
     return _COND_RE.sub(_replace, text)
+
+
+# ===== 系统提示词按 XML 标签拆分为独立消息 =====
+
+_TAG_RE = re.compile(r"</?([a-z_]+)(?:\s[^>]*)?>")
+
+
+def _split_system_prompt_by_tags(content: str) -> list[dict]:
+    """将已解析的 system prompt 按顶级 XML 标签拆成多条独立消息。
+
+    每个顶级 <tagname>...</tagname> 块成为一条 system 消息。
+    标签之间的裸文本作为单独的消息保留。
+    嵌套标签（在父标签内部的子标签）不拆分。
+    """
+    if not content.strip():
+        return [{"role": "system", "content": content}]
+
+    known = set(_TOP_LEVEL_TAGS)
+    tags = list(_TAG_RE.finditer(content))
+    if not tags:
+        return [{"role": "system", "content": content.strip()}]
+
+    messages = []
+    depth = 0
+    block_start = 0  # 当前块的起始位置
+
+    for m in tags:
+        is_close = m.group(0).startswith("</")
+        tag_name = m.group(1)
+
+        if is_close:
+            depth -= 1
+            if depth == 0 and tag_name in known and block_start >= 0:
+                block = content[block_start : m.end()].strip()
+                if block:
+                    messages.append({"role": "system", "content": block})
+                block_start = m.end()
+        else:
+            if depth == 0:
+                if tag_name in known:
+                    # 新顶级块：先提交前置裸文本
+                    if m.start() > block_start:
+                        untagged = content[block_start : m.start()].strip()
+                        if untagged:
+                            messages.append({"role": "system", "content": untagged})
+                    block_start = m.start()
+                else:
+                    # 非顶级标签（如 <tag> 未在 _TOP_LEVEL_TAGS 中）：重置块起点
+                    if block_start < m.start():
+                        untagged = content[block_start : m.start()].strip()
+                        if untagged:
+                            messages.append({"role": "system", "content": untagged})
+                    block_start = m.start()
+            depth += 1
+
+    # 尾部残留
+    if block_start < len(content):
+        remaining = content[block_start:].strip()
+        if remaining:
+            messages.append({"role": "system", "content": remaining})
+
+    return messages if messages else [{"role": "system", "content": content}]
 
 
 # ===== 上下文自动注入 =====
@@ -599,7 +673,13 @@ class SkillEngine:
         _pov = (context.get("narrative_perspective") or "").strip()
         if _pov:
             messages.append({"role": "system", "content": f"叙事视角：{_pov}"})
-        messages.append({"role": "system", "content": system_prompt})
+        # 按 XML 标签拆分为独立消息（每个标签一个消息，裸文本保留）
+        split_msgs = _split_system_prompt_by_tags(system_prompt)
+        messages.extend(split_msgs)
+        logger.warning(
+            f"[skill] 系统提示词已拆分为 {len(split_msgs)} 条独立消息 "
+            f"(tags: {[m['content'][:30] for m in split_msgs]})"
+        )
 
         # ===== 自动注入上下文（按 skill 类型选择性注入）=====
         all_blocks = _inject_context_blocks(context, skill_name)
@@ -628,25 +708,24 @@ class SkillEngine:
         if write_blocks:
             context["_post_tool_messages"] = write_blocks
 
-        # ===== 如果启用工具模式，将写作指导（commercial_design/constraints/output）从 skill prompt 中分拆到 post_tool ====
+        # ===== 工具模式：将 post_tool 标签对应的消息移到工具调用之后再注入 =====
         if tools and tool_executor and skill and len(messages) > 0:
-            sp = messages[0].get("content", "")
-            # 查找写作指导标签的起始位置
-            for tag_start in ("<commercial_design", "<constraints", "<output>"):
-                idx = sp.find(tag_start)
-                if idx > 0:
-                    # 在 tag 开始前的最后一个完整标签结尾切开
-                    split_at = sp.rfind("</", 0, idx)
-                    if split_at > 0:
-                        split_at = sp.find(">", split_at) + 1  # 跳到闭环标签后
-                        pre = sp[:split_at].strip()
-                        post = sp[split_at:].strip()
-                        if pre and post:
-                            messages[0]["content"] = pre
-                            post_msgs = context.get("_post_tool_messages") or []
-                            post_msgs.insert(0, {"role": "system", "content": post})
-                            context["_post_tool_messages"] = post_msgs
-                        break  # 只处理第一个匹配的标签
+            post_msgs = context.get("_post_tool_messages") or []
+            kept = []
+            for m in messages:
+                content = m.get("content", "")
+                # 检查消息内容是否以 post_tool 标签开头
+                is_post = False
+                for tag in _POST_TOOL_TAGS:
+                    if content.lstrip().startswith(f"<{tag}"):
+                        post_msgs.append(m)
+                        is_post = True
+                        break
+                if not is_post:
+                    kept.append(m)
+            if len(kept) < len(messages):
+                messages[:] = kept
+                context["_post_tool_messages"] = post_msgs
 
         # 用户指令：如果模板里本来就有 {user_prompt}（已替换进 system 消息），则不重复添加。
         user_text = str(context.get("user_prompt", ""))
