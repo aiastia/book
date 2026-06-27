@@ -20,37 +20,81 @@ logger = logging.getLogger(__name__)
 _R = r"[他她它]"
 
 # ====================================================================
-# 扫描器：找出 cleaner 没改干净的 AI 指纹句
+# 扫描器：关键词驱动，匹配后提取整句
 # ====================================================================
-_SCAN_PATTERNS: list[re.Pattern] = [
-    # === 心理描写 / 内心独白（AI 最爱） ===
-    # "她意识到/发现/知道/明白/觉得 + 整句"
-    re.compile(rf"{_R}(?:意识到|发现|知道|明白|觉得|认为)[^。！？]{{5,80}}[。！？]"),
-    # "不禁/不由得/忍不住/情不自禁"
-    re.compile(rf"{_R}(?:不禁|不由得|忍不住|情不自禁|下意识地|忽然|突然间)[^。！？]{{8,80}}[。！？]"),
-    # "内心/心底/心中/心里 + 动作描述"
-    re.compile(r"(?:内心|心底|心中|心里|脑海|脑中|脑海里)[^。！？]{{8,80}}[。！？]"),
-    # === 模糊/不确定性句式（AI 缺乏确定感） ===
-    # "仿佛/似乎 + 整句"
-    re.compile(r"(?:^|[。！？\n])(?:[^。！？\n]{{0,5}})?(?:仿佛|似乎|好像|隐约|隐隐|似乎要)[^。！？]{{5,80}}[。！？]"),
-    # "像是在/似乎是在/仿佛是在 + X"
-    re.compile(r"[，。]\s*(?:像是在|似乎是在|仿佛是在|好像是在)[^。！？]{{2,40}}"),
-    # "也许/或许/大概/说不定/想必"
-    re.compile(r"(?:^|[，。！？])(?:[^。！？]{{0,3}})(?:也许|或许|大概|说不定|想必|可能只是)[^。！？]{{8,50}}[。！？]"),
-    # === 解释性/总结性句式（AI 过度说明） ===
-    # "不是因为X，而是因为Y"（复杂版）
-    re.compile(r"不是(?:因为)?[^，。]{{2,15}}[，。]\s*(?:而是?|而是?因为)[^。！？]{{5,50}}"),
-    # "这意味着/也就是说/换言之"
-    re.compile(r"(?:这意味着|也就是说|换言之|换句话说|某种程度上|某种意义上)[^。！？]{{8,60}}[。！？]"),
-    # "，试图/表示 + 动作"
-    re.compile(r"[，。]\s*(?:试图|表示)[^。！？]{{2,40}}"),
-    # === 时间锚点（AI 堆砌"此刻/这一刻/就在此时"） ===
-    # "在此刻/这一刻/就在此时/就在这一刻"
-    re.compile(r"(?:此刻|这一刻|就在此时|就在这一刻|此时|就在这时|就在此刻)[^。！？]{{5,60}}[。！？]"),
-    # === 感官描写（AI 模板化"感到/感觉到/感受到"） ===
-    # "感到/感觉到/感受到/感到一种"
-    re.compile(rf"{_R}(?:感到|感觉到|感受到|感到一种|只感觉|只觉得)[^。！？]{{8,80}}[。！？]"),
+# 格式: (关键词, 类别标签)
+# 越靠前的关键词优先匹配（去重时保留更早出现的）
+_SCAN_KEYWORDS: list[tuple[str, str]] = [
+    # === 过度心理描写（AI 最爱解释角色内心） ===
+    ("意识到", "AI心理动词"),
+    ("感觉到", "AI感官动词"),
+    ("感受到", "AI感官动词"),
+    ("只觉得", "AI感官动词"),
+    ("只感觉", "AI感官动词"),
+    ("不禁", "AI情绪副词"),
+    ("不由得", "AI情绪副词"),
+    ("忍不住", "AI情绪副词"),
+    ("下意识", "AI心理副词"),
+    ("脑海里", "AI心理空间"),
+    ("内心深处", "AI心理空间"),
+    ("心底", "AI心理空间"),
+    # === 模糊/不确定性句式（AI 缺乏叙事确定感） ===
+    ("仿佛", "AI模糊副词"),
+    ("似乎", "AI模糊副词"),
+    ("隐约", "AI模糊副词"),
+    ("好像是在", "AI模糊比拟"),
+    ("像是在", "AI模糊比拟"),
+    # === 冗余解释 ===
+    ("这意味着", "AI总结句式"),
+    ("也就是说", "AI解释句式"),
+    ("某种程度上", "AI解释句式"),
+    ("某种意义上", "AI解释句式"),
+    ("不是因为他", "AI过度解释"),
+    ("而是因为", "AI过度解释"),
+    # === 时间锚点（AI 堆砌"在这一刻/此刻"） ===
+    ("这一刻", "AI时间锚点"),
+    ("就在此时", "AI时间锚点"),
+    ("就在此刻", "AI时间锚点"),
+    ("就在这时", "AI时间锚点"),
+    # === 意图/动作副词（AI 画蛇添足） ===
+    ("试图", "AI意图副词"),
+    ("表示", "AI意图副词"),
+    ("缓缓地", "AI动作副词"),
+    ("轻轻地", "AI动作副词"),
+    ("慢慢地", "AI动作副词"),
+    ("深深地", "AI程度副词"),
+    # === 感官公式化 ===
+    ("感到一种", "AI感官套话"),
+    ("听见自己的", "AI感官套话"),
+    ("看见自己的", "AI感官套话"),
 ]
+
+# 短句最小长度（太短的不值得改写）
+_MIN_SENTENCE_LEN = 12
+
+
+def _extract_sentence(text: str, pos: int) -> tuple[int, int, str]:
+    """从关键词位置提取所在整句的起止位置和内容。"""
+    # 往前找句首
+    start = pos
+    while start > 0:
+        c = text[start - 1]
+        if c in "。！？\n":
+            break
+        start -= 1
+    # 跳过句首空白/标点
+    while start < pos and text[start] in "，。！？\n\r\t ":
+        start += 1
+    # 往后找句尾
+    end = pos
+    while end < len(text):
+        c = text[end]
+        if c in "。！？\n":
+            end += 1  # 包含句尾标点
+            break
+        end += 1
+    sentence = text[start:end].strip()
+    return start, end, sentence
 
 
 def scan_fingerprint_sentences(text: str) -> list[dict]:
@@ -59,21 +103,30 @@ def scan_fingerprint_sentences(text: str) -> list[dict]:
     返回: [{start, end, sentence, reason}, ...]
     """
     hits = []
-    for pat in _SCAN_PATTERNS:
-        for m in pat.finditer(text):
-            sentence = m.group(0).strip()
-            if len(sentence) < 8:
+    seen_ranges: list[tuple[int, int]] = []  # 防止同一句子被多个关键词重复命中
+
+    for keyword, category in _SCAN_KEYWORDS:
+        pos = 0
+        while True:
+            pos = text.find(keyword, pos)
+            if pos == -1:
+                break
+            start, end, sentence = _extract_sentence(text, pos)
+            if len(sentence) < _MIN_SENTENCE_LEN:
+                pos = end
                 continue
-            # 去重：同一位置不重复报
-            start = m.start()
-            if any(abs(h["start"] - start) < 5 for h in hits):
+            # 去重：同一句子最多报一次
+            if any(abs(r[0] - start) < 10 for r in seen_ranges):
+                pos = end
                 continue
+            seen_ranges.append((start, end))
             hits.append({
                 "start": start,
-                "end": m.end(),
+                "end": end,
                 "sentence": sentence,
-                "reason": pat.pattern[:30],
+                "reason": category,
             })
+            pos = end
     # 按位置排序
     hits.sort(key=lambda h: h["start"])
     return hits
