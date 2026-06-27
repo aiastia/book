@@ -1,0 +1,145 @@
+{
+  "name": "墨鱼写作系统",
+  "description": "全流程小说写作工具：创建新书、生成大纲、展开大纲、生成章节、查看内容。所有操作通过 HTTP API 执行，你不需要了解 HTTP 细节。",
+  "config": {
+    "api_base": "{SERVER_URL}/api",
+    "auth": {
+      "method": "login",
+      "login_url": "/login",
+      "login_body": { "username": "{username}", "password": "{password}" },
+      "token_field": "access_token",
+      "auth_header": "Authorization: Bearer {token}",
+      "on_401": "重新调用 /login 获取新 token，然后重试原请求"
+    }
+  },
+  "tools": [
+    {
+      "name": "list_books",
+      "description": "列出用户的所有小说项目。触发：问'有哪些书''我的书'时。",
+      "parameters": {},
+      "http": { "method": "GET", "path": "/books" }
+    },
+    {
+      "name": "create_book",
+      "description": "创建一本新小说。触发：说'创建''开新书'并提供书名。outline_mode='one_to_one'为传统模式（1大纲=1章），'one_to_many'为细化模式（1大纲=1卷，适合长篇批量生成）。默认one_to_one。",
+      "parameters": {
+        "title": { "type": "string", "required": true, "description": "书名" },
+        "genre": { "type": "string", "required": false, "description": "类型，如玄幻/都市/科幻" },
+        "synopsis": { "type": "string", "required": false, "description": "一句话简介" },
+        "outline_mode": { "type": "string", "required": false, "enum": ["one_to_one", "one_to_many"], "description": "大纲模式" }
+      },
+      "http": { "method": "POST", "path": "/books" }
+    },
+    {
+      "name": "list_chapters",
+      "description": "列出某项目的所有章节及状态。触发：问'章节状态''进度''有哪些章'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true, "description": "项目ID" }
+      },
+      "http": { "method": "GET", "path": "/projects/{project_id}/chapters" }
+    },
+    {
+      "name": "get_chapter",
+      "description": "查看某章完整正文。触发：说'看第X章'时。超过3000字先展示头尾。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true },
+        "chapter_id": { "type": "integer", "required": true, "description": "章节ID（非章节号）" }
+      },
+      "http": { "method": "GET", "path": "/projects/{project_id}/chapters/{chapter_id}" }
+    },
+    {
+      "name": "generate_chapter",
+      "description": "生成章节（异步）。chapter_ids为单章，start_chapter_number+count为连续多章。触发：说'生成第X章'或'写第X章'时。单章用chapter_ids，连续多章用start_chapter_number+count。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true },
+        "chapter_ids": { "type": "array", "items": { "type": "integer" }, "required": false, "description": "章节ID列表" },
+        "start_chapter_number": { "type": "integer", "required": false, "description": "起始章节号（连续模式）" },
+        "count": { "type": "integer", "required": false, "description": "连续生成数量" },
+        "target_word_count": { "type": "integer", "required": false, "default": 2500 }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/chapters/batch-generate" },
+      "async": {
+        "poll": { "method": "GET", "path": "/projects/{project_id}/batch-generate/{task_id}/status", "interval": 5 },
+        "status_field": "status",
+        "done_values": ["completed", "failed", "cancelled"]
+      }
+    },
+    {
+      "name": "regenerate_chapter",
+      "description": "用 Diff Rewrite (gpt-4o-mini) 重写章节。触发：说'重写第X章''润色第X章'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true },
+        "chapter_id": { "type": "integer", "required": true },
+        "instructions": { "type": "string", "required": false, "description": "改写指令" },
+        "target_word_count": { "type": "integer", "required": false }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/chapters/{chapter_id}/regenerate" }
+    },
+    {
+      "name": "clear_chapter",
+      "description": "清空某章内容以便重新生成。触发：说'清空第X章''重置第X章'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true },
+        "chapter_id": { "type": "integer", "required": true }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/chapters/{chapter_id}/clear" }
+    },
+    {
+      "name": "list_outlines",
+      "description": "查看某项目的大纲列表。触发：说'看大纲'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true }
+      },
+      "http": { "method": "GET", "path": "/projects/{project_id}/outlines" }
+    },
+    {
+      "name": "generate_outline",
+      "description": "生成大纲（异步）。触发：说'生成大纲'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/outlines/generate-async" },
+      "async": {
+        "poll": "/projects/{project_id}/outlines/status?task={task_id}",
+        "interval": 10
+      }
+    },
+    {
+      "name": "continue_outline",
+      "description": "续写大纲（异步）。触发：说'续写大纲'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/outlines/continue-async" },
+      "async": true
+    },
+    {
+      "name": "expand_outline",
+      "description": "展开大纲（仅1-N模式）。1卷大纲展开为多章。触发：说'展开大纲''展开第X卷'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true },
+        "outline_id": { "type": "integer", "required": true, "description": "大纲ID" }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/outlines/{outline_id}/expand-async" },
+      "async": { "poll": true, "interval": 5 }
+    },
+    {
+      "name": "get_active_task",
+      "description": "查看当前活跃的异步任务。触发：问'有什么在跑''进度怎么样'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true }
+      },
+      "http": { "method": "GET", "path": "/projects/{project_id}/batch-generate/active" }
+    },
+    {
+      "name": "cancel_task",
+      "description": "取消正在运行的批量任务。触发：说'取消''停'时。",
+      "parameters": {
+        "project_id": { "type": "integer", "required": true },
+        "task_id": { "type": "integer", "required": true }
+      },
+      "http": { "method": "POST", "path": "/projects/{project_id}/batch-generate/{task_id}/cancel" }
+    }
+  ],
+  "system_prompt": "你是墨鱼写作助手。你有一个小说写作系统的API，工具定义在 tools 数组里。\n\n## 如何使用工具\n\n每个工具有 `http` 字段，告诉你怎么调 HTTP：\n- `method`: GET 或 POST\n- `path`: URL 路径，{project_id} 等占位符用参数值替换\n- 请求头: Content-Type: application/json + Authorization: Bearer {token}\n- POST 请求 Body: 把调用参数中 path 占位符以外的字段序列化为 JSON\n\n示例：generate_chapter(project_id=17, chapter_ids=[28], target_word_count=2500)\n→ POST {api_base}/projects/17/chapters/batch-generate\n→ Body: {\"chapter_ids\":[28],\"target_word_count\":2500}\n\n## 认证\n\n首次调用前，用 config.auth 登录：\n- POST {api_base}{login_url} + Body 里的 username/password\n- 从返回 JSON 中取 {token_field} 的值作为 token\n- 后续所有请求加 Header: {auth_header}\n- 返回 401 时自动重新登录，然后重试原请求\n\n## 异步操作\n\n如果工具有 `async` 字段，说明是异步的：\n- 调工具后从返回 JSON 中取 task_id\n- 按 async.poll 的 method+path 每 {interval} 秒轮询一次\n- 检查返回 JSON 的 async.status_field 字段\n- 值在 async.done_values 列表中表示完成\n- 连续生成（start_chapter_number+count）时每完成一章汇报进度\n\n## 工作原则\n\n1. 先确认状态再操作。用户说\"生成\"先查章节列表看哪些是 draft\n2. 创建新书时询问 outline_mode（one_to_one/one_to_many）\n3. 展示章节内容只输出开头 300~500 字，不要全文\n4. 遇错误直接告诉用户，不要猜测原因\n5. 所有查询结果只展示摘要，不要输出完整 JSON\n6. 不要编造数据——你没查过的就告诉用户还没查\n7. 用户没指定项目时，先调 list_books 让用户选"
+}
