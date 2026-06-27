@@ -818,6 +818,11 @@ class ChapterService:
         if not ai_client:
             ai_client = await self._get_ai_client(project)
 
+        # 模型覆盖：per-生成指定模型（空=用账户默认）
+        _ov_all = overrides or {}
+        if _ov_all.get("model"):
+            ai_client.model = str(_ov_all["model"])
+
         mode, skill_name = self._determine_generation_mode(chapter)
         chapter.status = "generating"
         await self.db.commit()
@@ -827,9 +832,15 @@ class ChapterService:
             # 注意：所有值必须是字符串，SkillEngine 只替换 str 类型的变量
             context = {"chapter_number": str(chapter.chapter_number),
                        "chapter_title": chapter.title or ""}
-            # 注入项目思考模式设置（供 SkillEngine 覆盖推理参数）
+            # 注入思考模式：项目设置作为底色，per-生成覆盖优先（low/medium/high）
+            _tm = {}
             if project and isinstance(project.settings, dict):
-                context["_thinking_modes"] = project.settings.get("thinking_modes", {})
+                _tm = dict(project.settings.get("thinking_modes", {}))
+            if _ov_all.get("thinking_mode"):
+                # 覆盖 chapter 槽位：启用推理并设置 effort
+                _tm["chapter"] = {"enabled": True, "reasoning_effort": str(_ov_all["thinking_mode"])}
+            if _tm:
+                context["_thinking_modes"] = _tm
             if project:
                 context["project_title"] = project.title or ""
                 _ov = overrides or {}
