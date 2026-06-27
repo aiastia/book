@@ -28,6 +28,8 @@
 - 如果修改指令提到"冲突"问题，重点强化矛盾和戏剧张力
 </guidelines>
 
+@include:_shared_writing_rules.md
+
 <output>
 【输出规范】
 直接输出重写后的章节正文内容。
