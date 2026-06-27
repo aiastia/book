@@ -715,13 +715,8 @@ class SkillEngine:
         instr_msgs = [m for m in split_msgs if m["role"] == "system"]
         knowl_msgs = [m for m in split_msgs if m["role"] == "user"]
         messages.extend(instr_msgs)
-        messages.extend(knowl_msgs)
-        logger.warning(
-            f"[skill] Prompt 已拆分: {len(split_msgs)} 条消息 "
-            f"({len(instr_msgs)} instruction + {len(knowl_msgs)} knowledge)"
-        )
 
-        # ===== 自动注入上下文（按 skill 类型选择性注入）=====
+        # ===== 自动注入上下文（放在 instruction 之后、knowledge 之前，利用缓存）=====
         all_blocks = _inject_context_blocks(context, skill_name)
         info_blocks = []
         write_blocks = []
@@ -745,6 +740,13 @@ class SkillEngine:
             else:
                 write_blocks.append(m)
         messages.extend(info_blocks)
+
+        # knowledge 消息放在最后（每章变化大，破坏缓存的位置统一靠后）
+        messages.extend(knowl_msgs)
+        logger.warning(
+            f"[skill] Prompt: {len(instr_msgs)} instruction + {len(info_blocks)} context + "
+            f"{len(knowl_msgs)} knowledge → {len(messages)} total (缓存友好)"
+        )
         if write_blocks:
             context["_post_tool_messages"] = write_blocks
 
