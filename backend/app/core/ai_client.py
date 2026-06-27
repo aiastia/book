@@ -384,6 +384,7 @@ class AIClient:
                         {
                             "index": idx,
                             "id": tc["id"],
+                            "type": "function",
                             "function": {"name": tc["name"], "arguments": tc["arguments"]},
                         }
                     )
