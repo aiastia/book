@@ -68,6 +68,9 @@ ignore = [
 # （base.py 集中导出 Pydantic schema、模型、辅助函数），豁免 star-import 相关噪音
 # 但保留其他规则（F401 真正未用的导入仍会报、B904 等仍会报）
 "app/api/routes/projects_pkg/*.py" = ["F403", "F405"]
+# base.py 是有意设计的共享导入枢纽，其导入用于供给子模块 `import *`，
+# 因此 Ruff 眼中的「未使用导入」实际上是公共 re-export，需豁免 F401。
+"app/api/routes/projects_pkg/base.py" = ["F401"]
 
 # ------------------------------------------------------------
 # 格式化配置（format，兼容 Black 风格）

@@ -5,13 +5,25 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 
 from app.core.ai_client import AIClient
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.models.chapter import Chapter
+from app.models.character import Character
+from app.models.foreshadow import Foreshadow
+from app.models.item import Item
+from app.models.location import Location
+from app.models.organization import Organization
+from app.models.outline import Outline
+from app.models.plot_analysis import PlotAnalysis
 from app.models.project import Project
+from app.models.world import WorldSetting
+from app.services.chapter_service import ChapterService
+from app.services.foreshadow_service import ForeshadowService
 from app.skills.engine import SkillEngine
 
 
