@@ -545,17 +545,29 @@ def _build_collected_data_summary(tool_call_history: list[dict], final_content: 
     return "\n".join(lines) if lines else "（已查询信息）"
 
 
-async def _auto_fill_items_and_locations(
-    db, project, outlines: list, tracker,
-) -> None:
-    """从大纲输出中收集 new_items / new_locations，去重后入库。"""
+@router.get("/{project_id}/outlines/pending-entities")
+async def get_pending_entities(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """获取大纲中引入但尚未入库的物品和地点。前端展示「需要补充」列表。"""
+    await get_user_project(db, project_id, user)
+
     from app.models.item import Item
     from app.models.location import Location
+    from app.models.outline import Outline
 
-    # 收集大纲中声明的所有新物品/地点（从 structure JSON 中读取）
+    outlines = (
+        (await db.execute(
+            select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number)
+        ))
+        .scalars().all()
+    )
+
+    # 收集大纲中声明的所有新物品/地点
     all_items: dict[str, dict] = {}
     all_locs: dict[str, dict] = {}
-
     for o in outlines:
         raw = o.structure or {}
         for ni in raw.get("new_items") or []:
@@ -563,28 +575,79 @@ async def _auto_fill_items_and_locations(
                 name = ni["name"].strip()
                 if name and name not in all_items:
                     all_items[name] = {
-                        "category": ni.get("category", "杂物"),
+                        "name": name, "category": ni.get("category", "杂物"),
                         "description": ni.get("description", "")[:200],
+                        "from_chapter": o.chapter_number,
                     }
         for nl in raw.get("new_locations") or []:
             if isinstance(nl, dict) and nl.get("name"):
                 name = nl["name"].strip()
                 if name and name not in all_locs:
                     all_locs[name] = {
-                        "location_type": nl.get("location_type", "其他"),
+                        "name": name, "location_type": nl.get("location_type", "其他"),
                         "description": nl.get("description", "")[:200],
+                        "from_chapter": o.chapter_number,
                     }
 
-    if not all_items and not all_locs:
-        return
-
-    await tracker.update(stage="filling", message="补充新物品和地点...")
-
+    # 检查 DB 中是否存在
     existing_items = {
-        i.name for i in (await db.execute(select(Item).where(Item.project_id == project.id))).scalars().all()
+        i.name for i in (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
     }
     existing_locs = {
-        l.name for l in (await db.execute(select(Location).where(Location.project_id == project.id))).scalars().all()
+        l.name for l in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
+    }
+
+    pending_items = [v for k, v in all_items.items() if k not in existing_items]
+    pending_locs = [v for k, v in all_locs.items() if k not in existing_locs]
+
+    return {
+        "pending_items": pending_items,
+        "pending_locations": pending_locs,
+        "total": len(pending_items) + len(pending_locs),
+    }
+
+
+@router.post("/{project_id}/outlines/generate-pending-entities")
+async def generate_pending_entities(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """用户确认后，生成 pending-entities 中缺失的物品和地点。"""
+    await get_user_project(db, project_id, user)
+
+    from app.models.item import Item
+    from app.models.location import Location
+    from app.models.outline import Outline
+
+    # 复用 pending-entities 的收集逻辑
+    outlines = (
+        (await db.execute(
+            select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number)
+        ))
+        .scalars().all()
+    )
+
+    all_items: dict[str, dict] = {}
+    all_locs: dict[str, dict] = {}
+    for o in outlines:
+        raw = o.structure or {}
+        for ni in raw.get("new_items") or []:
+            if isinstance(ni, dict) and ni.get("name"):
+                name = ni["name"].strip()
+                if name and name not in all_items:
+                    all_items[name] = {"category": ni.get("category", "杂物"), "description": ni.get("description", "")[:200]}
+        for nl in raw.get("new_locations") or []:
+            if isinstance(nl, dict) and nl.get("name"):
+                name = nl["name"].strip()
+                if name and name not in all_locs:
+                    all_locs[name] = {"location_type": nl.get("location_type", "其他"), "description": nl.get("description", "")[:200]}
+
+    existing_items = {
+        i.name for i in (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
+    }
+    existing_locs = {
+        l.name for l in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
     }
 
     created = 0
@@ -592,9 +655,8 @@ async def _auto_fill_items_and_locations(
         if name in existing_items:
             continue
         db.add(Item(
-            project_id=project.id, name=name,
-            category=info["category"], rarity="普通",
-            item_type="道具", description=info["description"],
+            project_id=project_id, name=name, category=info["category"],
+            rarity="普通", item_type="道具", description=info["description"],
             status="available",
         ))
         created += 1
@@ -602,16 +664,16 @@ async def _auto_fill_items_and_locations(
         if name in existing_locs:
             continue
         db.add(Location(
-            project_id=project.id, name=name,
-            location_type=info["location_type"],
-            description=info["description"],
-            atmosphere="", danger_level="safe",
+            project_id=project_id, name=name, location_type=info["location_type"],
+            description=info["description"], atmosphere="", danger_level="safe",
         ))
         created += 1
 
     if created:
         await db.commit()
-        logger.warning(f"[outline] 大纲附带新实体: {len(all_items)} 物品 + {len(all_locs)} 地点 → 入库 {created}")
+        logger.warning(f"[outline] 用户补全: {len(all_items)} 物品 + {len(all_locs)} 地点 → 入库 {created}")
+
+    return {"created": created, "items": len(all_items), "locations": len(all_locs)}
 
 
 @router.post("/{project_id}/outlines/generate-async")
@@ -725,10 +787,6 @@ async def generate_outlines_async(
                             )
                             task_db.add(ch)
                     await task_db.commit()
-                    # 大纲生成后自动补充缺失的物品和地点
-                    await _auto_fill_items_and_locations(
-                        task_db, proj, created_objs, tracker
-                    )
                 await tracker.complete(message=f"大纲生成完成（{len(outlines_data)}章）")
                 return
 
