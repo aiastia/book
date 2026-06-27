@@ -60,9 +60,9 @@ PATTERNS_SAFE: list[tuple[str, str]] = [
     (r"不是([^，。；]{2,20})[，。]*而是\s*([^，。]{2,50})", r"\2"),
     (r"并不是([^，。；]{2,20})[，。]*而是\s*([^，。]{2,50})", r"\2"),
     # "直到这一刻/这一瞬/现在" → 删
-    (r"[，。]直到(?:这一刻|这一瞬|现在|此时)[，。]?", "。"),
+    (r"(?:^|[，。])\s*直到(?:这一刻|这一瞬|现在|此时)[，。]?", "."),
     # "那一刻/这一瞬/这一刻" → 删
-    (r"[，。](?:那一刻|这一瞬|这一刻)[，。]?", ""),
+    (r"(?:^|[，。])\s*(?:那一刻|这一瞬|这一刻)[，。]?", ""),
     # 引语前缀 → 删
     (rf"{_R}开口[，。]", ""),
     # "不是比喻" → 删
@@ -70,9 +70,11 @@ PATTERNS_SAFE: list[tuple[str, str]] = [
     # "现在不是X的时候" → 删
     (r"现在不是(?:回忆|感慨|犹豫|害怕)的时候[，。]", ""),
     # 逻辑连接词 → 删（真人写作很少用）
-    (r"[，。]因此[，]?", "。"),
-    (r"[，。]于是[，]?", "。"),
-    (r"[，。]所以[，]?", "。"),
+    (r"(?:^|[，。])\s*因此[，]?", "。"),
+    (r"(?:^|[，。])\s*于是[，]?", "。"),
+    (r"(?:^|[，。])\s*所以[，]?", "。"),
+    # "两个人都X" → "两人X"
+    (r"两个人(?:都|同时)(.{2,20})", r"两人\1"),
 ]
 
 PATTERNS_NORMAL: list[tuple[str, str]] = [
@@ -120,13 +122,19 @@ _BODY_TRIGGERS: dict[str, list[str]] = {
 
 def _rotate_body_word(match: re.Match) -> str:
     raw = match.group(0)
+    # 去掉尾随的"了一下/了起来/了一下子"等
+    suffix = ""
+    raw_stripped = re.sub(r"(?:了一[下子]|了起[来]|了一[下子]|了一下子|[了着])$", "", raw)
+    if raw_stripped != raw:
+        suffix = raw[len(raw_stripped):]
+    raw = raw_stripped
     key = re.sub(rf"^{_R}", "", raw)
     for pat, pool in _BODY_PATTERNS:
         if pat.fullmatch(raw):
             idx = _body_counts.get(key, 0) % len(pool)
             _body_counts[key] = _body_counts.get(key, 0) + 1
-            return pool[idx]
-    return raw
+            return pool[idx] + suffix
+    return match.group(0)
 
 
 def _init_body_patterns():
