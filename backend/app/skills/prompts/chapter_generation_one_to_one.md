@@ -56,6 +56,8 @@
 
 @include:_shared_writing_rules.md
 
+@include:_shared_chunqiu_brush.md
+
 <output>
 开始写吧。从故事开场直接起笔。别铺垫，别介绍世界观，直接让人物在场景里动起来。
 

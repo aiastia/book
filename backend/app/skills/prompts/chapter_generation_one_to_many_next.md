@@ -85,6 +85,8 @@
 
 @include:_shared_writing_rules.md
 
+@include:_shared_chunqiu_brush.md
+
 <output>
 【输出规范】
 直接输出小说正文内容，无需任何前言、后记或解释性文字。
