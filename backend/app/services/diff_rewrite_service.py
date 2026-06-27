@@ -130,6 +130,41 @@ def scan_fingerprint_sentences(text: str) -> list[dict]:
     return hits
 
 
+# "不是A，（而）是B" 密度扫描（仅当全文超过 4 次时，标记超出部分）
+_NOT_A_BUT_B_RE = re.compile(r"不是[^。！？\n]{1,25}(?:。|，)\s*(?:而是?|是)[^。！？\n]{1,60}")
+
+
+def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
+    """扫描「不是A，而是B」句式。全章 > 4 次时，第 5 次及以后标记为需改写。"""
+    matches = []
+    for m in _NOT_A_BUT_B_RE.finditer(text):
+        start, end = m.start(), m.end()
+        sentence = text[start:end].strip()
+        # "不是A是B" 句式天然较短，降低最小长度阈值
+        if len(sentence) >= 6:
+            matches.append({"start": start, "end": end, "sentence": sentence})
+
+    # 只有超过阈值时才标记
+    threshold = 4
+    if len(matches) <= threshold:
+        return []
+
+    # 标记第 threshold+1 及以后的（去重）
+    extra_hits = []
+    seen = {(h["start"], h["end"]) for h in existing_hits}
+    for m in matches[threshold:]:  # 跳过前 threshold 个，只标记超出的
+        key = (m["start"], m["end"])
+        if key not in seen:
+            seen.add(key)
+            extra_hits.append({
+                "start": m["start"],
+                "end": m["end"],
+                "sentence": m["sentence"],
+                "reason": "AI句式密度过高-不是A是B",
+            })
+    return extra_hits
+
+
 # ====================================================================
 # 打包：带上下文
 # ====================================================================
@@ -179,6 +214,9 @@ async def _call_rewrite_api(
         "对每个「原句」，只改掉 AI 味（过度解释/心理说明/连接词/解释性从句），"
         "保持意思不变，禁止扩写，禁止新增内容，禁止改变人称。\n"
         "如果原句已经够好，原样返回。\n"
+        "特殊处理：「不是A，是B」句式改成直接陈述。\n"
+        "  例：「不是矿道，是裂隙」→「矿道裂成了一条向下的裂隙」\n"
+        "  例：「不是消失，是变形」→「轮廓正在变形」\n"
         "严格输出 JSON 数组：[{\"i\": 编号, \"t\": \"改后句子\"}]，不要任何其他文字。"
     )
 
@@ -260,6 +298,12 @@ async def diff_rewrite(
     """
     # 1. 扫描
     hits = scan_fingerprint_sentences(text)
+    # 1b. "不是A，是B" 密度扫描（全章 > 4 次时标记超出部分）
+    not_a_but_b_hits = _scan_not_a_but_b(text, hits)
+    if not_a_but_b_hits:
+        logger.warning(f"[rewrite] 「不是A是B」密度过高: 全文 {len(not_a_but_b_hits) + 4}+ 次，标记 {len(not_a_but_b_hits)} 句改写")
+        hits.extend(not_a_but_b_hits)
+        hits.sort(key=lambda h: h["start"])
     if not hits:
         logger.warning(f"[rewrite] 未命中任何 AI 指纹句，跳过 API 调用（无请求发出）")
         return text, {"命中": 0}
