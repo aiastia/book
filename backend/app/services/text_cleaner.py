@@ -254,64 +254,78 @@ def _apply_stats(text: str) -> tuple[str, dict]:
 
 
 def _strip_xml_like_tags(text: str) -> tuple[str, int]:
-    """移除 DSML/XML 风格的工具调用标签，防止泄漏到正文。
+    """移除 DSML/XML 风格的工具调用标签及内容，防止泄漏到正文。
 
-    匹配：
-    - <｜DSML｜...> ... </｜DSML｜...>  全角竖线 DSML 格式
-    - <|...|> 半角竖线格式（Kimi 残留等）
-    - 自闭合标签 <.../>
+    策略：先移除完整标签对（含嵌套内容），再清理残留的孤立标签。
     返回 (cleaned_text, removed_count)
     """
     removed = 0
 
-    # 1. 移除完整 DSML 标签对 <｜DSML｜xxx>...</｜DSML｜xxx>
-    #    匹配跨越换行的标签内容
-    dsml_pattern = re.compile(
-        r"<[｜\|]DSML[｜\|][^>]*>.*?</[｜\|]DSML[｜\|][^>]*>",
+    # ---- Pass 1: 完整标签对（含内容） ----
+    # DSML invoke 块：<｜DSML｜invoke ...> ... </｜DSML｜invoke>
+    dsml_invoke = re.compile(
+        r"<[｜\|]DSML[｜\|]invoke\b[^>]*>.*?</[｜\|]DSML[｜\|]invoke\s*>",
         re.DOTALL,
     )
-    while dsml_pattern.search(text):
-        text, n = dsml_pattern.subn("", text)
+    while dsml_invoke.search(text):
+        text, n = dsml_invoke.subn("", text)
         removed += n
         if n == 0:
             break
 
-    # 2. 移除自闭合的 DSML parameter 标签：<｜DSML｜parameter ... />
-    param_pattern = re.compile(
-        r"<[｜\|]DSML[｜\|]parameter\s[^>]*?/>",
+    # DSML parameter 块：<｜DSML｜parameter ...> ... </｜DSML｜parameter>
+    dsml_param = re.compile(
+        r"<[｜\|]DSML[｜\|]parameter\b[^>]*>.*?</[｜\|]DSML[｜\|]parameter\s*>",
         re.DOTALL,
     )
-    text, n = param_pattern.subn("", text)
-    removed += n
+    while dsml_param.search(text):
+        text, n = dsml_param.subn("", text)
+        removed += n
+        if n == 0:
+            break
 
-    # 3. 移除 Kimi 风格的 tool_call 残留标签
-    kimi_pattern = re.compile(
-        r"<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>",
-        re.DOTALL,
-    )
-    text, n = kimi_pattern.subn("", text)
-    removed += n
-
-    kimi_single = re.compile(
+    # Kimi tool_call 完整块
+    kimi_tool = re.compile(
         r"<\|tool_call_begin\|>.*?<\|tool_call_end\|>",
         re.DOTALL,
     )
-    text, n = kimi_single.subn("", text)
+    text, n = kimi_tool.subn("", text)
     removed += n
 
-    # 4. 兜底：移除任何残留的 <|...|> 或 <｜...｜> 标签（单行，非贪婪）
-    #    防止任何未知的工具调用格式泄漏
-    residual_pattern = re.compile(
-        r"<[｜\|]\S+?[｜\|][^>]*?(?:>.*?</[｜\|]\S+?[｜\|][^>]*?>|/>)",
+    # Kimi section 完整块
+    kimi_section = re.compile(
+        r"<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>",
         re.DOTALL,
     )
-    text, n = residual_pattern.subn("", text)
+    text, n = kimi_section.subn("", text)
     removed += n
 
-    # 5. 清理残留的空行
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    # DSML tool_calls 最外层（兜底）
+    dsml_outer = re.compile(
+        r"<[｜\|]DSML[｜\|]tool_calls\s*>.*?</[｜\|]DSML[｜\|]tool_calls\s*>",
+        re.DOTALL,
+    )
+    while dsml_outer.search(text):
+        text, n = dsml_outer.subn("", text)
+        removed += n
+        if n == 0:
+            break
 
-    return text.strip(), removed
+    # ---- Pass 2: 孤立标签（无内容或已拆散的标签碎片） ----
+    _TOOL_TAG = re.compile(
+        r"</?[｜\|]DSML[｜\|][^>]*/?>|"         # DSML 孤立标签
+        r"</?\|tool_call[^>]*\|>|"              # Kimi tool_call 标签
+        r"</?\|tool_calls_section[^>]*\|>",     # Kimi section 标签
+    )
+    text, n = _TOOL_TAG.subn("", text)
+    removed += n
+
+    # ---- 清理残留 ----
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # 删除纯空白行开头/结尾
+    text = text.strip()
+
+    return text, removed
 
 
 # ====================================================================
