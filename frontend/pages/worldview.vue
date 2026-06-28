@@ -44,7 +44,7 @@ const categories = ['地理', '历史', '种族', '势力', '修炼体系', '科
 async function onGenCore() {
   if (!await msg.confirm('AI 将重新生成核心世界观（时间/地点/氛围/规则），已有内容将被覆盖。确认开始？')) return
   genAll.value = true
-  try { await API.world.generateCore(); await refreshCore(); msg.success('核心世界观已生成') }
+  try { await API.world.generateCore({}); await refreshCore(); msg.success('核心世界观已生成') }
   catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { genAll.value = false }
 }

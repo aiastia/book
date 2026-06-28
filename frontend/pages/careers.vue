@@ -107,7 +107,7 @@ async function doGenerate() {
       career_type: genType.value === 'all' ? '' : genType.value,
       user_prompt: genReq.value,
     })
-    await refresh()
+    await refreshCareers()
     showGen.value = false
     msg.success(hasExisting ? `追加生成 ${r.count} 个职业` : `生成 ${r.count} 个职业`)
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
@@ -115,7 +115,7 @@ async function doGenerate() {
 }
 async function onAdd() {
   if (!newCareer.name.trim()) return
-  try { await API.career.create({ ...newCareer, stages: [], abilities: [], attributes: {} }); showAdd.value = false; newCareer.name = ''; await refresh() }
+  try { await API.career.create({ ...newCareer, stages: [], abilities: [], attributes: {} }); showAdd.value = false; newCareer.name = ''; await refreshCareers() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
 function openEdit(c: any) {
@@ -157,12 +157,12 @@ async function onSave() {
       stages: cleanStages,
       abilities: cleanAbilities,
     })
-    await refresh(); editing.value = null; msg.success('已保存')
+    await refreshCareers(); editing.value = null; msg.success('已保存')
   } catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await API.career.delete(id); await refresh(); msg.success('已删除') }
+  try { await API.career.delete(id); await refreshCareers(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
@@ -179,7 +179,7 @@ async function onAutoAssign() {
   autoAssigning.value = true
   try {
     const r = await API.career.autoAssign({ user_prompt: '' })
-    await refresh()
+    await refreshCareers()
     msg.success(`已为 ${r.count} 个角色分配主职业`)
   } catch (e: any) { msg.error('分配失败：' + formatError(e)) }
   finally { autoAssigning.value = false }

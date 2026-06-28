@@ -55,7 +55,7 @@ async function doGenerate() {
   generating.value = true
   try {
     const r = await API.item.generate({ count: genCount.value, category: genCategory.value, user_prompt: genReq.value })
-    await refresh()
+    await refreshItems()
     showGen.value = false
     msg.success(`生成 ${r.count} 个物品`)
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
@@ -77,13 +77,13 @@ async function onSave() {
     if (editing.value) await API.item.update(form.id, { ...form })
     else await API.item.create({ ...form })
     showAdd.value = false
-    await refresh()
+    await refreshItems()
     msg.success(editing.value ? '已更新' : '已添加')
   } catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await API.item.delete(id); await refresh(); msg.success('已删除') }
+  try { await API.item.delete(id); await refreshItems(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 </script>

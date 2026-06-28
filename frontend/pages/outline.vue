@@ -54,7 +54,7 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 const organizationOptions = ref<Array<{ name: string; org_type: string; label: string }>>([])
 async function loadCharacterOptions() {
   try {
-    const res = await API.character.gets()
+    const res = await useFetch(() => `/api/projects/${currentProjectId.value}/characters`)
     const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({
       name: c.name,
@@ -257,7 +257,7 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
 async function onGenerate() {
   generating.value = true
   try {
-    const { task_id } = await API.outline.generateAsync(genCount.value)
+    const { task_id } = await API.outline.generate(genCount.value)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_new', title: `生成${genCount.value}章大纲` })
     showGen.value = false
@@ -270,9 +270,9 @@ async function onGenerate() {
 // 任务完成时自动刷新列表（比 setTimeout 轮询更准）
 // onTaskCompleted 用前缀匹配，覆盖 outline_new / outline_continue / outline_expand
 const { onTaskCompleted } = useBackgroundTasks()
-onTaskCompleted('outline_new', () => { refresh() })
-onTaskCompleted('outline_continue', () => { refresh() })
-onTaskCompleted('outline_expand', () => { refresh() })
+onTaskCompleted('outline_new', () => { refreshOutlines() })
+onTaskCompleted('outline_continue', () => { refreshOutlines() })
+onTaskCompleted('outline_expand', () => { refreshOutlines() })
 
 function openContinue() {
   // 检查是否已有大纲
@@ -403,7 +403,7 @@ async function onSave() {
       },
       chapter_number: orig.chapter_number,
     })
-    await refresh(); editing.value = null; msg.success('已保存')
+    await refreshOutlines(); editing.value = null; msg.success('已保存')
   } catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDelete(id: number) {
@@ -415,7 +415,7 @@ async function onDelete(id: number) {
   if (!await msg.confirm(hint)) return
   try {
     const res = await API.outline.delete(id)
-    await refresh()
+    await refreshOutlines()
     if (res?.deleted_chapters) {
       msg.success(`已删除（含 ${res.deleted_chapters} 章正文）`)
     } else {
@@ -453,7 +453,7 @@ async function doExpand() {
   const mode = expandMode.value
   expanding.value = true
   try {
-    const { task_id } = await API.outline.expandAsync(expandTarget.value.id, {
+    const { task_id } = await API.outline.expand(expandTarget.value.id, {
       target_chapter_count: expandCount.value,
       strategy: expandStrategy.value,
       mode,
@@ -519,7 +519,7 @@ async function viewExpansion(o: any) {
 async function deleteExpansion() {
   if (!previewData.value) return
   if (!await msg.confirm(`确认删除此大纲展开的所有 ${previewData.value.chapter_count} 章？`)) return
-  try { await API.outline.deleteChapters(previewData.value.outline.id); await refresh(); showPreview.value = false; msg.success('已删除') }
+  try { await API.outline.deleteChapters(previewData.value.outline.id); await refreshOutlines(); showPreview.value = false; msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 </script>

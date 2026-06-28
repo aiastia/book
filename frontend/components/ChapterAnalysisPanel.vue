@@ -1,7 +1,6 @@
-import { API } from "~/composables/api"
 <script setup lang="ts">
 // 章节分析结果查看面板（含标注联动）
-import { apiGet } from '~/composables/useApi'
+import { API } from '~/composables/api'
 
 const props = defineProps<{
   chapterId: number

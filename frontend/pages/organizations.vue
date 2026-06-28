@@ -15,7 +15,7 @@ const { data: characters, refresh: refreshChars } = await useFetch(() => `/proje
 
 // 当组织生成/初始化任务完成时自动刷新列表
 onTaskCompleted('organizations', () => { refresh() })
-onTaskCompleted('init', () => { setTimeout(() => refresh(), 2000) })
+onTaskCompleted('init', () => { setTimeout(() => refreshTree(), 2000) })
 
 const generating = ref(false)
 const showGen = ref(false)
@@ -77,7 +77,7 @@ async function onAddMember() {
     showAddMember.value = false
     newMember.character_id = null; newMember.position = ''
     await loadMembers(selectedOrgId.value)
-    await refresh()
+    await refreshTree()
     msg.success('已添加')
   } catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
@@ -91,13 +91,13 @@ async function onSaveMember() {
   try {
     await API.organization.updateMember(selectedOrgId.value, editMemberId.value, { ...newMember })
     showEditMember.value = false; editMemberId.value = null
-    await loadMembers(selectedOrgId.value); await refresh()
+    await loadMembers(selectedOrgId.value); await refreshTree()
     msg.success('已更新')
   } catch (e: any) { msg.error('更新失败：' + formatError(e)) }
 }
 async function onRemoveMember(memberId: number) {
   if (!selectedOrgId.value) return
-  try { await API.organization.removeMember(selectedOrgId.value, memberId); await loadMembers(selectedOrgId.value); await refresh(); msg.success('已移除') }
+  try { await API.organization.removeMember(selectedOrgId.value, memberId); await loadMembers(selectedOrgId.value); await refreshTree(); msg.success('已移除') }
   catch (e: any) { msg.error('移除失败：' + formatError(e)) }
 }
 async function onGenMembers() {
@@ -106,7 +106,7 @@ async function onGenMembers() {
   genMembersLoading.value = true
   try {
     const r = await API.organization.generateMembers(selectedOrgId.value, { user_prompt: '' })
-    await loadMembers(selectedOrgId.value); await refresh()
+    await loadMembers(selectedOrgId.value); await refreshTree()
     msg.success(`AI 分配了 ${r.count} 名成员`)
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { genMembersLoading.value = false }
@@ -125,7 +125,7 @@ async function onGenerate() {
 }
 async function onAdd() {
   if (!newOrg.name.trim()) return
-  try { await API.organization.create({ ...newOrg }); showAdd.value = false; newOrg.name = ''; await refresh() }
+  try { await API.organization.create({ ...newOrg }); showAdd.value = false; newOrg.name = ''; await refreshTree() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
 function openEdit(o: any) {
@@ -134,12 +134,12 @@ function openEdit(o: any) {
 }
 async function onSave() {
   if (!selectedOrgId.value) return
-  try { await API.organization.update(selectedOrgId.value, { ...editForm }); await refresh(); editing.value = null; msg.success('已保存') }
+  try { await API.organization.update(selectedOrgId.value, { ...editForm }); await refreshTree(); editing.value = null; msg.success('已保存') }
   catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await API.organization.delete(id); selectedOrgId.value = null; selectedOrg.value = null; await refresh(); msg.success('已删除') }
+  try { await API.organization.delete(id); selectedOrgId.value = null; selectedOrg.value = null; await refreshTree(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
@@ -159,7 +159,7 @@ async function onInitAllMembers() {
   initAllLoading.value = true
   try {
     const r = await API.organization.generateAllMembers()
-    await refresh()
+    await refreshTree()
     msg.success(`完成：${r.created} 个新成员分配至 ${r.results.filter((x:any) => !x.skipped && !x.error).length} 个组织`)
   } catch (e: any) { msg.error('失败：' + formatError(e)) }
   finally { initAllLoading.value = false }

@@ -11,11 +11,11 @@ const { onTaskCompleted } = useBackgroundTasks()
 
 // 当角色生成任务完成时自动刷新列表
 onTaskCompleted('characters', () => {
-  refresh()
+  refreshChars()
 })
 onTaskCompleted('init', () => {
   // 项目初始化完成后刷新（角色可能在初始化管线中生成）
-  setTimeout(() => refresh(), 2000)
+  setTimeout(() => refreshChars(), 2000)
 })
 const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 // 加载职业体系，供「职业」字段下拉使用
@@ -186,14 +186,14 @@ async function onGenerate() {
   try {
     if (genCount.value > 1) {
       // 数量>1 走批量生成
-      const { task_id } = await API.chapter.batchGenerateCharactersAsync({ count: genCount.value, requirements: `${genRole.value}。${extra}` })
+      const { task_id } = await API.character.batchGenerate({ count: genCount.value, requirements: `${genRole.value}。${extra}` })
       const { trackTask } = useBackgroundTasks()
       trackTask({ id: task_id, task_type: 'characters', title: `批量生成${genCount.value}个角色` })
 	      showGen.value = false
 	      msg.success('批量生成任务已提交，可在右下角查看进度')
 	    } else {
 	      // 单个生成也走异步任务，避免前台阻塞
-	      const { task_id } = await API.chapter.batchGenerateCharactersAsync({ count: 1, requirements: `${genRole.value}。${extra}` })
+	      const { task_id } = await API.character.batchGenerate({ count: 1, requirements: `${genRole.value}。${extra}` })
 	      const { trackTask } = useBackgroundTasks()
 	      trackTask({ id: task_id, task_type: 'characters', title: `生成${genRole.value}角色` })
 	      showGen.value = false
@@ -210,7 +210,7 @@ async function onBatch() {
     if (totalCount === 0) { msg.warning('请至少设置一种角色数量'); return }
     const roleDesc = roleList.map(r => `${r.role}${r.count}个`).join('、')
     const reqText = `请生成${roleDesc}。${batchReq.value}`
-    const { task_id } = await API.chapter.batchGenerateCharactersAsync({ count: totalCount, requirements: reqText })
+    const { task_id } = await API.character.batchGenerate({ count: totalCount, requirements: reqText })
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'characters', title: `批量生成${totalCount}个角色（${roleDesc}）` })
 	    showBatch.value = false
@@ -249,7 +249,7 @@ async function onSave() {
       }))
     const payload = { ...editForm, sub_careers: subs }
     await API.character.update(editing.value.id, payload)
-    await refresh()
+    await refreshChars()
     editing.value = null
     msg.success('已保存')
   } catch (e: any) { msg.error('保存失败：' + formatError(e)) }
@@ -257,7 +257,7 @@ async function onSave() {
 
 async function onDelete(id:number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await API.character.delete(id); await refresh(); msg.success('已删除') }
+  try { await API.character.delete(id); await refreshChars(); msg.success('已删除') }
   catch (e:any) { msg.error('删除失败：'+formatError(e)) }
 }
 const roleColor: Record<string,string> = { '主角':'error', '反派':'warning', '配角':'processing', '路人':'default' }
