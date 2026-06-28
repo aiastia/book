@@ -2,12 +2,13 @@
 // 物品/道具管理：分类切换 + 卡片网格 + AI 生成 + CRUD
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { Character, Item } from '~/composables/api/types'
 useHead({ title: '物品道具 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: items, refresh: refreshItems } = await useFetch(() => `/projects/${currentProjectId.value}/items`)
-const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
+const { data: items, refresh: refreshItems } = await useFetch<Item[]>(() => `/projects/${currentProjectId.value}/items`)
+const { data: characters, refresh: refreshChars } = await useFetch<Character[]>(() => `/projects/${currentProjectId.value}/characters`)
 
 const generating = ref(false)
 const showAdd = ref(false)

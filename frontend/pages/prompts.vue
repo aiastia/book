@@ -3,7 +3,7 @@ import { API } from '~/composables/api'
 useHead({ title: '提示词模板 — 墨语' })
 const msg = useMessage()
 
-const { data: templates, refresh: refresh } = await useFetch(() => `/prompt-templates`)
+const { data: templates, refresh: refresh } = await useFetch<any[]>(() => `/prompt-templates`)
 const selectedId = ref<number | null>(null)
 const versions = ref<any[]>([])
 const activeVersion = ref<any>(null)

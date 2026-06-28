@@ -2,11 +2,12 @@
 // 我的书架：拟物书本卡片 + 删除/导出/导入 + 新建向导（AI一键生成世界观/角色/大纲）
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { BookSummary } from '~/composables/api/types'
 definePageMeta({ layout: 'default' })
 useHead({ title: '我的书架 — 墨语' })
 const msg = useMessage()
 const { selectProject, createProject: selectAndCreate } = useProject()
-const { data: projects, refresh: refresh } = await useFetch(() => `/books`)
+const { data: projects, refresh: refresh } = await useFetch<BookSummary[]>(() => `/books`)
 
 // 检查 AI 模型是否已配置
 const aiConfigured = ref<boolean | null>(null)

@@ -2,12 +2,13 @@
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { reactive } from 'vue'
+import type { Character, Outline, Project } from '~/composables/api/types'
 useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: project, refresh: refreshProject } = await useFetch(() => `/projects/${currentProjectId.value}`)
-const { data: outlines, refresh: refreshOutlines } = await useFetch(() => `/projects/${currentProjectId.value}/outlines`)
+const { data: project, refresh: refreshProject } = await useFetch<Project>(() => `/projects/${currentProjectId.value}`)
+const { data: outlines, refresh: refreshOutlines } = await useFetch<Outline[]>(() => `/projects/${currentProjectId.value}/outlines`)
 
 const generating = ref(false)
 const genCount = ref(10)
@@ -54,7 +55,7 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 const organizationOptions = ref<Array<{ name: string; org_type: string; label: string }>>([])
 async function loadCharacterOptions() {
   try {
-    const res = await useFetch(() => `/api/projects/${currentProjectId.value}/characters`)
+    const res = await useFetch<Character[]>(() => `/projects/${currentProjectId.value}/characters`)
     const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({
       name: c.name,

@@ -2,13 +2,14 @@
 // 世界设定：对标参考站 — 基础信息卡 + 世界观卡 + 详细设定卡（标签+值描述列表）
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { Project, WorldCore, WorldSetting } from '~/composables/api/types'
 useHead({ title: '世界设定 — 墨语' })
 const { currentProjectId, currentProjectInfo } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: project, refresh: refreshProject } = await useFetch(() => `/projects/${currentProjectId.value}`)
-const { data: worlds, refresh: refreshWorlds } = await useFetch(() => `/projects/${currentProjectId.value}/worldview`)
-const { data: worldCore, refresh: refreshCore } = await useFetch(() => `/projects/${currentProjectId.value}/worldview/core`)
+const { data: project, refresh: refreshProject } = await useFetch<Project>(() => `/projects/${currentProjectId.value}`)
+const { data: worlds, refresh: refreshWorlds } = await useFetch<WorldSetting[]>(() => `/projects/${currentProjectId.value}/worldview`)
+const { data: worldCore, refresh: refreshCore } = await useFetch<WorldCore>(() => `/projects/${currentProjectId.value}/worldview/core`)
 
 const genAll = ref(false)
 const reindexingWorlds = ref(false)

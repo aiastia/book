@@ -2,12 +2,13 @@
 // 关系类型管理：增删改查项目中已用的关系类型
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { RelationType } from '~/composables/api/types'
 useHead({ title: '关系类型管理 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 
 const msg = useMessage()
-const { data: types, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/relations/types`)
+const { data: types, refresh: refresh } = await useFetch<RelationType[]>(() => `/projects/${currentProjectId.value}/relations/types`)
 
 // 颜色池
 const typeColors = ['#e91e63','#ff5722','#f44336','#2196f3','#6B9CA4','#4caf50','#ff9800','#9c27b0','#00bcd4','#795548']

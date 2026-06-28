@@ -7,13 +7,14 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { Character, RelationType } from '~/composables/api/types'
 useHead({ title: '角色关系 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 
 const msg = useMessage()
-const { data: graph, refresh: refreshGraph } = await useFetch(() => `/projects/${currentProjectId.value}/relations/graph`)
-const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
+const { data: graph, refresh: refreshGraph } = await useFetch<any>(() => `/projects/${currentProjectId.value}/relations/graph`)
+const { data: characters, refresh: refresh } = await useFetch<Character[]>(() => `/projects/${currentProjectId.value}/characters`)
 // 全量关系列表（含 id，供表格编辑/删除用）
 const relationsData = ref<any[]>([])
 async function loadRelations() {
@@ -112,7 +113,7 @@ async function onDelete(record: any) {
 }
 
 // ===== 关系类型管理（子视图） =====
-const { data: relationTypes, refresh: refreshTypes } = await useFetch(() => `/projects/${currentProjectId.value}/relations/types`)
+const { data: relationTypes, refresh: refreshTypes } = await useFetch<RelationType[]>(() => `/projects/${currentProjectId.value}/relations/types`)
 const showAddType = ref(false)
 const newTypeName = ref('')
 const newTypeCategory = ref('social')

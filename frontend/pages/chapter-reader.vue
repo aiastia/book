@@ -3,6 +3,7 @@
 // 左侧章节正文（带高亮标注）+ 右侧标注侧边栏（按类型分组，点击定位）
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { Chapter } from '~/composables/api/types'
 
 useHead({ title: '章节阅读 — 墨语' })
 const { currentProjectId } = useProject()
@@ -10,7 +11,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const route = useRoute()
 
-const { data: chapters } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
+const { data: chapters } = await useFetch<Chapter[]>(() => `/projects/${currentProjectId.value}/chapters`)
 const selectedId = ref<number | null>(null)
 const chapter = ref<any>(null)
 const annotations = ref<any[]>([])

@@ -5,6 +5,7 @@ import { useProject } from '~/composables/useProject'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
 import RewriteSuggestionModal from '~/components/RewriteSuggestionModal.vue'
+import type { Chapter, Outline, Project } from '~/composables/api/types'
 
 useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
@@ -21,12 +22,12 @@ const msg = useMessage()
 })()
 
 // ===== 项目信息（含 outline_mode） =====
-const { data: projectData } = await useFetch(() => `/api/projects/${currentProjectId.value}`)
+const { data: projectData } = await useFetch<Project>(() => `/projects/${currentProjectId.value}`)
 const outlineMode = computed(() => projectData.value?.outline_mode || 'one_to_one')
 
 // ===== 章节 + 大纲数据 =====
-const { data: chapters, refresh: refreshList } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
-const { data: outlines } = await useFetch(() => `/api/projects/${currentProjectId.value}/outlines`)
+const { data: chapters, refresh: refreshList } = await useFetch<Chapter[]>(() => `/projects/${currentProjectId.value}/chapters`)
+const { data: outlines } = await useFetch<Outline[]>(() => `/projects/${currentProjectId.value}/outlines`)
 
 // ===== 编辑器状态 =====
 const editorOpen = ref(false)

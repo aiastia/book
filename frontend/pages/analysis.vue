@@ -3,11 +3,12 @@
 
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { PlotAnalysis } from '~/composables/api/types'
 useHead({ title: '剧情分析 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: analyses, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/analyses`)
+const { data: analyses, refresh: refresh } = await useFetch<PlotAnalysis[]>(() => `/projects/${currentProjectId.value}/analyses`)
 const { data: chapters } = await API.chapter.getAnalyses()
 
 // 选择章节查看详情

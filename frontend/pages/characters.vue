@@ -2,6 +2,7 @@
 // 角色设定：对标参考站 — 卡片网格，每个角色内容平铺（描述列表风格）
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
+import type { Career, Character } from '~/composables/api/types'
 
 useHead({ title: '角色设定 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
@@ -17,9 +18,9 @@ onTaskCompleted('init', () => {
   // 项目初始化完成后刷新（角色可能在初始化管线中生成）
   setTimeout(() => refreshChars(), 2000)
 })
-const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
+const { data: characters, refresh: refreshChars } = await useFetch<Character[]>(() => `/projects/${currentProjectId.value}/characters`)
 // 加载职业体系，供「职业」字段下拉使用
-const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
+const { data: careers, refresh: refreshCareers } = await useFetch<Career[]>(() => `/projects/${currentProjectId.value}/careers`)
 // 加载组织列表，供「所属组织」字段下拉使用
 const { data: organizations } = await API.organization.list()
 const occupationOptions = computed(() => {

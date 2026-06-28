@@ -2,9 +2,10 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { API } from '~/composables/api'
 import { CheckOutlined } from '@ant-design/icons-vue'
+import type { AIModelConfig } from '~/composables/api/types'
 useHead({ title: 'AI 设置 — 墨语' })
 const msg = useMessage()
-const { data: models, refresh: refresh } = await useFetch(() => `/ai-models`)
+const { data: models, refresh: refresh } = await useFetch<AIModelConfig[]>(() => `/ai-models`)
 const showAdd = ref(false)
 const editing = ref<any>(null)
 const form = reactive({
