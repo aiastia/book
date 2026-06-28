@@ -285,8 +285,8 @@ const statusColor = (s: string) => ({ draft: 'default', generating: 'processing'
 const { trackTask: trackBgTask, onTaskCompleted } = useBackgroundTasks()
 
 // 当章节生成/批量生成/分析任务完成时自动刷新列表
-onTaskCompleted('chapter', () => {
-  refreshList()
+onTaskCompleted('chapter', async () => {
+  await refreshList()
 })
 onTaskCompleted('init', () => {
   // 项目初始化完成后也刷新（大纲/章节可能变化）

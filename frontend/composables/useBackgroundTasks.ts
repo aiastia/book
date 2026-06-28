@@ -218,18 +218,8 @@ export function useBackgroundTasks() {
         } catch { /* 单个查询失败不影响整体 */ }
       }
 
-      // 手动清理：已完成超过 24 小时的任务自动移除
-      const now = Date.now()
-      const dayAgo = now - 24 * 60 * 60 * 1000
-      tasks.value = tasks.value.filter(t => {
-        if (t._dismissed) return false  // 被用户主动关闭的，立刻移除
-        // 已完成/失败/取消的任务，保留 24 小时
-        if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
-          if (!t._doneAt) t._doneAt = now
-          if (t._doneAt < dayAgo) return false
-        }
-        return true
-      })
+      // 仅移除被用户主动关闭的任务
+      tasks.value = tasks.value.filter(t => !t._dismissed)
     } catch (e) {
       // 静默失败（如未登录）
     }
