@@ -13,8 +13,8 @@ if (!currentProjectId.value) await navigateTo('/books')
 
 const api = useBookApi()
 const msg = useMessage()
-const { data: graph, refresh } = await api.getRelationGraph()
-const { data: characters } = await api.getCharacters()
+const { data: graph, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/relations/graph`)
+const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 // 全量关系列表（含 id，供表格编辑/删除用）
 const relationsData = ref<any[]>([])
 async function loadRelations() {
@@ -113,7 +113,7 @@ async function onDelete(record: any) {
 }
 
 // ===== 关系类型管理（子视图） =====
-const { data: relationTypes, refresh: refreshTypes } = await api.getRelationTypes()
+const { data: relationTypes, refresh: refreshTypes } = await useFetch(() => `/projects/${currentProjectId.value}/relations/types`)
 const showAddType = ref(false)
 const newTypeName = ref('')
 const newTypeCategory = ref('social')

@@ -7,7 +7,7 @@ useHead({ title: '我的书架 — 墨语' })
 const msg = useMessage()
 const api = useBookApi()
 const { selectProject, createProject: selectAndCreate } = useProject()
-const { data: projects, refresh } = await api.listBooks()
+const { data: projects, refresh: refresh } = await useFetch(() => `/books`)
 
 // 检查 AI 模型是否已配置
 const aiConfigured = ref<boolean | null>(null)

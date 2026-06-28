@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 灵感模式：逐步向导 + 快速模式
 import { useBookApi } from '~/composables/useBookApi'
-import { apiPost } from '~/composables/useApi'
+
 import { useProject } from '~/composables/useProject'
 useHead({ title: '灵感模式 — 墨语' })
 const api = useBookApi()

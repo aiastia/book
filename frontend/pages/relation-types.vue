@@ -8,7 +8,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 
 const api = useBookApi()
 const msg = useMessage()
-const { data: types, refresh } = await api.getRelationTypes()
+const { data: types, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/relations/types`)
 
 // 颜色池
 const typeColors = ['#e91e63','#ff5722','#f44336','#2196f3','#6B9CA4','#4caf50','#ff9800','#9c27b0','#00bcd4','#795548']

@@ -8,7 +8,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
-const { data: memories, refresh } = await api.getMemories({ limit: 100 })
+const { data: memories, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/memories?limit=100`)
 const { data: stats } = await api.getMemoryStats()
 
 // 类型筛选

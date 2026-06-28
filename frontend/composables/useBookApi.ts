@@ -510,6 +510,10 @@ export function useBookApi() {
     // ==================== 别名（兼容旧命名） ====================
     getChapters: function (id?: number) { return this.listChapters(id) },
     getOutlines: function (id?: number) { return this.listOutlines(id) },
+    getCharacter: function (characterId: number, id?: number) { return _get(`/projects/${id || pid()}/characters/${characterId}`) },
+    updateCareer: function (careerId: number, body: any, id?: number) { return _put(`/projects/${id || pid()}/careers/${careerId}`, body) },
+    getTaskStatus: function (taskId: number) { return _get(`/tasks/${taskId}`) },
+    getAnalysis: function (chapterNumber: number, id?: number) { return _get(`/projects/${id || pid()}/analyses/${chapterNumber}`) },
     batchGenerate: function (body: any, id?: number) {
       return this.generateChapters(id || _pid(), {
         start: body.start_chapter_number,

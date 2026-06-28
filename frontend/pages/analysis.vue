@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 剧情分析：按章节展示分析维度，对标 MuMuAINovel Tab 布局
-import { apiGet } from '~/composables/useApi'
+
 import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '剧情分析 — 墨语' })
@@ -8,7 +8,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
-const { data: analyses, refresh } = await api.getAnalyses()
+const { data: analyses, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/analyses`)
 const { data: chapters } = await api.getChapters()
 
 // 选择章节查看详情
@@ -39,8 +39,8 @@ async function viewDetail(chapterNumber: number) {
   const cid = chapterIdByNumber(chapterNumber)
   try {
     const [r, ch, ann] = await Promise.all([
-      apiGet<any>(`/api/projects/${currentProjectId.value}/analyses/${chapterNumber}`).catch(() => null),
-      cid ? apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${cid}`).catch(() => null) : Promise.resolve(null),
+      api.getAnalysis(chapterNumber).catch(() => null),
+      cid ? api.getChapter(cid).catch(() => null) : Promise.resolve(null),
       cid ? api.getAnnotations(cid).catch(() => null) : Promise.resolve(null),
     ])
     detail.value = r
@@ -218,7 +218,7 @@ async function pollAnalysisTask(taskId: number, chapterNumber: number, onDone?: 
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 2000))
     try {
-      const t = await apiGet<any>(`/api/tasks/${taskId}`)
+      const t = await api.getTaskStatus(taskId)
       if (t.status === 'completed') {
         await refresh()
         await viewDetail(chapterNumber)
@@ -260,7 +260,7 @@ async function pollBatchAnalysisTask(taskId: number) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 3000))
     try {
-      const t = await apiGet<any>(`/api/tasks/${taskId}`)
+      const t = await api.getTaskStatus(taskId)
       if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
         await refresh()
         if (selectedChapter.value) await viewDetail(selectedChapter.value)

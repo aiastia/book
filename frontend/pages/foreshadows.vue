@@ -7,7 +7,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
-const { data: foreshadows, refresh } = await api.getForeshadows()
+const { data: foreshadows, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/foreshadows`)
 
 const generating = ref(false)
 const showAdd = ref(false)

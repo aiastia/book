@@ -7,7 +7,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
-const { data: tree, refresh } = await api.getLocationTree()
+const { data: tree, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/locations/tree`)
 
 const generating = ref(false)
 const showAdd = ref(false)

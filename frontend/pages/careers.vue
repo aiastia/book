@@ -2,17 +2,17 @@
 // 职业体系：主/副职业分页 + 详细卡片（对标参考站）
 import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
-import { apiPut } from '~/composables/useApi'
+
 useHead({ title: '职业体系 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
-const { data: careers, refresh } = await api.getCareers()
+const { data: careers, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 角色职业关联（#19，显示持有此职业的角色）
 const { data: charCareers } = await api.getCharCareers()
 // 角色名映射
-const { data: characters } = await api.getCharacters()
+const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 const charNameMap = computed(() => {
   const m: Record<number, string> = {}
   for (const c of (characters.value || [])) m[c.id] = c.name
@@ -150,7 +150,7 @@ async function onSave() {
       name: a.name.trim(),
       description: a.description || '',
     }))
-    await apiPut(`/api/projects/${currentProjectId.value}/careers/${editing.value.id}`, {
+    await api.updateCareer(editing.value.id, {
       name: editForm.name,
       career_type: editForm.career_type,
       category: editForm.category,

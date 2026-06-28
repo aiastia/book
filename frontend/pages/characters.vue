@@ -2,7 +2,7 @@
 // 角色设定：对标参考站 — 卡片网格，每个角色内容平铺（描述列表风格）
 import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
-import { apiGet } from '~/composables/useApi'
+
 useHead({ title: '角色设定 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
@@ -18,9 +18,9 @@ onTaskCompleted('init', () => {
   // 项目初始化完成后刷新（角色可能在初始化管线中生成）
   setTimeout(() => refresh(), 2000)
 })
-const { data: characters, refresh } = await api.getCharacters()
+const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 // 加载职业体系，供「职业」字段下拉使用
-const { data: careers } = await api.getCareers()
+const { data: careers, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 加载组织列表，供「所属组织」字段下拉使用
 const { data: organizations } = await api.getOrganizations()
 const occupationOptions = computed(() => {
