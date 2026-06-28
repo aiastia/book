@@ -499,20 +499,12 @@ async def book_import_deconstruct(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """一键拆解：采样立项 → 建项目 → 拆前 N 章大纲。
+    """异步一键拆解：立即返回 task_id，后台执行采样立项→建项目→拆大纲。
 
     req: { sample_side: head|tail, sample_count=5, outline_chapters=20 }
-    全流程在一次请求内完成（不流式），前端转圈等待。timeout 建议设 300s。
-
-    返回 { project_id, project_info, outline_count, batches_done }
+    前端通过右下角浮窗查看进度。
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
-    from app.models.imported_book import ImportedBook
-    from app.services.txt_parser_service import parse_txt_file
-
-    # 1. 取书
+    # 校验书籍存在
     result = await db.execute(
         select(ImportedBook).where(ImportedBook.id == book_id, ImportedBook.user_id == user.id)
     )
@@ -522,114 +514,171 @@ async def book_import_deconstruct(
     if not book.raw_text:
         raise HTTPException(400, "书籍正文为空，无法拆解")
 
-    chapters = parse_txt_file(book.raw_text.encode("utf-8")).get("chapters", [])
-    if not chapters:
-        raise HTTPException(400, "未识别到章节，无法拆解")
+    from app.services.async_ai_service import submit_async_task
 
-    engine, ai_client = await make_engine_and_client(db, user.id)
-
-    # 2. 立项采样 → 反向项目建议
-    sample_count = max(1, req.sample_count or 5)
-    sampled_text = _sample_chapters_text(chapters, req.sample_side, sample_count)
-    sug_result = await engine.execute_skill(
-        "book_import_reverse_project_suggestion",
-        ai_client,
-        {
-            "title": book.title or "未知书名",
-            "sampled_text": sampled_text,
-            "user_prompt": f"请从以下小说文本中提取项目信息（书名：{book.title}）。",
-        },
-    )
-    check_skill_error(sug_result)
-    project_info = sug_result.get("json") or {}
-
-    # 3. 建项目
-    genre = project_info.get("genre") or ""
-    synopsis = project_info.get("description") or project_info.get("synopsis") or ""
-    new_proj = Project(
-        user_id=user.id,
-        title=project_info.get("title") or book.title,
-        genre=genre,
-        synopsis=synopsis,
-        chapter_count=req.outline_chapters,
-        current_word_count=0,
-        target_word_count=project_info.get("target_words") or 0,
-        narrative_pov=project_info.get("narrative_perspective") or "第三人称",
-        status="active",
-    )
-    db.add(new_proj)
-    await db.commit()
-    await db.refresh(new_proj)
-
-    # 4. 拆前 N 章大纲（按 5 章/批循环）
     outline_chapters = max(5, req.outline_chapters or 20)
-    available = min(outline_chapters, len(chapters))
-    theme = project_info.get("theme") or ""
-    narrative_pov = project_info.get("narrative_perspective") or "第三人称"
-    created_outlines = 0
-    batches_done = 0
-    batch_size = 5
 
-    for start_no in range(1, available + 1, batch_size):
-        end_no = min(start_no + batch_size - 1, available)
-        # 取对应章节正文（章节号从 1 开始，列表索引从 0 开始）
-        batch_chapters = chapters[start_no - 1 : end_no]
-        batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
-        if not batch_text.strip():
-            continue
-        try:
-            o_result = await engine.execute_skill(
-                "book_import_reverse_outlines",
-                ai_client,
-                {
-                    "title": new_proj.title,
-                    "genre": genre or "网文",
-                    "theme": theme,
-                    "narrative_perspective": narrative_pov,
-                    "start_chapter": str(start_no),
-                    "end_chapter": str(end_no),
-                    "expected_count": str(end_no - start_no + 1),
-                    "chapters_text": batch_text,
-                    "user_prompt": f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。",
-                },
-            )
-            if o_result.get("error"):
-                logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
-                continue
-            outlines_data = o_result.get("json") or []
-            if not isinstance(outlines_data, list):
-                continue
-            for item in outlines_data:
-                db.add(
-                    Outline(
-                        project_id=new_proj.id,
-                        chapter_number=item.get("chapter_number", start_no),
-                        title=item.get("title", ""),
-                        summary=item.get("summary", ""),
-                        scenes=item.get("scenes", []),
-                        key_points=item.get("key_points", []),
-                        emotion=item.get("emotion", ""),
-                        goal=item.get("goal", ""),
-                        structure=item,
+    async def _run_deconstruct(task_id: int, payload: dict):
+        import logging
+
+        from app.services import background_task_service as bgs
+
+        logger = logging.getLogger(__name__)
+        tracker = bgs.TaskProgressTracker(task_id)
+
+        async with async_session() as task_db:
+            # 1. 取书
+            bk = (
+                await task_db.execute(
+                    select(ImportedBook).where(
+                        ImportedBook.id == payload["book_id"],
+                        ImportedBook.user_id == payload["user_id"],
                     )
                 )
-                created_outlines += 1
-            batches_done += 1
-        except Exception as e:
-            logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
-            continue
+            ).scalar_one_or_none()
+            if not bk or not bk.raw_text:
+                await tracker.fail("书籍不存在或正文为空")
+                return
 
-    # 5. 回填状态
-    book.status = "project_created"
-    book.created_project_id = new_proj.id
-    await db.commit()
+            await tracker.update(stage="preparing", message="解析章节...")
+            chapters = parse_txt_file(bk.raw_text.encode("utf-8")).get("chapters", [])
+            if not chapters:
+                await tracker.fail("未识别到章节")
+                return
 
-    return {
-        "project_id": new_proj.id,
-        "project_info": project_info,
-        "outline_count": created_outlines,
-        "batches_done": batches_done,
-    }
+            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
+
+            # 2. 立项采样
+            await tracker.update(stage="analyzing", message="AI 分析项目信息...")
+            sample_count = max(1, payload["sample_count"])
+            sampled_text = _sample_chapters_text(chapters, payload["sample_side"], sample_count)
+            sug_result = await engine.execute_skill(
+                "book_import_reverse_project_suggestion",
+                ai_client,
+                {
+                    "title": bk.title or "未知书名",
+                    "sampled_text": sampled_text,
+                    "user_prompt": f"请从以下小说文本中提取项目信息（书名：{bk.title}）。",
+                },
+            )
+            if sug_result.get("error"):
+                await tracker.fail(f"项目分析失败: {sug_result['error']}")
+                return
+            project_info = sug_result.get("json") or {}
+
+            # 3. 建项目
+            genre = project_info.get("genre") or ""
+            synopsis = project_info.get("description") or project_info.get("synopsis") or ""
+            new_proj = Project(
+                user_id=payload["user_id"],
+                title=project_info.get("title") or bk.title,
+                genre=genre,
+                synopsis=synopsis,
+                chapter_count=payload["outline_chapters"],
+                current_word_count=0,
+                target_word_count=project_info.get("target_words") or 0,
+                narrative_pov=project_info.get("narrative_perspective") or "第三人称",
+                status="active",
+            )
+            task_db.add(new_proj)
+            await task_db.commit()
+            await task_db.refresh(new_proj)
+
+            # 4. 拆大纲（按 5 章/批）
+            available = min(payload["outline_chapters"], len(chapters))
+            theme = project_info.get("theme") or ""
+            narrative_pov = project_info.get("narrative_perspective") or "第三人称"
+            batch_size = 5
+            total_batches = (available + batch_size - 1) // batch_size
+            created_outlines = 0
+            batches_done = 0
+
+            for start_no in range(1, available + 1, batch_size):
+                # 检查取消
+                bk2 = (
+                    await task_db.execute(
+                        select(ImportedBook).where(ImportedBook.id == payload["book_id"])
+                    )
+                ).scalar_one_or_none()
+                batch_idx = (start_no - 1) // batch_size
+                await tracker.update(
+                    stage="generating",
+                    message=f"拆解大纲 第{start_no}-{min(start_no + batch_size - 1, available)}章（批次 {batch_idx + 1}/{total_batches}）",
+                    progress=int(batch_idx / total_batches * 100),
+                )
+
+                end_no = min(start_no + batch_size - 1, available)
+                batch_chapters = chapters[start_no - 1 : end_no]
+                batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
+                if not batch_text.strip():
+                    continue
+                try:
+                    o_result = await engine.execute_skill(
+                        "book_import_reverse_outlines",
+                        ai_client,
+                        {
+                            "title": new_proj.title,
+                            "genre": genre or "网文",
+                            "theme": theme,
+                            "narrative_perspective": narrative_pov,
+                            "start_chapter": str(start_no),
+                            "end_chapter": str(end_no),
+                            "expected_count": str(end_no - start_no + 1),
+                            "chapters_text": batch_text,
+                            "user_prompt": f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。",
+                        },
+                    )
+                    if o_result.get("error"):
+                        logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
+                        continue
+                    outlines_data = o_result.get("json") or []
+                    if not isinstance(outlines_data, list):
+                        continue
+                    for item in outlines_data:
+                        task_db.add(
+                            Outline(
+                                project_id=new_proj.id,
+                                chapter_number=item.get("chapter_number", start_no),
+                                title=item.get("title", ""),
+                                summary=item.get("summary", ""),
+                                scenes=item.get("scenes", []),
+                                key_points=item.get("key_points", []),
+                                emotion=item.get("emotion", ""),
+                                goal=item.get("goal", ""),
+                                structure=item,
+                            )
+                        )
+                        created_outlines += 1
+                    batches_done += 1
+                    await task_db.commit()
+                except Exception as e:
+                    logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
+                    continue
+
+            # 5. 回填
+            bk.status = "project_created"
+            bk.created_project_id = new_proj.id
+            await task_db.commit()
+
+            await tracker.complete(
+                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲"
+            )
+
+    task_id = await submit_async_task(
+        user_id=user.id,
+        project_id=None,
+        task_type="book_import",
+        title=f"拆书导入：{book.title}",
+        payload={
+            "book_id": book_id,
+            "user_id": user.id,
+            "sample_side": req.sample_side,
+            "sample_count": req.sample_count,
+            "outline_chapters": outline_chapters,
+        },
+        runner=_run_deconstruct,
+    )
+    return {"task_id": task_id}
 
 
 # ============ MCP 增强 ============

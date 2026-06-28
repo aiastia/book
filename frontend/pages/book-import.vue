@@ -73,9 +73,12 @@ async function onDeconstruct() {
       sample_count: sampleCount.value,
       outline_chapters: outlineChapters.value,
     })
-    deconstructResult.value = res
-    parseStep.value = 3
-    msg.success(`拆解完成！已生成 ${res.outline_count} 章大纲`)
+    // 异步任务：提交后关闭弹窗，进度由右下角浮窗显示
+    const { trackTask } = useBackgroundTasks()
+    trackTask({ id: res.task_id, task_type: 'book_import', title: `拆书导入：${parseTarget.value.title}` })
+    parseStep.value = 0
+    parseTarget.value = null
+    msg.success('拆解任务已提交，可在右下角查看进度')
     await refresh()
   } catch (e: any) {
     msg.error('拆解失败：' + formatError(e))
