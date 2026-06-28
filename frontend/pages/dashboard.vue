@@ -16,14 +16,25 @@ if (!currentProjectId.value) {
   await navigateTo('/books')
 }
 
-// 检查 AI 模型是否已配置
+// 检查 AI 模型是否已配置（延迟重试，避免 auth 未就绪）
 const aiConfigured = ref<boolean | null>(null)
-;(async () => {
+async function checkAiConfig() {
   try {
     const models = await api.listAiModels()
     aiConfigured.value = Array.isArray(models) && models.length > 0
-  } catch { aiConfigured.value = false }
-})()
+  } catch {
+    // auth 可能未就绪，2秒后重试一次
+    if (aiConfigured.value === null) {
+      setTimeout(async () => {
+        try {
+          const models2 = await api.listAiModels()
+          aiConfigured.value = Array.isArray(models2) && models2.length > 0
+        } catch { aiConfigured.value = true /* 失败不报，静默跳过 */ }
+      }, 2000)
+    }
+  }
+}
+checkAiConfig()
 
 const { data: project } = await api.getProject()
 const { data: chapters } = await api.getChapters()
