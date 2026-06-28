@@ -5,5 +5,6 @@
 @include:rules/_shared_dialogue.md
 @include:rules/_shared_information_control.md
 @include:rules/_shared_density_control.md
+@include:rules/_shared_narrative_rhythm.md
 
 </tone_rules>
