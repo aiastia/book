@@ -423,7 +423,6 @@ async def _chat_with_tools_json(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        max_rounds=3,  # 大纲/展开：2轮查询 + 1轮输出
     )
     if raw.get("error"):
         return raw
@@ -836,7 +835,6 @@ class SkillEngine:
                         model=model,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        max_rounds=3,  # 章节生成：2轮查询 + 1轮输出，够用且快
                         post_tool_messages=context.get("_post_tool_messages"),
                     )
                 else:

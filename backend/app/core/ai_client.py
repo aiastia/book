@@ -625,7 +625,7 @@ class AIClient:
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
-        max_rounds: int = 5,
+        max_rounds: int = 3,
         post_tool_messages: list[dict] = None,
     ) -> dict:
         """带工具调用的聊天循环（对标 MuMu _handle_tool_calls）。
@@ -641,7 +641,7 @@ class AIClient:
             tools: OpenAI function calling 格式的工具定义
             tool_executor: async def(tool_name, arguments_dict) -> str
             max_tokens: None → 走 _resolve_max_tokens（用户 AI 设置 > settings 默认）
-            max_rounds: 最大工具调用轮数（默认5，含最后一轮强制输出）
+            max_rounds: 最大工具调用轮数（默认3，含最后一轮强制输出）
         """
         import json
         import logging

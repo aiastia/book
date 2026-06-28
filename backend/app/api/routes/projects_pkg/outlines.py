@@ -913,7 +913,6 @@ async def generate_outlines_async(
                     messages=phase1_messages,
                     tools=tools,
                     tool_executor=tool_executor,
-                    max_rounds=3,  # 2轮查询 + 1轮输出
                 )
                 if collection_result.get("error"):
                     await tracker.fail(collection_result["error"])
