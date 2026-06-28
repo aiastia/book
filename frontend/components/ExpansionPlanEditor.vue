@@ -58,10 +58,7 @@ async function onRegenerate() {
   )) return
   regenerating.value = true
   try {
-    const { task_id } = await API.outline.expand(props.outlineId, {
-      target_chapter_count: existingCount,
-      mode: 'replace',
-    })
+    const { task_id } = await API.outline.expand(props.outlineId, existingCount, 'replace')
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_expand', title: `重新展开第${props.chapterNumber}章所属卷(${existingCount}节)` })
     msg.success('重新规划任务已提交，完成后刷新查看')

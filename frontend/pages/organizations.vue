@@ -15,7 +15,7 @@ const { data: tree, refresh: refreshTree } = await useFetch<any[]>(() => `/proje
 const { data: characters, refresh: refreshChars } = await useFetch<Character[]>(() => `/projects/${currentProjectId.value}/characters`)
 
 // 当组织生成/初始化任务完成时自动刷新列表
-onTaskCompleted('organizations', () => { refresh() })
+onTaskCompleted('organizations', () => { refreshTree() })
 onTaskCompleted('init', () => { setTimeout(() => refreshTree(), 2000) })
 
 const generating = ref(false)

@@ -6,7 +6,7 @@ export function useAiConfigCheck() {
   async function check() {
     if (configured.value !== null) return configured.value
     try {
-      const models = await useNuxtApp().$api?.('/api/ai-models', { timeout: 5000 }) || []
+      const models = await useFetch?.('/api/ai-models', { timeout: 5000 }) || []
       configured.value = Array.isArray(models) && models.length > 0
     } catch {
       configured.value = false

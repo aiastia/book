@@ -19,7 +19,7 @@ const pendingEntities = ref<{ pending_items: any[]; pending_locations: any[]; to
 const fillingEntities = ref(false)
 async function checkPendingEntities() {  try {
     const res = await $fetch(`/api/projects/${currentProjectId.value}/outlines/pending-entities`)
-    if (res.total > 0) pendingEntities.value = res
+    if ((res as any).total > 0) pendingEntities.value = res as any
     else pendingEntities.value = null
   } catch (_) { pendingEntities.value = null }
 }
@@ -106,7 +106,7 @@ const continueForm = reactive({
 const chapterCountOptions = [5, 10, 20, 40]
 // 远程模型列表（动态拉取）
 const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
-const defaultModelName = ref('')
+const defaultModelName: any = ref("")
 const loadingModels = ref(false)
 
 // 项目默认叙事视角（用于「按小说设定」placeholder 显示）
@@ -336,7 +336,7 @@ async function onGenerateNewChars() {
   generatingChars.value = true
   try {
     for (const name of newCharNames.value) {
-      const { task_id } = await API.character.generateAsync({ specification: `请生成一个名为「${name}」的角色` })
+      const { task_id } = await API.character.generateAsync({ requirements: `请生成一个名为「${name}」的角色` })
       const { trackTask } = useBackgroundTasks()
       trackTask({ id: task_id, task_type: 'characters', title: `生成角色「${name}」` })
     }

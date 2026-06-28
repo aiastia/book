@@ -145,7 +145,7 @@ async function onRenameType() {
   if (!oldName || !newName) { msg.warning('名称不能为空'); return }
   try {
     if (oldName !== newName) {
-      await API.relation.renameType(oldName, newName)
+      await API.relation.renameType({ old: oldName, new: newName })
     }
     renamingType.value = null; await refreshTypes(); await refresh()
     msg.success(oldName !== newName ? `已重命名「${oldName}」→「${newName}」` : '已保存')

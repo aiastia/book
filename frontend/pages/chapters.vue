@@ -59,7 +59,7 @@ const availableSkills = ref<any[]>([])
 const selectedSkillKey = ref<string | undefined>()
 const availableModels = ref<Array<{ value: string; label: string }>>([])
 const selectedModel = ref<string | undefined>()
-const defaultModelName = ref('')  // 默认模型名（用于 placeholder 显示）
+const defaultModelName: any = ref("")  // 默认模型名（用于 placeholder 显示）
 const skillThinkingMode = ref<string | undefined>()
 
 // ===== 章节分析 =====
@@ -434,14 +434,12 @@ async function onGenerate() {
     const styleObj = selectedStyleId.value ? writingStyles.value.find((s:any) => s.id === selectedStyleId.value) : undefined
     const { task_id } = await API.chapter.generateAsync(
       editing.value.id,
-      selectedSkillKey.value || undefined,
-      styleObj,
-      {
-        narrative_pov: narrativePov.value || undefined,
-        target_word_count: targetWords.value,
+      { skillName: selectedSkillKey.value || undefined,
+        style: styleObj,
+        narrativePov: narrativePov.value || undefined,
+        targetWords: targetWords.value,
         model: selectedModel.value || undefined,
-        thinking_mode: skillThinkingMode.value || undefined,
-      },
+        thinkingMode: skillThinkingMode.value || undefined },
     )
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'chapter_generate', title: `生成第${editing.value.chapter_number}章` })

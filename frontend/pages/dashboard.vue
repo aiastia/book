@@ -2,7 +2,7 @@
 // 仪表盘：当前项目的统计 + 快捷操作
 // 基于后端项目级接口
 import { API } from '~/composables/api'
-import type { Project, Chapter, Outline } from '~/composables/api/types'
+import type { Project, Chapter, Outline, Character } from '~/composables/api/types'
 import { useProject } from '~/composables/useProject'
 
 useHead({ title: '仪表盘 — 墨语' })

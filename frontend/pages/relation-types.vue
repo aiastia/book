@@ -59,7 +59,7 @@ async function onRename() {
   const newName = renameTarget.value.trim()
   if (!oldName || !newName || oldName === newName) { renaming.value = null; return }
   try {
-    const res = await API.relation.renameType(oldName, newName)
+    const res = await API.relation.renameType({ old: oldName, new: newName })
     renaming.value = null
     await refresh()
     msg.success(`已重命名「${oldName}」→「${newName}」（${(res as any).updated || 0} 条关系已更新）`)
