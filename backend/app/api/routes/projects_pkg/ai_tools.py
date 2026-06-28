@@ -525,6 +525,7 @@ async def book_import_deconstruct(
         import logging
 
         from app.services import background_task_service as bgs
+        from app.services.txt_parser_service import parse_txt_file
 
         logger = logging.getLogger(__name__)
         tracker = bgs.TaskProgressTracker(task_id)
