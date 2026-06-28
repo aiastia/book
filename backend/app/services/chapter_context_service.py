@@ -146,9 +146,9 @@ class ChapterContextService:
                 .all()
             )
             involved_locs = [
-                l
+                loc
                 for loc in all_locs
-                if any(kw in l.name for kw in chapter_keywords) or l.name in chapter_keywords
+                if any(kw in loc.name for kw in chapter_keywords) or loc.name in chapter_keywords
             ]
             major_locs = [
                 loc for loc in all_locs if loc.importance in ("major", "key") and loc not in involved_locs
@@ -158,15 +158,15 @@ class ChapterContextService:
             for loc in major_locs:
                 if len(selected_locs) >= 6:
                     break
-                selected_locs.append(l)
+                selected_locs.append(loc)
             if len(selected_locs) < 8:
                 for loc in other_locs:
                     if len(selected_locs) >= 8:
                         break
-                    selected_locs.append(l)
+                    selected_locs.append(loc)
             if selected_locs:
                 lines = [
-                    f"- {l.name}（{l.location_type}）：{(l.atmosphere or l.description or '')[:60]}"
+                    f"- {loc.name}（{loc.location_type}）：{(loc.atmosphere or loc.description or '')[:60]}"
                     for loc in selected_locs
                 ]
                 out["key_locations"] = "地点：\n" + "\n".join(lines)

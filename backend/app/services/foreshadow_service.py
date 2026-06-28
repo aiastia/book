@@ -205,13 +205,13 @@ class ForeshadowService:
                     c.strip() for c in related_chars.replace("、", ",").split(",") if c.strip()
                 ]
 
-            def _merge_related(fs_obj):
+            def _merge_related(fs_obj, _related_chars=related_chars):
                 """把 related_chars 合并进 fs_obj.structure.related_characters"""
-                if not related_chars:
+                if not _related_chars:
                     return
                 struct = dict(fs_obj.structure or {})
                 existing = struct.get("related_characters") or []
-                merged = list(set(existing) | set(related_chars))
+                merged = list(set(existing) | set(_related_chars))
                 struct["related_characters"] = merged
                 fs_obj.structure = struct
 

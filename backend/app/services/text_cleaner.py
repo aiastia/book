@@ -243,12 +243,12 @@ def _apply_stats(text: str) -> tuple[str, dict]:
             continue
         replacement = _STATS_REPLACEMENTS.get(word, "")
         kept = 0
-        def _replace(m):
+        def _replace(m, _threshold=threshold, _replacement=replacement):
             nonlocal kept
             kept += 1
-            if kept <= threshold:
+            if kept <= _threshold:
                 return m.group(0)
-            return replacement
+            return _replacement
         text = pattern.sub(_replace, text)
     return text, report
 

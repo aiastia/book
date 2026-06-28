@@ -75,9 +75,9 @@ async def location_tree(
     by_id = {loc.id: {**loc.to_dict(), "children": []} for loc in locs}
     roots = []
     for loc in locs:
-        node = by_id[l.id]
-        if l.parent_location_id and l.parent_location_id in by_id:
-            by_id[l.parent_location_id]["children"].append(node)
+        node = by_id[loc.id]
+        if loc.parent_location_id and loc.parent_location_id in by_id:
+            by_id[loc.parent_location_id]["children"].append(node)
         else:
             roots.append(node)
     return roots

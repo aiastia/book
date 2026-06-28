@@ -972,9 +972,9 @@ async def _list_available_entities(db: AsyncSession, project_id: int) -> str:
     )
     location_list = [
         {
-            "name": l.name,
-            "location_type": l.location_type or "",
-            "danger_level": l.danger_level or "safe",
+            "name": loc.name,
+            "location_type": loc.location_type or "",
+            "danger_level": loc.danger_level or "safe",
         }
         for loc in locs
     ]
@@ -1038,24 +1038,24 @@ async def _query_location(db: AsyncSession, project_id: int, name: str) -> str:
     results = []
     for loc in matched[:3]:
         parent_name = ""
-        if l.parent_location_id:
+        if loc.parent_location_id:
             parent = (
-                await db.execute(select(Location).where(Location.id == l.parent_location_id))
+                await db.execute(select(Location).where(Location.id == loc.parent_location_id))
             ).scalar_one_or_none()
             if parent:
                 parent_name = parent.name
         results.append(
             {
-                "name": l.name,
-                "location_type": l.location_type or "",
-                "description": (l.description or "")[:200],
-                "atmosphere": l.atmosphere or "",
-                "faction_control": l.faction_control or "",
-                "geography": l.geography or "",
-                "importance": l.importance or "normal",
-                "danger_level": l.danger_level or "safe",
+                "name": loc.name,
+                "location_type": loc.location_type or "",
+                "description": (loc.description or "")[:200],
+                "atmosphere": loc.atmosphere or "",
+                "faction_control": loc.faction_control or "",
+                "geography": loc.geography or "",
+                "importance": loc.importance or "normal",
+                "danger_level": loc.danger_level or "safe",
                 "parent_location": parent_name,
-                "first_appear_chapter": l.first_appear_chapter,
+                "first_appear_chapter": loc.first_appear_chapter,
             }
         )
     return json.dumps(results if len(results) > 1 else results[0], ensure_ascii=False)
@@ -1250,9 +1250,9 @@ async def _generate_location(
     if matched:
         _item = matched[0]
         return json.dumps({
-            "name": l.name, "location_type": l.location_type,
-            "description": (l.description or "")[:200],
-            "danger_level": l.danger_level,
+            "name": _item.name, "location_type": _item.location_type,
+            "description": (_item.description or "")[:200],
+            "danger_level": _item.danger_level,
             "_note": "地点已存在，返回已有记录",
         }, ensure_ascii=False)
 
