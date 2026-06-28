@@ -7,7 +7,7 @@ definePageMeta({ layout: 'default' })
 useHead({ title: '我的书架 — 墨语' })
 const msg = useMessage()
 const { selectProject, createProject: selectAndCreate } = useProject()
-const { data: projects, refresh: refresh } = await useFetch<BookSummary[]>(() => `/api/books`)
+const { data: projects, refresh: refresh } = await useFetch<BookSummary[]>(() => `${useRuntimeConfig().public.apiBase}/api/books`)
 
 // 检查 AI 模型是否已配置
 const aiConfigured = ref<boolean | null>(null)

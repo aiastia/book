@@ -3,7 +3,7 @@ import { API } from '~/composables/api'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: 'Skill 管理 — 墨语' })
 const msg = useMessage()
-const { data: skills, refresh: refresh } = await useFetch<any[]>(() => `/api/skills`)
+const { data: skills, refresh: refresh } = await useFetch<any[]>(() => `${useRuntimeConfig().public.apiBase}/api/skills`)
 
 // 加载变量参考文档
 async function loadVariables() {

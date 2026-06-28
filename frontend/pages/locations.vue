@@ -6,7 +6,7 @@ useHead({ title: '地点地图 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: tree, refresh: refresh } = await useFetch<any[]>(() => `/api/projects/${currentProjectId.value}/locations/tree`)
+const { data: tree, refresh: refresh } = await useFetch<any[]>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/locations/tree`)
 
 const generating = ref(false)
 const showAdd = ref(false)

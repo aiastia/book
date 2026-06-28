@@ -7,7 +7,7 @@ useHead({ title: '故事记忆 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: memories, refresh: refresh } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/memories?limit=100`)
+const { data: memories, refresh: refresh } = await useFetch<any>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/memories?limit=100`)
 const { data: stats } = await API.memory.getStats()
 
 // 类型筛选
