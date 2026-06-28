@@ -87,7 +87,7 @@ function openPanel() {
 
 async function loadWritingStyles() {
   try {
-    writingStyles.value = await API.writingStyles ||) || []
+    writingStyles.value = await API.global.listWritingStyles() || []
   } catch {}
 }
 

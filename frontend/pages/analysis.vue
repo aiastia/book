@@ -8,7 +8,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const { data: analyses, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/analyses`)
-const { data: chapters } = await API.chapter.gets()
+const { data: chapters } = await API.chapter.getAnalyses()
 
 // 选择章节查看详情
 const selectedChapter = ref<number | null>(null)

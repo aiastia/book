@@ -4,24 +4,47 @@
  *   import { API } from '~/composables/api'
  *   await API.book.list()
  *   await API.chapter.batchGenerate(17, { start: 3, count: 5 })
- *   const outlines = await API.outline.list()
  */
-export { bookApi as book } from './book.api'
-export { chapterApi as chapter } from './chapter.api'
-export { outlineApi as outline } from './outline.api'
-export { characterApi as character } from './character.api'
-export { itemApi as item } from './item.api'
-export { locationApi as location } from './location.api'
-export { worldApi as world } from './world.api'
-export { organizationApi as organization } from './organization.api'
-export { foreshadowApi as foreshadow } from './foreshadow.api'
-export { relationApi as relation } from './relation.api'
-export { aiApi as ai } from './ai.api'
-export { taskApi as task } from './task.api'
-export { memoryApi as memory } from './memory.api'
+import { bookApi } from './book.api'
+import { chapterApi } from './chapter.api'
+import { outlineApi } from './outline.api'
+import { characterApi } from './character.api'
+import { itemApi } from './item.api'
+import { locationApi } from './location.api'
+import { worldApi } from './world.api'
+import { organizationApi } from './organization.api'
+import { foreshadowApi } from './foreshadow.api'
+import { relationApi } from './relation.api'
+import { aiApi } from './ai.api'
+import { taskApi } from './task.api'
+import { memoryApi } from './memory.api'
+import { promptApi } from './prompt.api'
+import { globalApi } from './global.api'
+import { bookImportApi } from './book-import.api'
+import { skillApi } from './skill.api'
+import { careerApi } from './career.api'
+import { charCareerApi } from './character.api'
+
+export const API = {
+  book: bookApi,
+  chapter: chapterApi,
+  outline: outlineApi,
+  character: characterApi,
+  item: itemApi,
+  location: locationApi,
+  world: worldApi,
+  organization: organizationApi,
+  foreshadow: foreshadowApi,
+  relation: relationApi,
+  ai: aiApi,
+  task: taskApi,
+  memory: memoryApi,
+  prompt: promptApi,
+  global: globalApi,
+  bookImport: bookImportApi,
+  skill: skillApi,
+  career: careerApi,
+  charCareer: charCareerApi,
+}
+
 export { pid } from './client'
-export { promptApi as prompt } from './prompt.api'
-export { globalApi as global } from './global.api'
-export { bookImportApi as bookImport } from './book-import.api'
-export { skillApi as skill } from './skill.api'
-export { careerApi as career } from './career.api'

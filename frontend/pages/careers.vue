@@ -9,7 +9,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 角色职业关联（#19，显示持有此职业的角色）
-const { data: charCareers } = await API.character.getCareers()
+const { data: charCareers } = await API.charCareer.list()
 // 角色名映射
 const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 const charNameMap = computed(() => {

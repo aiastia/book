@@ -47,8 +47,9 @@ export const chapterApi = {
     return post(`/projects/${id}/chapters/batch-generate`, body)
   },
   /** 重写/润色 */
-  regenerate: (chapterId: number, instructions = '', id?: number, targetWords?: number) =>
-    post(`/projects/${P(id)}/chapters/${chapterId}/regenerate`, { instructions, target_word_count: targetWords }),
+  regenerate: (chapterId: number, body: string | Record<string, any>, id?: number, targetWords?: number) =>
+    post(`/projects/${P(id)}/chapters/${chapterId}/regenerate`,
+      typeof body === 'string' ? { instructions: body, target_word_count: targetWords } : body),
   getNavigation: (chapterId: number, id?: number) =>
     get(`/projects/${P(id)}/chapters/${chapterId}/navigation`),
   getAnnotations: (chapterId: number, id?: number) =>

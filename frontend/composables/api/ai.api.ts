@@ -14,6 +14,9 @@ export const aiApi = {
     post('/ai-models/test-embedding', { base_url: baseUrl, api_key: apiKey, embedding_model: embeddingModel }),
   fetchRemoteModels: (baseUrl: string, apiKey: string, provider = 'openai') =>
     post('/ai-models/fetch-remote', { base_url: baseUrl, api_key: apiKey, provider }),
+  fetchModelRemoteModels: (modelId: number) => get(`/ai-models/${modelId}/remote-models`),
+  fetchRewriteRemoteModels: (baseUrl: string, apiKey: string) =>
+    post('/ai-models/fetch-rewrite-models', { base_url: baseUrl, api_key: apiKey }),
   // 封面
   generateCoverPrompt: (id?: number) => post(`/projects/${P(id)}/cover/generate-prompt`),
   generateCoverImage: (prompt: string, id?: number) => post(`/projects/${P(id)}/cover/generate-image`, { prompt }),
