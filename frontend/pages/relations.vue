@@ -13,7 +13,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 
 const api = useBookApi()
 const msg = useMessage()
-const { data: graph, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/relations/graph`)
+const { data: graph, refresh: refreshGraph } = await useFetch(() => `/projects/${currentProjectId.value}/relations/graph`)
 const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 // 全量关系列表（含 id，供表格编辑/删除用）
 const relationsData = ref<any[]>([])
