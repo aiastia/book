@@ -81,10 +81,19 @@ const quickActions = computed(() => [
 // 封面提示词
 const msg = useMessage()
 const coverLoading = ref(false)
-const coverPrompt = ref('')
+const coverPrompt = ref(project.value?.cover_prompt || '')
 const showCover = ref(false)
 const imageLoading = ref(false)
 const imageConfigured = ref(false)
+
+// 查看已保存的封面提示词
+function viewSavedPrompt() {
+  if (!coverPrompt.value) {
+    msg.info('暂无已保存的封面提示词，请先生成')
+    return
+  }
+  showCover.value = true
+}
 
 async function checkImageConfig() {
   try {
@@ -130,7 +139,8 @@ function copyCoverPrompt() {
 <template>
   <PageHeader :title="currentProjectInfo?.title || project?.title || '加载中…'">
     <template #actions>
-      <a-button :loading="coverLoading" @click="onGenerateCover">{{ coverLoading ? '生成中…' : '🖼 封面提示词' }}</a-button>
+      <a-button v-if="coverPrompt" @click="viewSavedPrompt">🖼 查看封面提示词</a-button>
+      <a-button :loading="coverLoading" @click="onGenerateCover">{{ coverPrompt ? (coverLoading ? '重新生成中…' : '🔄 重新生成') : (coverLoading ? '生成中…' : '🖼 生成封面提示词') }}</a-button>
       <NuxtLink to="/books"><a-button>切换书籍</a-button></NuxtLink>
     </template>
   </PageHeader>
