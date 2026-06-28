@@ -7,7 +7,7 @@ export const memoryApi = {
   update: (memId: number, body: any, id?: number) => put(`/projects/${P(id)}/memories/${memId}`, body),
   delete: (memId: number, id?: number) => del(`/projects/${P(id)}/memories/${memId}`),
   clear: (id?: number) => post(`/projects/${P(id)}/memories/clear`),
-  search: (query: string, id?: number) => get(`/projects/${P(id)}/memories/search?q=${encodeURIComponent(query)}`),
+  search: (body: any, id?: number) => get(`/projects/${P(id)}/memories/search?q=${encodeURIComponent(query)}`),
   getStats: (id?: number) => get(`/projects/${P(id)}/memories/stats`),
   reindex: (id?: number) => post(`/projects/${P(id)}/memories/reindex`),
 }

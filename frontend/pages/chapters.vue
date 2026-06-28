@@ -21,12 +21,12 @@ const msg = useMessage()
 })()
 
 // ===== 项目信息（含 outline_mode） =====
-const { data: projectData } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}`)
+const { data: projectData } = await useFetch(() => `/api/projects/${currentProjectId.value}`)
 const outlineMode = computed(() => projectData.value?.outline_mode || 'one_to_one')
 
 // ===== 章节 + 大纲数据 =====
-const { data: chapters, refresh: refreshList } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/chapters`)
-const { data: outlines } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/outlines`)
+const { data: chapters, refresh: refreshList } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
+const { data: outlines } = await useFetch(() => `/api/projects/${currentProjectId.value}/outlines`)
 
 // ===== 编辑器状态 =====
 const editorOpen = ref(false)

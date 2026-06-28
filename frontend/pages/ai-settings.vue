@@ -4,7 +4,7 @@ import { API } from '~/composables/api'
 import { CheckOutlined } from '@ant-design/icons-vue'
 useHead({ title: 'AI 设置 — 墨语' })
 const msg = useMessage()
-const { data: models, refresh: refresh } = await useFetch<any>(() => `/ai-models`)
+const { data: models, refresh: refresh } = await useFetch(() => `/ai-models`)
 const showAdd = ref(false)
 const editing = ref<any>(null)
 const form = reactive({

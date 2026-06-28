@@ -6,8 +6,8 @@ useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: project, refresh: refreshProject } = await useFetch<any>(() => `/projects/${currentProjectId.value}`)
-const { data: outlines, refresh: refreshOutlines } = await useFetch<any>(() => `/projects/${currentProjectId.value}/outlines`)
+const { data: project, refresh: refreshProject } = await useFetch(() => `/projects/${currentProjectId.value}`)
+const { data: outlines, refresh: refreshOutlines } = await useFetch(() => `/projects/${currentProjectId.value}/outlines`)
 
 const generating = ref(false)
 const genCount = ref(10)
@@ -54,7 +54,7 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 const organizationOptions = ref<Array<{ name: string; org_type: string; label: string }>>([])
 async function loadCharacterOptions() {
   try {
-    const res = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/characters`)
+    const res = await useFetch(() => `/api/projects/${currentProjectId.value}/characters`)
     const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({
       name: c.name,
@@ -453,11 +453,7 @@ async function doExpand() {
   const mode = expandMode.value
   expanding.value = true
   try {
-    const { task_id } = await API.outline.expand(expandTarget.value.id, body.target_chapter_count, body.mode || "new")
-      target_chapter_count: expandCount.value,
-      strategy: expandStrategy.value,
-      mode,
-    })
+    const { task_id } = await API.outline.expand(expandTarget.value.id, expandCount.value, mode)
     const { trackTask } = useBackgroundTasks()
     const titleMap = { new: '展开', replace: '重新展开', append: '继续展开' }
     trackTask({ id: task_id, task_type: 'outline_expand', title: `${titleMap[mode]}第${expandTarget.value.chapter_number}卷` })

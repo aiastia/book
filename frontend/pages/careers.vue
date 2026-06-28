@@ -7,11 +7,11 @@ useHead({ title: '职业体系 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: careers, refresh: refreshCareers } = await useFetch<any>(() => `/projects/${currentProjectId.value}/careers`)
+const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 角色职业关联（#19，显示持有此职业的角色）
 const { data: charCareers } = await API.charCareer.list()
 // 角色名映射
-const { data: characters, refresh: refreshChars } = await useFetch<any>(() => `/projects/${currentProjectId.value}/characters`)
+const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 const charNameMap = computed(() => {
   const m: Record<number, string> = {}
   for (const c of (characters.value || [])) m[c.id] = c.name

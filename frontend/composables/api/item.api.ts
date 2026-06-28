@@ -6,5 +6,5 @@ export const itemApi = {
   create: (body: any, id?: number) => post(`/projects/${P(id)}/items`, body),
   update: (itemId: number, body: any, id?: number) => put(`/projects/${P(id)}/items/${itemId}`, body),
   delete: (itemId: number, id?: number) => del(`/projects/${P(id)}/items/${itemId}`),
-  generate: (id?: number) => post(`/projects/${P(id)}/items/generate`),
+  generate: (body: any = {}, id?: number) => post(`/projects/${P(id)}/items/generate`),
 }

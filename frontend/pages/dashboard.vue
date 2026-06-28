@@ -2,6 +2,7 @@
 // 仪表盘：当前项目的统计 + 快捷操作
 // 基于后端项目级接口
 import { API } from '~/composables/api'
+import type { Project, Chapter, Outline } from '~/composables/api/types'
 import { useProject } from '~/composables/useProject'
 
 useHead({ title: '仪表盘 — 墨语' })
@@ -35,10 +36,10 @@ async function checkAiConfig() {
 }
 checkAiConfig()
 
-const { data: project } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}`)
-const { data: chapters } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/chapters`)
-const { data: characters } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/characters`)
-const { data: outlines } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/outlines`)
+const { data: project } = await useFetch(() => `/api/projects/${currentProjectId.value}`)
+const { data: chapters } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
+const { data: characters } = await useFetch(() => `/api/projects/${currentProjectId.value}/characters`)
+const { data: outlines } = await useFetch(() => `/api/projects/${currentProjectId.value}/outlines`)
 
 const stats = computed(() => {
   const wordCount = chapters.value?.reduce((sum: number, c: any) => sum + (c.word_count || 0), 0) ?? 0
