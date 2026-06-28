@@ -2,7 +2,7 @@
   "name": "outline_expand_single",
   "display_name": "大纲展开（1对多）",
   "description": "将大纲节点展开为详细章节规划（单批次）",
-  "category": "outline",
+  "category": "outline_1toN",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

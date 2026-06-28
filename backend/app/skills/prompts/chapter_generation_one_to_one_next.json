@@ -2,7 +2,7 @@
   "name": "chapter_generation_one_to_one_next",
   "display_name": "章节创作-1-1模式（第2章及以后）",
   "description": "1-1模式：基于上一章内容创作新章节（用于第2章及以后）",
-  "category": "chapter",
+  "category": "chapter_1to1",
   "skill_type": "builtin",
   "config": {},
   "parameters": {

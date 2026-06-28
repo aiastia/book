@@ -2,7 +2,7 @@
   "name": "inspire",
   "display_name": "灵感激发",
   "description": "根据模糊想法生成创意",
-  "category": "outline",
+  "category": "inspire",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

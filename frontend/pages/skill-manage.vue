@@ -32,8 +32,9 @@ const activeTab = ref<string>('form')
 
 const categories = ['custom', 'chapter', 'outline', 'character', 'world', 'analysis', 'foreshadow', 'inspire', 'skill', 'mcp', 'tool', 'import_book']
 const categoryLabels: Record<string, string> = {
-  custom: '自定义', chapter: '章节', outline: '大纲', character: '角色',
-  world: '世界观', analysis: '分析', foreshadow: '伏笔', inspire: '灵感',
+  custom: '自定义', chapter: '章节', chapter_1to1: '章节(1→1)', chapter_1toN: '章节(1→N)',
+  outline: '大纲', outline_1toN: '大纲展开(1→N)', character: '角色',
+  organization: '组织', world: '世界观', analysis: '分析', foreshadow: '伏笔', inspire: '灵感',
   skill: '写作技能', mcp: 'MCP', tool: '工具', import_book: '拆书', other: '其他',
 }
 

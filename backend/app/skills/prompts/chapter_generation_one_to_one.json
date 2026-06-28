@@ -2,7 +2,7 @@
   "name": "chapter_generation_one_to_one",
   "display_name": "章节创作-1-1模式（第1章）",
   "description": "1-1模式：章节创作（用于第1章，无前置章节）",
-  "category": "chapter",
+  "category": "chapter_1to1",
   "skill_type": "builtin",
   "config": {},
   "parameters": {
