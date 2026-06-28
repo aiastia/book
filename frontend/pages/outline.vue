@@ -547,6 +547,20 @@ async function deleteExpansion() {
       </a-button>
     </div>
 
+    <!-- 待补充物品/地点 -->
+    <a-alert
+      v-if="pendingEntities && pendingEntities.total > 0"
+      type="warning" show-icon closable style="margin-bottom:12px;"
+      @close="pendingEntities = null"
+    >
+      <template #message>
+        大纲中引用了 <b>{{ pendingEntities.pending_items?.length || 0 }}</b> 个新物品和 <b>{{ pendingEntities.pending_locations?.length || 0 }}</b> 个新地点尚未录入
+      </template>
+      <template #action>
+        <a-button size="small" type="primary" :loading="fillingEntities" @click="fillPendingEntities">自动生成</a-button>
+      </template>
+    </a-alert>
+
     <div v-if="outlines && outlines.length" class="outline-list">
       <OutlineCard
         v-for="o in outlines"

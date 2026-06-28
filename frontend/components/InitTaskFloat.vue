@@ -211,6 +211,7 @@ const hasDoneTasks = computed(() =>
           <span v-if="t._doneAt && t.status !== 'pending' && t.status !== 'running'" class="task-time">{{ formatTime(t._doneAt) }}</span>
         </div>
         <div class="task-msg">{{ t.status_message || '准备中...' }}</div>
+        <div v-if="t.status === 'failed' && t.error" class="task-error">{{ typeof t.error === 'string' ? t.error : JSON.stringify(t.error) }}</div>
         <!-- 阶段标签 -->
         <div v-if="parseSubProgress(t)?.phase && (t.status === 'pending' || t.status === 'running')" class="task-phase">
           {{ parseSubProgress(t).phase === 'generating' ? '✍️ 生成中' : parseSubProgress(t).phase === 'analyzing' ? '🔍 分析中' : '' }}
@@ -315,6 +316,7 @@ const hasDoneTasks = computed(() =>
 .type-icon { font-size: 12px; }
 .task-time { font-size: 11px; color: #8C8C8C; margin-left: auto; }
 .task-msg { font-size: 13px; color: #595959; margin-bottom: 8px; line-height: 1.5; }
+.task-error { font-size: 12px; color: #C75B5B; margin-bottom: 8px; padding: 6px 8px; background: #FFF0F0; border-radius: 4px; border-left: 3px solid #C75B5B; line-height: 1.5; word-break: break-all; }
 .task-phase { font-size: 11px; color: #4D8088; font-weight: 500; margin-bottom: 4px; }
 .task-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .progress-track { flex: 1; height: 5px; background: #F0EDE6; border-radius: 999; overflow: hidden; }
