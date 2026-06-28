@@ -354,8 +354,8 @@ function rebuildLabels() {
   })
   vfEdges.value = [...newEdges]
 }
-function onDragStop(_event: any, node: any) {
-  // 将被拖拽节点的位置同步到 vfNodes
+function onDragStop(e: any) {
+  const node = e?.node || e
   if (node?.id && node?.position) {
     const idx = vfNodes.value.findIndex((n: any) => n.id === node.id)
     if (idx >= 0) vfNodes.value[idx].position = { ...node.position }
