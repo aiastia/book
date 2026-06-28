@@ -284,7 +284,7 @@ async def semantic_search(
         return results
     except Exception as e:
         logger.error(f"[memory] 语义搜索失败: {e}")
-        raise HTTPException(500, f"语义搜索失败: {e}")
+        raise HTTPException(500, f"语义搜索失败: {e}") from e
 
 
 @router.post("/{project_id}/memories/reindex")

@@ -249,7 +249,7 @@ async def generate_locations(
         data = data.get("locations") or data.get("data") or []
 
     created = []
-    for item in data[: req.count * 2]:
+    for _item in data[: req.count * 2]:
         if not isinstance(l, dict) or not l.get("name"):
             continue
         try:

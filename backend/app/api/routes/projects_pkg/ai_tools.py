@@ -149,7 +149,7 @@ async def generate_cover_image(
                 raise HTTPException(500, f"出图 API 返回 {resp.status_code}: {resp.text[:200]}")
             data = resp.json()
     except httpx.RequestError as e:
-        raise HTTPException(500, f"出图请求失败：{e}")
+        raise HTTPException(500, f"出图请求失败：{e}") from e
 
     # 保存图片到本地
     images = data.get("data", [])
@@ -263,7 +263,7 @@ async def parse_txt(
         try:
             raw = base64.b64decode(req["base64"])
         except Exception:
-            raise HTTPException(400, "base64 解码失败")
+            raise HTTPException(400, "base64 解码失败") from None
     elif req.get("text"):
         raw = req["text"].encode("utf-8")
     else:
@@ -386,7 +386,7 @@ async def book_import_upload(
         try:
             raw = _b64.b64decode(req.base64)
         except Exception:
-            raise HTTPException(400, "base64 解码失败")
+            raise HTTPException(400, "base64 解码失败") from None
     elif req.text:
         raw = req.text.encode("utf-8")
     else:

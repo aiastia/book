@@ -38,7 +38,7 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证凭据")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的认证凭据") from None
 
 
 async def get_current_user(

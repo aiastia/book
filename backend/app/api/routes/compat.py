@@ -162,7 +162,7 @@ async def _recent_activities(db: AsyncSession, user: User, limit: int = 5):
     ).all()
     now = datetime.utcnow()
     result = []
-    for c, project_title in rows:
+    for c, __project_title in rows:
         ts = c.updated_at or c.created_at or now
         delta = now - ts
         if delta < timedelta(hours=1):

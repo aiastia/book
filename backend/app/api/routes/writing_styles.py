@@ -314,7 +314,7 @@ async def analyze_style(
         try:
             traits = _json.loads(content)
         except Exception:
-            raise HTTPException(500, "文风提炼返回格式异常，请重试或更换模型")
+            raise HTTPException(500, "文风提炼返回格式异常，请重试或更换模型") from None
 
     s.style_traits = traits
     s.traits_updated_at = datetime.utcnow()
