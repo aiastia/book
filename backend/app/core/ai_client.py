@@ -193,9 +193,13 @@ class AIClient:
     @classmethod
     async def from_user_config(cls, db, user_id: int) -> "AIClient":
         """从用户配置创建客户端（查找用户默认 AI 模型）。
+
         会把 AIModelConfig 的 temperature/top_p/penalty 挂到实例作为默认值，
         使所有走本方法的调用路径（skill 流水线、project_init、inspiration、ai_tools 等）
         自动读取用户在 AI 设置页配的参数。
+
+        Raises:
+            ValueError: 用户未配置任何 AI 模型
         """
         try:
             from sqlalchemy import select
@@ -220,9 +224,25 @@ class AIClient:
                     reasoning_effort=cfg.reasoning_effort or "low",
                     **cls._defaults_from_cfg(cfg),
                 )
+            # 无默认模型，尝试取任意一个
+            result = await db.execute(
+                select(AIModelConfig).where(AIModelConfig.user_id == user_id).limit(1)
+            )
+            cfg = result.scalar_one_or_none()
+            if cfg:
+                return cls(
+                    base_url=cfg.base_url,
+                    api_key=cfg.api_key,
+                    model=cfg.model,
+                    provider=cfg.provider or cfg.backend_type or "openai",
+                    embedding_model=cfg.embedding_model or "",
+                    reasoning_model=cfg.reasoning_model or False,
+                    reasoning_effort=cfg.reasoning_effort or "low",
+                    **cls._defaults_from_cfg(cfg),
+                )
         except Exception:
             pass
-        return cls()
+        raise ValueError("未配置 AI 模型。请在「AI 设置」中添加至少一个 AI 模型配置。")
 
     @property
     def client(self) -> AsyncOpenAI:

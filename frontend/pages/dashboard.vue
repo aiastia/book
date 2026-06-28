@@ -16,6 +16,15 @@ if (!currentProjectId.value) {
   await navigateTo('/books')
 }
 
+// 检查 AI 模型是否已配置
+const aiConfigured = ref<boolean | null>(null)
+;(async () => {
+  try {
+    const models = await api.listAiModels()
+    aiConfigured.value = Array.isArray(models) && models.length > 0
+  } catch { aiConfigured.value = false }
+})()
+
 const { data: project } = await api.getProject()
 const { data: chapters } = await api.getChapters()
 const { data: characters } = await api.getCharacters()
@@ -125,6 +134,18 @@ function copyCoverPrompt() {
         <a-statistic :value="s.value" />
       </a-card>
     </div>
+
+    <!-- AI 模型未配置提示 -->
+    <a-alert
+      v-if="aiConfigured === false"
+      type="warning" show-icon style="margin-bottom:16px;"
+      message="未配置 AI 模型"
+      description="请先在 AI 设置中配置至少一个 AI 模型（API 地址 + 密钥 + 模型名），否则所有 AI 功能（生成章节/大纲/角色等）将无法使用。"
+    >
+      <template #action>
+        <NuxtLink to="/ai-settings"><a-button size="small" type="primary">前往配置</a-button></NuxtLink>
+      </template>
+    </a-alert>
 
     <!-- 创作引导：当项目还是空的时候展示 -->
     <a-card v-if="stats.chapters === 0 && stats.outlines === 0" class="guide-card">

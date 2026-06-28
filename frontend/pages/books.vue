@@ -9,6 +9,15 @@ const api = useProjectApi()
 const { selectProject, createProject: selectAndCreate } = useProject()
 const { data: projects, refresh } = await api.listProjects()
 
+// 检查 AI 模型是否已配置
+const aiConfigured = ref<boolean | null>(null)
+;(async () => {
+  try {
+    const models = await api.listAiModels()
+    aiConfigured.value = Array.isArray(models) && models.length > 0
+  } catch { aiConfigured.value = false }
+})()
+
 // ===== 模式筛选 =====
 const filterMode = ref<'all' | 'one_to_one' | 'one_to_many'>('all')
 const filteredProjects = computed(() => {
@@ -143,6 +152,16 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
         <NuxtLink to="/inspire"><a-button ghost style="color:#fff;border-color:rgba(255,255,255,0.5);">灵感模式</a-button></NuxtLink>
       </div>
     </div>
+
+    <a-alert
+      v-if="aiConfigured === false"
+      type="warning" show-icon banner
+      message="未配置 AI 模型，所有 AI 功能（生成章节/大纲/角色等）将无法使用。"
+    >
+      <template #action>
+        <NuxtLink to="/ai-settings"><a-button size="small" type="primary">前往配置</a-button></NuxtLink>
+      </template>
+    </a-alert>
 
     <div class="book-grid-bg">
       <div v-if="projects && projects.length" style="display:flex;gap:8px;margin-bottom:16px;justify-content:center">
