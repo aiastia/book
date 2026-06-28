@@ -270,7 +270,7 @@ const usedRelationTypes = computed(() => {
 const vfNodes = ref<any[]>([])
 const vfEdges = ref<any[]>([])
 const vueFlowRef = ref()
-const nodeTypes = { relation: RelationNode }
+const nodeTypes = { relation: markRaw(RelationNode) }
 
 function buildGraph() {
   if (!graph.value) return

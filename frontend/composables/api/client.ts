@@ -18,7 +18,7 @@ function getTokenSSR(): string | null {
 
 async function _fetch(path: string, opts: RequestInit = {}): Promise<any> {
   const config = useRuntimeConfig()
-  const base = import.meta.client ? config.public.apiBase : 'http://localhost:8000'
+  const base = import.meta.server ? config.apiBase : config.public.apiBase
   const url = `${base}/api${path}`
 
   let token = ''
