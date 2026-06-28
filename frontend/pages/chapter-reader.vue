@@ -10,7 +10,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const route = useRoute()
 
-const { data: chapters } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
+const { data: chapters } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/chapters`)
 const selectedId = ref<number | null>(null)
 const chapter = ref<any>(null)
 const annotations = ref<any[]>([])

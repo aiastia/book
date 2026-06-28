@@ -23,7 +23,7 @@ import { globalApi } from './global.api'
 import { bookImportApi } from './book-import.api'
 import { skillApi } from './skill.api'
 import { careerApi } from './career.api'
-import { charCareerApi } from './character.api'
+import { charCareerApi } from './char-career.api'
 
 export const API = {
   book: bookApi,

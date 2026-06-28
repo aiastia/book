@@ -35,10 +35,10 @@ async function checkAiConfig() {
 }
 checkAiConfig()
 
-const { data: project } = await useFetch(() => `/api/projects/${currentProjectId.value}`)
-const { data: chapters } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
-const { data: characters } = await useFetch(() => `/api/projects/${currentProjectId.value}/characters`)
-const { data: outlines } = await useFetch(() => `/api/projects/${currentProjectId.value}/outlines`)
+const { data: project } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}`)
+const { data: chapters } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/chapters`)
+const { data: characters } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/characters`)
+const { data: outlines } = await useFetch<any>(() => `/api/projects/${currentProjectId.value}/outlines`)
 
 const stats = computed(() => {
   const wordCount = chapters.value?.reduce((sum: number, c: any) => sum + (c.word_count || 0), 0) ?? 0

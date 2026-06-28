@@ -7,11 +7,11 @@ useHead({ title: '职业体系 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
+const { data: careers, refresh: refreshCareers } = await useFetch<any>(() => `/projects/${currentProjectId.value}/careers`)
 // 角色职业关联（#19，显示持有此职业的角色）
 const { data: charCareers } = await API.charCareer.list()
 // 角色名映射
-const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
+const { data: characters, refresh: refreshChars } = await useFetch<any>(() => `/projects/${currentProjectId.value}/characters`)
 const charNameMap = computed(() => {
   const m: Record<number, string> = {}
   for (const c of (characters.value || [])) m[c.id] = c.name
@@ -178,7 +178,7 @@ async function onAutoAssign() {
   if (!await msg.confirm('AI 将根据角色性格背景和职业体系，为未分配职业的角色推荐主职业。确认开始？')) return
   autoAssigning.value = true
   try {
-    const r = await API.career.autoAssign({ user_prompt: '' })
+    const r = await API.career.autoAssign()
     await refreshCareers()
     msg.success(`已为 ${r.count} 个角色分配主职业`)
   } catch (e: any) { msg.error('分配失败：' + formatError(e)) }

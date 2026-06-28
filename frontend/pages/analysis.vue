@@ -7,7 +7,7 @@ useHead({ title: '剧情分析 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: analyses, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/analyses`)
+const { data: analyses, refresh: refresh } = await useFetch<any>(() => `/projects/${currentProjectId.value}/analyses`)
 const { data: chapters } = await API.chapter.getAnalyses()
 
 // 选择章节查看详情
