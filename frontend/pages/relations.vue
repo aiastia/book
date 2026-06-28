@@ -18,7 +18,7 @@ const { data: characters, refresh: refresh } = await useFetch<Character[]>(() =>
 // 全量关系列表（含 id，供表格编辑/删除用）
 const relationsData = ref<any[]>([])
 async function loadRelations() {
-  const res = await API.relation.list()
+  const res = await API.relation.list(currentProjectId.value)
   // useApi 返回 AsyncData，其 data 是 Ref
   const d = (res as any)?.data
   relationsData.value = (d?.value ?? d ?? []) as any[]

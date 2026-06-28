@@ -22,7 +22,7 @@ const { data: characters, refresh: refreshChars } = await useFetch<Character[]>(
 // 加载职业体系，供「职业」字段下拉使用
 const { data: careers, refresh: refreshCareers } = await useFetch<Career[]>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/careers`)
 // 加载组织列表，供「所属组织」字段下拉使用
-const { data: organizations } = await API.organization.list()
+const { data: organizations } = await API.organization.list(currentProjectId.value)
 const occupationOptions = computed(() => {
   const list = (careers.value || []).map((c: any) => c.name).filter(Boolean)
   // 去重
@@ -274,7 +274,7 @@ function toggleExpand(id: number) {
 const charRelations = ref<Record<number, string[]>>({})
 async function loadAllRelations() {
   try {
-    const res = await API.relation.list()
+    const res = await API.relation.list(currentProjectId.value)
     const d = (res as any)?.data
     const rels = (d?.value ?? d ?? []) as any[]
     const map: Record<number, string[]> = {}

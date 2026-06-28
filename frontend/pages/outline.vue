@@ -66,7 +66,7 @@ async function loadCharacterOptions() {
 }
 async function loadOrganizationOptions() {
   try {
-    const res2 = await API.organization.list()
+    const res2 = await API.organization.list(currentProjectId.value)
     const list2 = (res2 as any).data || (res2 as any) || []
     organizationOptions.value = list2.map(o => ({
       name: o.name,
