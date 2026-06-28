@@ -58,22 +58,39 @@ async def ai_denoising(
 async def generate_cover_prompt(
     project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
 ):
-    """生成小说封面设计提示词"""
+    """生成小说封面设计提示词（纯文本输出，不走 JSON 解析）"""
     proj = await get_user_project(db, project_id, user)
-    engine, ai_client = await make_engine_and_client(db, user.id)
-    result = await engine.execute_skill(
-        "novel_cover_prompt_template",
-        ai_client,
-        {
-            "title": proj.title,
-            "genre": proj.genre or "网文",
-            "theme": "",
-            "description": proj.synopsis or "暂无简介",
-            "user_prompt": f"请为小说「{proj.title}」生成封面设计提示词。题材：{proj.genre}，简介：{proj.synopsis}",
-        },
+    ai_client = await AIClient.from_user_config(db, user.id)
+    # 读取封面提示词模板
+    import os
+    template_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        "skills", "prompts", "novel_cover_prompt_template.md",
     )
-    check_skill_error(result)
-    cover_prompt = result.get("content", "") or result.get("json") or ""
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            template = f.read()
+    except FileNotFoundError:
+        template = (
+            "创作一幅高质量小说封面插图提示词。\n"
+            "标题：{title}\n类型：{genre}\n简介：{description}\n"
+            "输出英文图片生成提示词。"
+        )
+    prompt_text = template.format(
+        title=proj.title,
+        genre=proj.genre or "网文",
+        theme="",
+        description=proj.synopsis or "暂无简介",
+    )
+    result = await ai_client.chat(
+        messages=[{"role": "user", "content": prompt_text}],
+        model=None,
+        temperature=0.7,
+        max_tokens=800,
+    )
+    cover_prompt = result.get("content", "").strip()
+    if not cover_prompt:
+        raise HTTPException(500, "AI 未返回有效内容")
     return {"cover_prompt": cover_prompt}
 
 
