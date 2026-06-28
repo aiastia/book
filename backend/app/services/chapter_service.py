@@ -1637,7 +1637,8 @@ class ChapterService:
             await self.db.commit()
 
             # 后处理
-            await self._post_generation(chapter)
+            skip_analysis = (overrides or {}).get("skip_analysis", False)
+            await self._post_generation(chapter, skip_analysis=skip_analysis)
 
             return {
                 "chapter_id": chapter.id,
@@ -1657,13 +1658,14 @@ class ChapterService:
                 return {"error": "AI 连接失败，请稍后重试"}
             return {"error": err}
 
-    async def _post_generation(self, chapter: Chapter):
+    async def _post_generation(self, chapter: Chapter, skip_analysis: bool = False):
         """生成后处理"""
         # 1. 自动剧情分析（摘要已合并到分析中，一次调用产出摘要+分析+伏笔+角色状态）
-        try:
-            await self._auto_analyze(chapter)
-        except Exception as e:
-            print(f"[chapter_service] 自动剧情分析失败（不影响章节）: {e}", flush=True)
+        if not skip_analysis:
+            try:
+                await self._auto_analyze(chapter)
+            except Exception as e:
+                print(f"[chapter_service] 自动剧情分析失败（不影响章节）: {e}", flush=True)
 
         # 3. 兜底埋入：分析未覆盖的规划伏笔（pending + plant_chapter_number 匹配）
         await self.foreshadow_service.auto_plant_pending_foreshadows(chapter.chapter_number)

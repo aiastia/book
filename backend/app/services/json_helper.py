@@ -771,9 +771,8 @@ def parse_json(text: str) -> dict | list:
         return json.loads(cleaned)
     except (json.JSONDecodeError, Exception) as e:
         logger.error(f"❌ parse_json 完全失败: {e}")
-        logger.error(f"   原始文本长度: {len(text) if text else 0}")
-        logger.error(f"   清洗后文本长度: {len(cleaned) if cleaned else 0}")
-        logger.debug(f"   清洗后文本预览: {safe_preview(cleaned, 500)}")
+        logger.error(f"   原始文本长度: {len(text) if text else 0}，清洗后: {len(cleaned) if cleaned else 0}")
+        logger.warning(f"   [JSON失败内容预览 前500字] {safe_preview(cleaned, 500)}")
         raise json.JSONDecodeError("JSON解析失败（json5和标准json均失败）", cleaned, 0)
 
 

@@ -623,7 +623,8 @@ class AIClient:
                 bad_content = (last_result.get("content") or "")[:500]
                 logger.warning(
                     f"[AI] JSON解析失败，准备重试 (attempt {attempt}/{max_retries})，"
-                    f"已消耗 input={total_input_tokens} output={total_output_tokens} tokens"
+                    f"input={total_input_tokens} output={total_output_tokens}，"
+                    f"失败内容预览: {bad_content[:200]}"
                 )
                 hint_messages = list(messages) + [
                     {
