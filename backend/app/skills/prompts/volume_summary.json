@@ -2,7 +2,7 @@
   "name": "volume_summary",
   "display_name": "卷摘要生成",
   "description": "每 N 章自动生成一个卷级摘要，保障长期连贯性",
-  "category": "analysis",
+  "category": "outline_1toN",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

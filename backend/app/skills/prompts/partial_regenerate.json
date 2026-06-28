@@ -2,7 +2,7 @@
   "name": "partial_regenerate",
   "display_name": "局部重写",
   "description": "根据用户修改要求重写选中的段落内容",
-  "category": "chapter",
+  "category": "chapter_1to1",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

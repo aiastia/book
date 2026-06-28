@@ -2,7 +2,7 @@
   "name": "chapter_regeneration_system",
   "display_name": "章节重写系统提示",
   "description": "用于章节重写的系统提示词",
-  "category": "chapter",
+  "category": "chapter_1to1",
   "skill_type": "builtin",
   "parameters": {
     "type": "object",

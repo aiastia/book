@@ -2,7 +2,7 @@
   "name": "chapter_planner",
   "display_name": "章节规划",
   "description": "AI 规划章节所需资料（Planner阶段）",
-  "category": "chapter",
+  "category": "chapter_1to1",
   "skill_type": "builtin",
   "system_prompt_file": "chapter_planner.md",
   "parameters": {
