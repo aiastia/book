@@ -1,13 +1,26 @@
 <script setup lang="ts">
 // 全局浮动任务面板：对标 MuMuAINovel FloatingTaskPanel
 // 展示所有后台任务（通用队列 + 旧项目初始化）
-// 任务完成后保留 24 小时，支持手动关闭
+// 任务完成后保留至用户手动关闭
 import { apiGet, apiPost } from '~/composables/useApi'
+
+const emit = defineEmits<{ (e: 'retry', task: any): void }>()
 
 const { tasks, isActive, hasAnyTasks, refreshTasks, cancelTask, dismissTask, clearDoneTasks, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
 const msg = useMessage()
 const collapsed = ref(true)
 const resuming = ref(false)
+
+function retryTask(t: any) {
+  if (t.task_type === 'chapter_batch') {
+    dismissTask(t.id)
+    emit('retry', t)
+  } else {
+    // 其他类型任务简单关闭，用户手动重试
+    dismissTask(t.id)
+    msg.info('请在对应页面重新操作')
+  }
+}
 const failedTasks = ref<any[]>([])
 const ignoredTaskIds = ref<Set<number>>(new Set())
 
@@ -227,6 +240,11 @@ const hasDoneTasks = computed(() =>
             size="small" type="primary" :loading="resuming"
             @click.stop="onResume(t._taskId || t.id)"
           >从失败处重试</a-button>
+          <a-button
+            v-if="!t._isLegacy && t.status === 'failed'"
+            size="small" type="primary"
+            @click.stop="retryTask(t)"
+          >重试</a-button>
           <a-button
             v-if="t.status === 'pending' || t.status === 'running'"
             size="small" danger type="link" @click.stop="cancelTask(t.id)"
