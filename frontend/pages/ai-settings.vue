@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { CheckOutlined } from '@ant-design/icons-vue'
 useHead({ title: 'AI 设置 — 墨语' })
 const msg = useMessage()
-const api = useProjectApi()
+const api = useBookApi()
 const { data: models, refresh } = await api.listAiModels()
 const showAdd = ref(false)
 const editing = ref<any>(null)

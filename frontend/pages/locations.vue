@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 地点/地图管理：树形结构 + 卡片 + AI 生成 + CRUD
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '地点地图 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: tree, refresh } = await api.getLocationTree()
 

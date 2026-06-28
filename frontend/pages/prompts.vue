@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 useHead({ title: '提示词模板 — 墨语' })
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 
 const { data: templates, refresh } = await api.listPromptTemplates()

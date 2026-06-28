@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { UploadOutlined, LoadingOutlined } from '@ant-design/icons-vue'
 useHead({ title: '拆书导入 — 墨语' })
 const msg = useMessage()
-const api = useProjectApi()
+const api = useBookApi()
 const { data: imported, refresh } = await useApi<any[]>('/api/imported-books', { key: 'imported-books' })
 const uploading = ref(false)
 const fileList = ref<any[]>([])

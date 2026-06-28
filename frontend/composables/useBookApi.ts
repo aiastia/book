@@ -283,5 +283,249 @@ export function useBookApi() {
     /** 异步触发分析 */
     triggerAnalysisAsync: (chapterId: number, id?: number) =>
       _post(`/projects/${id || pid()}/chapters/${chapterId}/analyze`),
+    getAnalysisTaskStatus: (chapterId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/chapters/${chapterId}/analyze/status`),
+    getAnalyses: (id?: number) => _get(`/projects/${id || pid()}/analyses`),
+    /** 剧情分析 */
+    syncForeshadowsFromAnalysis: (chapterIds?: number[], id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/sync-foreshadows`, { chapter_ids: chapterIds }),
+
+    // ==================== 角色扩展 ====================
+    getCharacters: (id?: number) => _get(`/projects/${id || pid()}/characters`),
+    autoGenerateCharacter: (id?: number) =>
+      _post(`/projects/${id || pid()}/characters/generate`),
+    autoGenerateCharacterAsync: (body: { count: number; requirements?: string }, id?: number) =>
+      _post(`/projects/${id || pid()}/characters/generate-async`, body),
+    batchGenerateCharacters: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/characters/batch-generate`, body),
+    batchGenerateCharactersAsync: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/characters/batch-generate-async`, body),
+    getCharacterOrganizations: (characterId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/characters/${characterId}/organizations`),
+    // 职业
+    getCareers: (id?: number) => _get(`/projects/${id || pid()}/careers`),
+    createCareer: (body: any, id?: number) => _post(`/projects/${id || pid()}/careers`, body),
+    deleteCareer: (careerId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/careers/${careerId}`),
+    autoAssignCareers: (id?: number) => _post(`/projects/${id || pid()}/careers/auto-assign`),
+    getCharCareers: (characterId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/characters/${characterId}/careers`),
+    createCharCareer: (characterId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/characters/${characterId}/careers`, body),
+    updateCharCareer: (ccId: number, body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/character-careers/${ccId}`, body),
+    deleteCharCareer: (ccId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/character-careers/${ccId}`),
+
+    // ==================== 物品/地点 CRUD ====================
+    getItems: (id?: number) => _get(`/projects/${id || pid()}/items`),
+    createItem: (body: any, id?: number) => _post(`/projects/${id || pid()}/items`, body),
+    updateItem: (itemId: number, body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/items/${itemId}`, body),
+    deleteItem: (itemId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/items/${itemId}`),
+    generateItems: (id?: number) => _post(`/projects/${id || pid()}/items/generate`),
+    getLocations: (id?: number) => _get(`/projects/${id || pid()}/locations`),
+    createLocation: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/locations`, body),
+    updateLocation: (locId: number, body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/locations/${locId}`, body),
+    deleteLocation: (locId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/locations/${locId}`),
+    generateLocations: (id?: number) => _post(`/projects/${id || pid()}/locations/generate`),
+    getLocationTree: (id?: number) => _get(`/projects/${id || pid()}/locations/tree`),
+
+    // ==================== 组织扩展 ====================
+    getOrganizations: (id?: number) => _get(`/projects/${id || pid()}/organizations`),
+    autoGenerateOrganization: (id?: number) =>
+      _post(`/projects/${id || pid()}/organizations/generate`),
+    generateOrganizationAsync: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/organizations/generate-async`, body),
+    getOrgMembers: (orgId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/organizations/${orgId}/members`),
+    addOrgMember: (orgId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/organizations/${orgId}/members`, body),
+    updateOrgMember: (memberId: number, body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/organization-members/${memberId}`, body),
+    removeOrgMember: (memberId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/organization-members/${memberId}`),
+    generateOrgMembers: (orgId: number, id?: number) =>
+      _post(`/projects/${id || pid()}/organizations/${orgId}/members/generate`),
+    generateAllOrgMembers: (id?: number) =>
+      _post(`/projects/${id || pid()}/organizations/members/generate-all`),
+    getOrgTree: (id?: number) => _get(`/projects/${id || pid()}/organizations/tree`),
+    updateOrgTree: (body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/organizations/tree`, body),
+    autoAnalyzeOrganizations: (id?: number) =>
+      _post(`/projects/${id || pid()}/organizations/auto-analyze`),
+
+    // ==================== 世界观扩展 ====================
+    getWorlds: (id?: number) => _get(`/projects/${id || pid()}/worldview`),
+    getWorldCore: (id?: number) => _get(`/projects/${id || pid()}/worldview/core`),
+    generateWorld: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/worldview/generate`, body),
+    generateWorldCore: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/worldview/generate-core`, body),
+    updateWorldCore: (body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/worldview/core`, body),
+    reindexWorldVectors: (id?: number) =>
+      _post(`/projects/${id || pid()}/worldview/reindex`),
+
+    // ==================== 关系 ====================
+    getRelations: (id?: number) => _get(`/projects/${id || pid()}/relations`),
+    createRelation: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/relations`, body),
+    updateRelation: (relId: number, body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/relations/${relId}`, body),
+    deleteRelation: (relId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/relations/${relId}`),
+    getRelationGraph: (id?: number) => _get(`/projects/${id || pid()}/relations/graph`),
+    autoRebuildRelations: (id?: number) =>
+      _post(`/projects/${id || pid()}/relations/auto-rebuild`),
+    getRelationTypes: (id?: number) => _get(`/projects/${id || pid()}/relations/types`),
+    renameRelationType: (body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/relations/types/rename`, body),
+    deleteRelationType: (typeId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/relations/types/${typeId}`),
+    getRelationChangeLogs: (relId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/relations/${relId}/change-logs`),
+    createRelationChangeLog: (relId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/relations/${relId}/change-logs`, body),
+    deleteRelationChangeLog: (relId: number, logId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/relations/${relId}/change-logs/${logId}`),
+    getCharacterChangeLogs: (characterId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/characters/${characterId}/change-logs`),
+    createCharacterChangeLog: (characterId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/characters/${characterId}/change-logs`, body),
+    deleteCharacterChangeLog: (characterId: number, logId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/characters/${characterId}/change-logs/${logId}`),
+
+    // ==================== 伏笔扩展 ====================
+    getForeshadows: (status?: string, id?: number) =>
+      _get(`/projects/${id || pid()}/foreshadows${status ? `?status=${status}` : ''}`),
+    batchDeleteForeshadows: (ids: number[], id?: number) =>
+      _post(`/projects/${id || pid()}/foreshadows/batch-delete`, { ids }),
+    planForeshadows: (id?: number) => _post(`/projects/${id || pid()}/foreshadows/plan`),
+    plantForeshadow: (fid: number, chapterNumber: number, hintText = '', id?: number) =>
+      _post(`/projects/${id || pid()}/foreshadows/${fid}/plant`, { chapter_number: chapterNumber, hint_text: hintText }),
+    resolveForeshadow: (fid: number, chapterNumber: number, resolutionText = '', isPartial = false, id?: number) =>
+      _post(`/projects/${id || pid()}/foreshadows/${fid}/resolve`, { chapter_number: chapterNumber, resolution_text: resolutionText, is_partial: isPartial }),
+    abandonForeshadow: (fid: number, reason = '', id?: number) =>
+      _post(`/projects/${id || pid()}/foreshadows/${fid}/abandon`, { reason }),
+    getPendingResolve: (currentChapter: number, id?: number) =>
+      _get(`/projects/${id || pid()}/foreshadows/pending-resolve?chapter=${currentChapter}`),
+    getOverdueForeshadows: (currentChapter: number, id?: number) =>
+      _get(`/projects/${id || pid()}/foreshadows/overdue?chapter=${currentChapter}`),
+
+    // ==================== 记忆 ====================
+    getMemories: (id?: number) => _get(`/projects/${id || pid()}/memories`),
+    createMemory: (body: any, id?: number) => _post(`/projects/${id || pid()}/memories`, body),
+    updateMemory: (memId: number, body: any, id?: number) =>
+      _put(`/projects/${id || pid()}/memories/${memId}`, body),
+    deleteMemory: (memId: number, id?: number) =>
+      _del(`/projects/${id || pid()}/memories/${memId}`),
+    clearMemories: (id?: number) => _post(`/projects/${id || pid()}/memories/clear`),
+    searchMemories: (query: string, id?: number) =>
+      _get(`/projects/${id || pid()}/memories/search?q=${encodeURIComponent(query)}`),
+    getMemoryStats: (id?: number) => _get(`/projects/${id || pid()}/memories/stats`),
+    reindexMemories: (id?: number) => _post(`/projects/${id || pid()}/memories/reindex`),
+
+    // ==================== 重写/润色 ====================
+    getRegenTasks: (chapterId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/chapters/${chapterId}/regeneration/tasks`),
+    getRegenTaskDetail: (chapterId: number, taskId: number, id?: number) =>
+      _get(`/projects/${id || pid()}/chapters/${chapterId}/regeneration/${taskId}`),
+    applyRegenTask: (chapterId: number, taskId: number, id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/${chapterId}/regeneration/${taskId}/apply`),
+    partialRegenerate: (chapterId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/${chapterId}/partial-regenerate`, body),
+    applyPartialRegen: (chapterId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/${chapterId}/apply-partial-regenerate`, body),
+
+    // ==================== 大纲扩展 ====================
+    generateOutlines: (chapterCount = 10, id?: number) =>
+      _post(`/projects/${id || pid()}/outlines/generate-async`, { chapter_count: chapterCount }),
+    generateOutlinesAsync: (chapterCount = 3, id?: number) =>
+      _post(`/projects/${id || pid()}/outlines/generate-async`, { chapter_count: chapterCount }),
+    continueOutlinesAsync: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/outlines/continue-async`, body),
+    expandOutlineAsync: (outlineId: number, body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/outlines/${outlineId}/expand-async`, body),
+    batchExpandOutlinesAsync: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/outlines/batch-expand-async`, body),
+
+    // ==================== 提示词模板 ====================
+    listPromptTemplates: () => _get('/prompt-templates'),
+    getPromptTemplate: (id: number) => _get(`/prompt-templates/${id}`),
+    createPromptTemplate: (body: any) => _post('/prompt-templates', body),
+    deletePromptTemplate: (id: number) => _del(`/prompt-templates/${id}`),
+    listPromptVersions: (templateId: number) => _get(`/prompt-templates/${templateId}/versions`),
+    createPromptVersion: (templateId: number, body: any) =>
+      _post(`/prompt-templates/${templateId}/versions`, body),
+    activatePromptVersion: (templateId: number, versionId: number) =>
+      _post(`/prompt-templates/${templateId}/versions/${versionId}/activate`),
+
+    // ==================== Skill ====================
+    createSkill: (body: any) => _post('/skills', body),
+    updateSkill: (skillId: number, body: any) => _put(`/skills/${skillId}`, body),
+    deleteCustomSkill: (skillId: number) => _del(`/skills/${skillId}`),
+    resetSkill: (skillId: number) => _post(`/skills/${skillId}/reset`),
+    resetAllSkills: () => _post('/skills/reset-all'),
+    reloadSkills: () => _post('/skills/reload'),
+
+    // ==================== 书导入 ====================
+    parseTxt: (body: any) => _post('/projects/book-import/parse-txt', body),
+    fullImport: (body: any) => _post('/projects/book-import/full-import', body),
+    bookImportSuggest: (body: any) => _post('/book-import/reverse-suggest', body),
+    bookImportReverseOutlines: (body: any) => _post('/book-import/reverse-outlines', body),
+    bookImportDeconstruct: (bookId: number) => _post(`/book-import/${bookId}/deconstruct`),
+    uploadBookImport: (body: any) => _post('/book-import/upload', body),
+    getImportedBook: (bookId: number) => _get(`/book-import/${bookId}`),
+    deleteImportedBook: (bookId: number) => _del(`/book-import/${bookId}`),
+
+    // ==================== MCP ====================
+    mcpWorldPlanning: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/mcp/world-planning`, body),
+    mcpCharacterPlanning: (body: any, id?: number) =>
+      _post(`/projects/${id || pid()}/mcp/character-planning`, body),
+
+    // ==================== AI 扩展 ====================
+    testRewrite: (baseUrl: string, apiKey: string, model: string) =>
+      _post('/ai-models/test-rewrite', { base_url: baseUrl, api_key: apiKey, model }),
+    testEmbedding: (baseUrl: string, apiKey: string, embeddingModel: string) =>
+      _post('/ai-models/test-embedding', { base_url: baseUrl, api_key: apiKey, embedding_model: embeddingModel }),
+    fetchRemoteModels: (baseUrl: string, apiKey: string, provider = 'openai') =>
+      _post('/ai-models/fetch-remote', { base_url: baseUrl, api_key: apiKey, provider }),
+    fetchModelRemoteModels: (modelId: number) =>
+      _get(`/ai-models/${modelId}/remote-models`),
+    fetchRewriteRemoteModels: (baseUrl: string, apiKey: string) =>
+      _post('/ai-models/fetch-rewrite-models', { base_url: baseUrl, api_key: apiKey }),
+
+    // ==================== 全局灵感 ====================
+    globalInspirationStep: (step: string, body: any) =>
+      _post(`/global-inspiration/step/${step}`, body),
+    globalInspirationQuickComplete: (body: any) =>
+      _post('/global-inspiration/quick-complete', body),
+
+    // ==================== 别名（兼容旧命名） ====================
+    getChapters: function (id?: number) { return this.listChapters(id) },
+    getOutlines: function (id?: number) { return this.listOutlines(id) },
+    batchGenerate: function (body: any, id?: number) {
+      return this.generateChapters(id || _pid(), {
+        start: body.start_chapter_number,
+        count: body.count,
+        chapterIds: body.chapter_ids,
+        targetWords: body.target_word_count,
+        modelOverride: body.model_override,
+        styleId: body.style_id,
+        narrativePerspective: body.narrative_perspective,
+        enableAnalysis: body.enable_analysis,
+      })
+    },
+    deleteProjectById: function (id: number) { return this.deleteProject(id) },
+    generateChapterAsyncCompat: function (chapterId: number, skillName?: string, style?: any, opts?: any, id?: number) {
+      return this.generateChapterAsync(chapterId, skillName, style, opts, id)
+    },
+    pid: () => _pid(),
   }
 }

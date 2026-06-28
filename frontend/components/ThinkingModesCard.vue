@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 
-const api = useProjectApi()
+const api = useBookApi()
 const { currentProjectId } = useProject()
 const msg = useMessage()
 

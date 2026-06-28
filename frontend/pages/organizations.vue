@@ -1,14 +1,14 @@
 <script setup lang="ts">
 // 组织与势力：左右分栏（对标 MuMu Organizations.tsx）
 // 左侧组织列表（树形）+ 右侧选中组织详情 + 内嵌成员表格
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { useBackgroundTasks } from '~/composables/useBackgroundTasks'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: '组织与势力 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { onTaskCompleted } = useBackgroundTasks()
 const { data: tree, refresh } = await api.getOrgTree()

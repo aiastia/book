@@ -2,7 +2,7 @@
 // 章节规划编辑器 — 编辑基础字段，保存时合并回原 plan 保留 AI 生成的富字段
 import { apiGet } from '~/composables/useApi'
 import { useProject } from '~/composables/useProject'
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 
 const props = defineProps<{
   open: boolean
@@ -20,7 +20,7 @@ const emit = defineEmits<{
 }>()
 
 const { currentProjectId } = useProject()
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 
 // 表单字段

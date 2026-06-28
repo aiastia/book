@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // 关系类型管理：增删改查项目中已用的关系类型
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '关系类型管理 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: types, refresh } = await api.getRelationTypes()
 

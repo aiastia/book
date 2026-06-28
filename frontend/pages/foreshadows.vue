@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 伏笔管理：统计卡片 + 筛选栏 + 表格视图（对标参考站）
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '伏笔管理 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: foreshadows, refresh } = await api.getForeshadows()
 

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // 故事记忆：列表 + 类型筛选 + 向量语义搜索 + 统计
 // 对标 MuMuAINovel memories 页面。记忆由剧情分析自动提取，本页提供管理与语义检索。
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '故事记忆 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: memories, refresh } = await api.getMemories({ limit: 100 })
 const { data: stats } = await api.getMemoryStats()

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // 章节阅读器（#8）：带记忆标注的阅读视图
 // 左侧章节正文（带高亮标注）+ 右侧标注侧边栏（按类型分组，点击定位）
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: '章节阅读 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const route = useRoute()
 

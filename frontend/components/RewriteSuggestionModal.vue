@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 
 const props = defineProps<{
   visible: boolean
@@ -14,7 +14,7 @@ const emit = defineEmits<{
   (e: 'rewriteComplete', content: string): void
 }>()
 
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 
 const instructions = ref('')

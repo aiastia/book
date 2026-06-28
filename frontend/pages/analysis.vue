@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // 剧情分析：按章节展示分析维度，对标 MuMuAINovel Tab 布局
 import { apiGet } from '~/composables/useApi'
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '剧情分析 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: analyses, refresh } = await api.getAnalyses()
 const { data: chapters } = await api.getChapters()

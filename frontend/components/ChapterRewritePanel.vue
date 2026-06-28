@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 章节重写面板（#11 重写历史 + #13 扩写缩写/局部重写）
 // 对标 MuMuAINovel Chapters 重写功能
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 
 const props = defineProps<{
   chapterId: number | null
@@ -9,7 +9,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'applied'): void; (e: 'regenerated', content: string): void }>()
 
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 
 const open = ref(false)

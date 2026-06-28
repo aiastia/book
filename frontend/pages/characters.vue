@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // 角色设定：对标参考站 — 卡片网格，每个角色内容平铺（描述列表风格）
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: '角色设定 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { onTaskCompleted } = useBackgroundTasks()
 

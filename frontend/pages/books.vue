@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // 我的书架：拟物书本卡片 + 删除/导出/导入 + 新建向导（AI一键生成世界观/角色/大纲）
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 definePageMeta({ layout: 'default' })
 useHead({ title: '我的书架 — 墨语' })
 const msg = useMessage()
-const api = useProjectApi()
+const api = useBookApi()
 const { selectProject, createProject: selectAndCreate } = useProject()
-const { data: projects, refresh } = await api.listProjects()
+const { data: projects, refresh } = await api.listBooks()
 
 // 检查 AI 模型是否已配置
 const aiConfigured = ref<boolean | null>(null)

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 物品/道具管理：分类切换 + 卡片网格 + AI 生成 + CRUD
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '物品道具 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: items, refresh } = await api.getItems()
 const { data: characters } = await api.getCharacters()

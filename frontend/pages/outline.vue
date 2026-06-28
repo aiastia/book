@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { reactive } from 'vue'
 useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: project } = await api.getProject()
 const { data: outlines, refresh } = await api.getOutlines()

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // 职业体系：主/副职业分页 + 详细卡片（对标参考站）
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { apiPut } from '~/composables/useApi'
 useHead({ title: '职业体系 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: careers, refresh } = await api.getCareers()
 // 角色职业关联（#19，显示持有此职业的角色）

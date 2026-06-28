@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // 世界设定：对标参考站 — 基础信息卡 + 世界观卡 + 详细设定卡（标签+值描述列表）
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '世界设定 — 墨语' })
 const { currentProjectId, currentProjectInfo } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: project, refresh: refreshProject } = await api.getProject()
 const { data: worlds, refresh: refreshWorlds } = await api.getWorlds()

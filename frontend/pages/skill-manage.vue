@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: 'Skill 管理 — 墨语' })
 const msg = useMessage()
-const api = useProjectApi()
+const api = useBookApi()
 const { data: skills, refresh } = await api.listSkills()
 
 // 加载变量参考文档

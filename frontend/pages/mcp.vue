@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // MCP 服务器管理
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { apiGet, apiPost, apiPut, apiDelete } from '~/composables/useApi'
 
 useHead({ title: 'MCP 管理 — 墨语' })
 const msg = useMessage()
-const api = useProjectApi()
+const api = useBookApi()
 
 const servers = ref<any[]>([])
 const loading = ref(false)

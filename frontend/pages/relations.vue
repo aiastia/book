@@ -5,13 +5,13 @@ import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '角色关系 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { data: graph, refresh } = await api.getRelationGraph()
 const { data: characters } = await api.getCharacters()
