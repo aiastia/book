@@ -1625,6 +1625,7 @@ async def _step_validate_outline(db, task, pid, proj, engine, ai_client):
     )
 
     task.status_message = f"大纲验证完成（补全 {count} 个实体）" if count else "大纲验证通过"
+    task.validate_done = 1
     await db.commit()
     return None
 
