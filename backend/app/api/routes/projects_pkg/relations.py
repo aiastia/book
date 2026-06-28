@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from app.api.routes.projects_pkg.base import *
+from app.core.database import async_session
 from app.models.character import CharacterRelation
 
 router = make_router()
