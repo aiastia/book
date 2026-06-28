@@ -232,7 +232,7 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
       <a-form-item label="小说简介"><a-textarea v-model:value="wizard.synopsis" :rows="2" :maxlength="300" show-count placeholder="一句话描述故事" /></a-form-item>
       <a-form-item label="主题"><a-textarea v-model:value="wizard.theme" :rows="2" :maxlength="500" show-count placeholder="故事的核心主题（如：复仇与救赎）" /></a-form-item>
       <a-row :gutter="12">
-        <a-col :span="8"><a-form-item label="类型"><a-auto-complete v-model:value="wizard.genre" :options="genres.map(g => ({ value: g }))" :filter-option="(input:string, option:any) => option.value.toLowerCase().includes(input.toLowerCase())" allow-clear placeholder="选择或输入类型" /></a-form-item></a-col>
+        <a-col :span="8"><a-form-item label="类型"><a-auto-complete v-model:value="wizard.genre" :options="genres.map(g => ({ value: g }))" :filter-option="(input:string, option:any) => option.value.toLowerCase().includes(input.toLowerCase())"><a-input placeholder="选择或输入类型" allow-clear /></a-auto-complete></a-form-item></a-col>
         <a-col :span="8"><a-form-item label="叙事视角"><a-select v-model:value="wizard.narrative_pov" style="width:100%"><a-select-option label="第三人称" value="第三人称" /><a-select-option label="第一人称" value="第一人称" /><a-select-option label="全知视角" value="全知视角" /></a-select></a-form-item></a-col>
         <a-col :span="8"><a-form-item label="主角名字（可选）"><a-input v-model:value="wizard.protagonist_name" placeholder="留空则AI生成" /></a-form-item></a-col>
       </a-row>

@@ -581,7 +581,7 @@ async function rebuild() {
         </a-form-item>
       </div>
       <a-form-item label="关系类型">
-        <a-auto-complete v-model:value="form.relation_type" :options="commonRelationTypes.map(t => ({ value: t }))" placeholder="如：同伴、宿敌、难友（可自由输入）" />
+        <a-auto-complete v-model:value="form.relation_type" :options="commonRelationTypes.map(t => ({ value: t }))"><a-input placeholder="如：同伴、宿敌、难友（可自由输入）" /></a-auto-complete>
       </a-form-item>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
         <a-form-item label="分类">
