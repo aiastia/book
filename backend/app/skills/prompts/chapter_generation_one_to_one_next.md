@@ -15,6 +15,8 @@
 @include:_shared_writing_rules.md
 
 <constraints>
+@include:_shared_constraints.md
+
 @include:_shared_one_to_one_body.md
 
 【续章专属要求】

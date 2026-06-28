@@ -17,7 +17,9 @@
 @include:_shared_writing_rules.md
 
 <constraints>
-一、地基（这个不能崩）
+@include:_shared_constraints.md
+
+一、地基
 
 这是第一章，你得让读者在读完前三段之后，脑子里有三样东西：谁、在哪儿、什么处境。不用全交代清楚，但得有个底。
 
