@@ -3,7 +3,7 @@
 对标 MuMuAINovel 的 tasks.py。提供任务查询/取消/删除/清理入口。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.core.auth import get_current_user
 from app.models.user import User
@@ -37,6 +37,25 @@ async def list_active(
 ):
     """列出活跃任务（pending/running）。"""
     return await bg.list_active_tasks(user_id=user.id, project_id=project_id)
+
+
+@router.post("/batch")
+async def batch_get_tasks(
+    payload: dict = Body(...),
+    user: User = Depends(get_current_user),
+):
+    """批量查询任务状态（前端轮询兜底用，一次请求查多个任务）。"""
+    ids = payload.get("ids") or []
+    if not ids or not isinstance(ids, list):
+        return []
+    # 限制最多 50 个，防止滥用
+    ids = [int(i) for i in ids[:50] if i]
+    results = []
+    for tid in ids:
+        task = await bg.get_task(tid)
+        if task and task.get("user_id") == user.id:
+            results.append(task)
+    return results
 
 
 @router.get("/{task_id}")

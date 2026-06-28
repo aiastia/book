@@ -200,6 +200,8 @@ export function useBackgroundTasks() {
   }
 
   async function refreshTasks() {
+    // 先清理超过 24 小时的已完成任务
+    _cleanupOldDoneTasks()
     // 拉取活跃的通用任务
     try {
       const list = await apiGet<any[]>('/api/tasks/active', { timeout: 5000 })
@@ -227,11 +229,13 @@ export function useBackgroundTasks() {
       }
 
       // 兜底：本地仍显示 pending/running 但已不在 active 列表的任务
-      // （说明服务端已 completed/failed，但 WebSocket 断连没推送 → 逐个查状态）
+      // （说明服务端已 completed/failed，但 WebSocket 断连没推送 → 批量查状态）
       const staleLocalTasks = tasks.value.filter(
         t => (t.status === 'pending' || t.status === 'running') && !serverIds.has(t.id) && typeof t.id === 'number'
       )
-      for (const t of staleLocalTasks) {
+      if (staleLocalTasks.length === 1) {
+        // 单个任务直接查
+        const t = staleLocalTasks[0]
         try {
           const fresh = await apiGet<any>(`/api/tasks/${t.id}`, { timeout: 5000 })
           const wasActive = t.status === 'pending' || t.status === 'running'
@@ -242,6 +246,25 @@ export function useBackgroundTasks() {
             _scheduleAutoDismiss(t.id)
           }
         } catch { /* 单个查询失败不影响整体 */ }
+      } else if (staleLocalTasks.length > 1) {
+        // 多个任务批量查（一次 HTTP 替代 N 次）
+        try {
+          const freshList = await apiPost<any[]>('/api/tasks/batch', {
+            ids: staleLocalTasks.map(t => t.id),
+          }, { timeout: 8000 })
+          const freshMap = new Map((freshList || []).map((f: any) => [f.id, f]))
+          for (const t of staleLocalTasks) {
+            const fresh = freshMap.get(t.id)
+            if (!fresh) continue
+            const wasActive = t.status === 'pending' || t.status === 'running'
+            Object.assign(t, fresh)
+            if (wasActive && (fresh.status === 'completed' || fresh.status === 'failed')) {
+              t._doneAt = Date.now()
+              _fireCallbacks(fresh)
+              _scheduleAutoDismiss(t.id)
+            }
+          }
+        } catch { /* 批量查询失败不影响整体 */ }
       }
 
       // 仅移除被用户主动关闭的任务
@@ -310,9 +333,10 @@ export function useBackgroundTasks() {
     } finally {
       polling = false
     }
-    // 仅在所有任务都被手动关闭后才停止轮询
-    // (不再因任务完成而自动停止)
-    if (!legacyTaskId.value && tasks.value.length === 0 && !legacyTaskStatus.value) {
+    // 没有活跃任务时停止轮询（已完成的不再触发轮询）
+    const hasActive = tasks.value.some(t => t.status === 'pending' || t.status === 'running')
+    const hasLegacyActive = legacyTaskId.value || (legacyTaskStatus.value && (legacyTaskStatus.value.status === 'pending' || legacyTaskStatus.value.status === 'running'))
+    if (!hasActive && !hasLegacyActive) {
       stopPolling()
     }
   }
@@ -347,15 +371,25 @@ export function useBackgroundTasks() {
     }
   }
 
-  // 已完成任务 24 小时后自动移除（失败任务保留，需用户手动处理）
-  function _scheduleAutoDismiss(id: number | string) {
-    setTimeout(() => {
-      const t = tasks.value.find(t => t.id === id)
-      if (t && t.status === 'completed') {
-        t._dismissed = true
-        tasks.value = tasks.value.filter(x => !x._dismissed)
+  // 已完成的任务超过 24 小时自动移除（基于时间戳检查，不依赖 setTimeout）
+  const AUTO_DISMISS_MS = 24 * 60 * 60 * 1000
+  function _cleanupOldDoneTasks() {
+    const now = Date.now()
+    tasks.value = tasks.value.filter(t => {
+      // 已完成且有 _doneAt 超过 24 小时 → 移除
+      if (t.status === 'completed' && t._doneAt && (now - t._doneAt > AUTO_DISMISS_MS)) {
+        return false
       }
-    }, 24 * 60 * 60 * 1000)
+      return true
+    })
+  }
+  // 标记完成时间并尝试立即清理
+  function _scheduleAutoDismiss(id: number | string) {
+    const t = tasks.value.find(t => t.id === id)
+    if (t && t.status === 'completed') {
+      t._doneAt = Date.now()
+    }
+    _cleanupOldDoneTasks()
   }
 
   async function dismissTask(id: number | string) {

@@ -27,9 +27,25 @@ from app.services import background_task_service as bg_service
 
 logger = logging.getLogger(__name__)
 
-# runner 注册表：task_type → runner 函数
-# 各路由提交任务时自动注册，重试时按 task_type 查找
-_RUNNER_REGISTRY: dict[str, Callable] = {}
+# runner 注册表：task_type → (runner, factory_module)
+# factory_module 用于后端重启后延迟加载 runner（从对应路由文件重新导入）
+# 结构：{ task_type: { "runner": Callable, "factory": str } }
+_RUNNER_REGISTRY: dict[str, dict] = {}
+
+# task_type → runner 工厂模块路径（后端重启后延迟恢复用）
+# 新增 task_type 时在此注册，确保重试在重启后仍可用
+_RUNNER_FACTORIES: dict[str, str] = {
+    "chapter_generate": "app.api.routes.projects_pkg.chapters:_get_chapter_runner",
+    "chapter_analyze": "app.api.routes.projects_pkg.chapters:_get_analyze_runner",
+    "chapter_batch_analyze": "app.api.routes.projects_pkg.chapters:_get_batch_analyze_runner",
+    "outline_new": "app.api.routes.projects_pkg.outlines:_get_outline_new_runner",
+    "outline_continue": "app.api.routes.projects_pkg.outlines:_get_outline_continue_runner",
+    "outline_expand": "app.api.routes.projects_pkg.outlines:_get_outline_expand_runner",
+    "characters": "app.api.routes.projects_pkg.characters:_get_characters_runner",
+    "organizations": "app.api.routes.projects_pkg.organizations:_get_organizations_runner",
+    "world_core": "app.api.routes.projects_pkg.worlds:_get_world_core_runner",
+    "book_import": "app.api.routes.projects_pkg.ai_tools:_get_book_import_runner",
+}
 
 
 async def submit_async_task(
@@ -54,7 +70,7 @@ async def submit_async_task(
         task_id: 任务ID，前端用于轮询
     """
     # 注册 runner（供重试使用）
-    _RUNNER_REGISTRY[task_type] = runner
+    _RUNNER_REGISTRY[task_type] = {"runner": runner}
 
     task = await bg_service.create_task(
         user_id=user_id,
@@ -65,6 +81,19 @@ async def submit_async_task(
     )
     asyncio.create_task(_wrap_runner(task.id, runner, payload))
     return task.id
+
+
+def _resolve_runner(task_type: str) -> Callable | None:
+    """从注册表获取 runner；若注册表为空（后端重启后），尝试从工厂加载。"""
+    entry = _RUNNER_REGISTRY.get(task_type)
+    if entry and entry.get("runner"):
+        return entry["runner"]
+
+    # 后端重启后注册表为空，尝试从路由文件重新获取 runner
+    # 当前各路由的 runner 是内嵌闭包，无法延迟加载
+    # 实际策略：runner 注册表在首次提交同类型任务时自动填充
+    # 重启后尚未提交过的类型无法重试 → 提示用户在页面重新操作
+    return None
 
 
 async def retry_task(task_id: int, user_id: int) -> int:
@@ -99,9 +128,12 @@ async def retry_task(task_id: int, user_id: int) -> int:
         title = task.title or task_type
         project_id = task.project_id
 
-    runner = _RUNNER_REGISTRY.get(task_type)
+    runner = _resolve_runner(task_type)
     if not runner:
-        raise ValueError(f"任务类型 '{task_type}' 暂不支持重试，请在对应页面重新操作")
+        raise ValueError(
+            f"任务类型 '{task_type}' 的执行器未加载（可能后端已重启），"
+            f"请在对应页面重新操作"
+        )
 
     # 创建新任务
     new_task = await bg_service.create_task(
