@@ -1,16 +1,15 @@
 <script setup lang="ts">
 // 职业体系：主/副职业分页 + 详细卡片（对标参考站）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 
 useHead({ title: '职业体系 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 角色职业关联（#19，显示持有此职业的角色）
-const { data: charCareers } = await api.getCharCareers()
+const { data: charCareers } = await API.character.getCareers()
 // 角色名映射
 const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 const charNameMap = computed(() => {

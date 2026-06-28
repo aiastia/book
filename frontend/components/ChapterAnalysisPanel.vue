@@ -12,7 +12,6 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'rewriteWithSuggestions', sug
 
 const { currentProjectId } = useProject()
 const msg = useMessage()
-const api = useBookApi()
 
 const visible = ref(false)
 const loading = ref(false)

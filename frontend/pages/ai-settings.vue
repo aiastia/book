@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch } from 'vue'
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { CheckOutlined } from '@ant-design/icons-vue'
 useHead({ title: 'AI 设置 — 墨语' })
 const msg = useMessage()
-const api = useBookApi()
 const { data: models, refresh: refresh } = await useFetch(() => `/ai-models`)
 const showAdd = ref(false)
 const editing = ref<any>(null)
@@ -109,10 +108,10 @@ async function onSave() {
   saving.value = true
   try {
     if (editing.value) {
-      await api.updateAiModel(form.id, { ...form })
+      await API.ai.updateModel(form.id, { ...form })
     } else {
-      const { id } = await api.createAiModel({ ...form })
-      if (form.is_default) await api.updateAiModel(id, { is_default: true })
+      const { id } = await API.ai.createModel({ ...form })
+      if (form.is_default) await API.ai.updateModel(id, { is_default: true })
     }
     showAdd.value = false
     await refresh()
@@ -124,20 +123,20 @@ async function onSave() {
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除此模型配置？')) return
-  try { await api.deleteAiModel(id); delete testResult.value[id]; await refresh() } catch (e: any) { msg.error('删除失败') }
+  try { await API.ai.deleteModel(id); delete testResult.value[id]; await refresh() } catch (e: any) { msg.error('删除失败') }
 }
 async function onTest(id: number) {
   testing.value = id
   testResult.value[id] = '测试中…'
   try {
-    const r = await api.testAiModel(id)
+    const r = await API.ai.testModel(id)
     testResult.value[id] = `✅ ${r.reply}`
   } catch (e: any) {
     testResult.value[id] = `❌ ${formatError(e, '失败')}`
   } finally { testing.value = null }
 }
 async function onSetDefault(id: number) {
-  try { await api.updateAiModel(id, { is_default: true }); await refresh() } catch (e: any) { msg.error('设置失败') }
+  try { await API.ai.updateModel(id, { is_default: true }); await refresh() } catch (e: any) { msg.error('设置失败') }
 }
 
 /** 从远程 API 获取模型列表 */
@@ -152,7 +151,7 @@ async function fetchModels() {
     fetchingModels.value = true
     remoteModels.value = []
     try {
-      const r = await api.fetchModelRemoteModels(form.id)
+      const r = await API.ai.fetchModelRemoteModels(form.id)
       remoteModels.value = r.models || []
       if (remoteModels.value.length === 0) msg.warning('未获取到可用模型')
     } catch (e: any) {
@@ -169,7 +168,7 @@ async function fetchModels() {
   fetchingModels.value = true
   remoteModels.value = []
   try {
-    const r = await api.fetchRemoteModels(form.base_url, form.api_key, form.provider)
+    const r = await API.ai.fetchRemoteModels(form.base_url, form.api_key, form.provider)
     remoteModels.value = r.models || []
     if (remoteModels.value.length === 0) {
       msg.warning('未获取到可用模型')
@@ -228,7 +227,7 @@ async function onTestEmbedding() {
   testingEmbed.value = true
   embedResult.value = '测试中…'
   try {
-    const r = await api.testEmbedding(form.base_url, form.api_key, form.embedding_model || 'text-embedding-3-small')
+    const r = await API.ai.testEmbedding(form.base_url, form.api_key, form.embedding_model || 'text-embedding-3-small')
     embedResult.value = `✅ 向量维度 ${r.dim}，模型 ${r.model}`
     msg.success('Embedding 接口可用')
   } catch (e: any) {
@@ -315,7 +314,7 @@ async function onSaveRewrite() {
   if (!def) { msg.warning('请先添加一个 AI 模型'); return }
   savingRewrite.value = true
   try {
-    await api.updateAiModel(def.id, {
+    await API.ai.updateModel(def.id, {
       rewrite_base_url: rewriteForm.base_url || '',
       rewrite_api_key: rewriteForm.api_key || '',
       rewrite_model: rewriteForm.model || '',
@@ -331,7 +330,7 @@ async function onSaveImage() {
   if (!def) { msg.warning('请先添加一个 AI 模型'); return }
   savingImage.value = true
   try {
-    await api.updateAiModel(def.id, {
+    await API.ai.updateModel(def.id, {
       image_base_url: imageForm.base_url || '',
       image_api_key: imageForm.api_key || '',
       image_model: imageForm.model || '',
@@ -347,7 +346,7 @@ async function onTestRewrite() {
   testingRewrite.value = true
   rewriteResult.value = '测试中…'
   try {
-    const r = await api.testRewrite(rewriteForm.base_url, rewriteForm.api_key, rewriteForm.model || 'gpt-4o-mini')
+    const r = await API.ai.testRewrite(rewriteForm.base_url, rewriteForm.api_key, rewriteForm.model || 'gpt-4o-mini')
     rewriteOk.value = !!(r as any)?.ok
     rewriteResult.value = (r as any)?.ok ? `✅ ${(r as any).msg}` : `❌ ${(r as any).msg}`
   } catch (e: any) {
@@ -363,7 +362,7 @@ async function fetchRewriteModels() {
   if (!rewriteForm.base_url) { msg.warning('请先填写 Base URL'); return }
   fetchingRewriteModels.value = true
   try {
-    const r = await api.fetchRewriteRemoteModels(rewriteForm.base_url, rewriteForm.api_key)
+    const r = await API.ai.fetchRewriteRemoteModels(rewriteForm.base_url, rewriteForm.api_key)
     rewriteRemoteModels.value = (r as any).models || []
     if (!rewriteRemoteModels.value.length) msg.warning('未获取到可用模型')
   } catch (e: any) { msg.error('获取失败：' + formatError(e)) }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 章节重写面板（#11 重写历史 + #13 扩写缩写/局部重写）
 // 对标 MuMuAINovel Chapters 重写功能
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 
 const props = defineProps<{
   chapterId: number | null
@@ -9,7 +9,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'applied'): void; (e: 'regenerated', content: string): void }>()
 
-const api = useBookApi()
 const msg = useMessage()
 
 const open = ref(false)
@@ -85,7 +84,7 @@ async function onRewrite() {
   rewriting.value = true
   rewriteResult.value = null
   try {
-    const r = await api.regenerateChapter(props.chapterId, { ...rewriteForm })
+    const r = await API.chapter.regenerate(props.chapterId, { ...rewriteForm })
     rewriteResult.value = r
     msg.success('重写完成')
     await loadHistory()
@@ -104,7 +103,7 @@ async function onApplyRewrite() {
   if (!rewriteResult.value || !props.chapterId) return
   if (!await msg.confirm('确认用重写内容覆盖原章节？')) return
   try {
-    await api.applyRegenTask(props.chapterId, rewriteResult.value.id)
+    await API.chapter.applyRegenTask(props.chapterId, rewriteResult.value.id)
     msg.success('已应用')
     open.value = false
     emit('applied')
@@ -174,7 +173,7 @@ async function loadHistory() {
   if (!props.chapterId) return
   loadingHistory.value = true
   try {
-    history.value = await api.getRegenTasks(props.chapterId)
+    history.value = await API.chapter.getRegenTasks(props.chapterId)
   } catch (e: any) {
     msg.error('加载历史失败：' + formatError(e))
   } finally {
@@ -184,7 +183,7 @@ async function loadHistory() {
 async function viewHistory(task: any) {
   if (!props.chapterId) return
   try {
-    historyDetail.value = await api.getRegenTaskDetail(props.chapterId, task.id)
+    historyDetail.value = await API.chapter.getRegenTaskDetail(props.chapterId, task.id)
   } catch (e: any) {
     msg.error('加载详情失败：' + formatError(e))
   }
@@ -193,7 +192,7 @@ async function applyHistory(task: any) {
   if (!props.chapterId) return
   if (!await msg.confirm(`确认应用「${task.version_note || '版本 ' + task.version_number}」覆盖当前章节？`)) return
   try {
-    await api.applyRegenTask(props.chapterId, task.id)
+    await API.chapter.applyRegenTask(props.chapterId, task.id)
     msg.success('已应用')
     open.value = false
     emit('applied')

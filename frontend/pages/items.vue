@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // 物品/道具管理：分类切换 + 卡片网格 + AI 生成 + CRUD
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '物品道具 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: items, refresh: refreshItems } = await useFetch(() => `/projects/${currentProjectId.value}/items`)
 const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
@@ -55,7 +54,7 @@ async function onGenerate() {
 async function doGenerate() {
   generating.value = true
   try {
-    const r = await api.generateItems({ count: genCount.value, category: genCategory.value, user_prompt: genReq.value })
+    const r = await API.item.generate({ count: genCount.value, category: genCategory.value, user_prompt: genReq.value })
     await refresh()
     showGen.value = false
     msg.success(`生成 ${r.count} 个物品`)
@@ -75,8 +74,8 @@ function openEdit(i: any) {
 async function onSave() {
   if (!form.name.trim()) return
   try {
-    if (editing.value) await api.updateItem(form.id, { ...form })
-    else await api.createItem({ ...form })
+    if (editing.value) await API.item.update(form.id, { ...form })
+    else await API.item.create({ ...form })
     showAdd.value = false
     await refresh()
     msg.success(editing.value ? '已更新' : '已添加')
@@ -84,7 +83,7 @@ async function onSave() {
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteItem(id); await refresh(); msg.success('已删除') }
+  try { await API.item.delete(id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 </script>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 批量生成面板（连续模式）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { useBackgroundTasks } from '~/composables/useBackgroundTasks'
 
@@ -9,7 +9,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'done'): void }>()
 
-const api = useBookApi()
 const msg = useMessage()
 const { trackTask } = useBackgroundTasks()
 const { currentProjectId } = useProject()
@@ -88,7 +87,7 @@ function openPanel() {
 
 async function loadWritingStyles() {
   try {
-    writingStyles.value = await api.listWritingStyles() || []
+    writingStyles.value = await API.writingStyles ||) || []
   } catch {}
 }
 
@@ -96,12 +95,12 @@ async function loadRemoteModels() {
   if (remoteModels.value.length && defaultModelName.value) return
   loadingModels.value = true
   try {
-    const r = await api.fetchDefaultRemoteModels()
+    const r = await API.ai.fetchDefaultRemoteModels()
     remoteModels.value = r.models || []
     defaultModelName.value = r.default_model || ''
   } catch {
     try {
-      const models = await api.listAiModels()
+      const models = await API.ai.listModels()
       const def = models.find((m: any) => m.is_default) || models[0]
       if (def?.model) defaultModelName.value = def.model
     } catch {}
@@ -113,7 +112,7 @@ async function loadRemoteModels() {
 async function loadProjectDefault() {
   if (!currentProjectId.value) return
   try {
-    const p = await api.getProject()
+    const p = await API.book.get()
     if (p) {
       projectDefaultPov.value = p.narrative_pov || '第三人称'
       projectDefaultStyleName.value = p.writing_style?.name || ''
@@ -124,7 +123,7 @@ async function loadProjectDefault() {
 
 async function checkActiveTask() {
   try {
-    const t = await api.getActiveBatchTask()
+    const t = await API.task.getActiveBatch()
     if (t && ['completed', 'failed', 'cancelled'].includes(t.status)) {
       currentTask.value = t
     }
@@ -143,7 +142,7 @@ async function onSubmit() {
   submitting.value = true
   try {
     if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
-    const r = await api.generateChapters(currentProjectId.value!, {
+    const r = await API.chapter.batchGenerate(currentProjectId.value!, {
       start: startChapterNumber.value,
       count: actualCount.value,
       targetWords: targetWords.value,

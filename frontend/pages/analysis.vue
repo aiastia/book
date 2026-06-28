@@ -1,15 +1,14 @@
 <script setup lang="ts">
 // 剧情分析：按章节展示分析维度，对标 MuMuAINovel Tab 布局
 
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '剧情分析 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: analyses, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/analyses`)
-const { data: chapters } = await api.getChapters()
+const { data: chapters } = await API.chapter.gets()
 
 // 选择章节查看详情
 const selectedChapter = ref<number | null>(null)
@@ -39,9 +38,9 @@ async function viewDetail(chapterNumber: number) {
   const cid = chapterIdByNumber(chapterNumber)
   try {
     const [r, ch, ann] = await Promise.all([
-      api.getAnalysis(chapterNumber).catch(() => null),
-      cid ? api.getChapter(cid).catch(() => null) : Promise.resolve(null),
-      cid ? api.getAnnotations(cid).catch(() => null) : Promise.resolve(null),
+      API.chapter.getAnalysis(chapterNumber).catch(() => null),
+      cid ? API.chapter.get(cid).catch(() => null) : Promise.resolve(null),
+      cid ? API.chapter.getAnnotations(cid).catch(() => null) : Promise.resolve(null),
     ])
     detail.value = r
     if (ch) chapterContent.value = ch.content || ''
@@ -192,7 +191,7 @@ const { trackTask } = useBackgroundTasks()
 async function analyzeChapter(chapterId: number, chapterNumber: number) {
   analyzing.value = true
   try {
-    const r = await api.triggerAnalysisAsync(chapterId)
+    const r = await API.chapter.triggerAnalysis(chapterId)
     if (r?.task_id) {
       trackTask({ id: r.task_id, task_type: 'chapter_analyze', title: `分析第${chapterNumber}章`, status: 'pending' })
       msg.success(`第${chapterNumber}章分析任务已提交，可在右下角查看进度`)
@@ -218,7 +217,7 @@ async function pollAnalysisTask(taskId: number, chapterNumber: number, onDone?: 
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 2000))
     try {
-      const t = await api.getTaskStatus(taskId)
+      const t = await API.task.getStatus(taskId)
       if (t.status === 'completed') {
         await refresh()
         await viewDetail(chapterNumber)
@@ -239,7 +238,7 @@ async function analyzeAll() {
   if (!await msg.confirm('将分析所有未分析的章节，可能需要较长时间。确认开始？')) return
   analyzingAll.value = true
   try {
-    const r = await api.analyzeAllUnanalyzed()
+    const r = await API.chapter.analyzeAll()
     if (r?.task_id) {
       trackTask({ id: r.task_id, task_type: 'chapter_batch_analyze', title: '批量剧情分析', status: 'pending' })
       msg.success('批量分析任务已提交，可在右下角查看进度')
@@ -260,7 +259,7 @@ async function pollBatchAnalysisTask(taskId: number) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 3000))
     try {
-      const t = await api.getTaskStatus(taskId)
+      const t = await API.task.getStatus(taskId)
       if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
         await refresh()
         if (selectedChapter.value) await viewDetail(selectedChapter.value)

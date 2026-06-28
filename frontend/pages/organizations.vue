@@ -1,14 +1,13 @@
 <script setup lang="ts">
 // 组织与势力：左右分栏（对标 MuMu Organizations.tsx）
 // 左侧组织列表（树形）+ 右侧选中组织详情 + 内嵌成员表格
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { useBackgroundTasks } from '~/composables/useBackgroundTasks'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: '组织与势力 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { onTaskCompleted } = useBackgroundTasks()
 const { data: tree, refresh: refreshTree } = await useFetch(() => `/projects/${currentProjectId.value}/organizations/tree`)
@@ -74,7 +73,7 @@ const genMembersLoading = ref(false)
 async function onAddMember() {
   if (!newMember.character_id || !selectedOrgId.value) return
   try {
-    await api.addOrgMember(selectedOrgId.value, { ...newMember })
+    await API.organization.addMember(selectedOrgId.value, { ...newMember })
     showAddMember.value = false
     newMember.character_id = null; newMember.position = ''
     await loadMembers(selectedOrgId.value)
@@ -90,7 +89,7 @@ function openEditMember(m: any) {
 async function onSaveMember() {
   if (!selectedOrgId.value || !editMemberId.value) return
   try {
-    await api.updateOrgMember(selectedOrgId.value, editMemberId.value, { ...newMember })
+    await API.organization.updateMember(selectedOrgId.value, editMemberId.value, { ...newMember })
     showEditMember.value = false; editMemberId.value = null
     await loadMembers(selectedOrgId.value); await refresh()
     msg.success('已更新')
@@ -98,7 +97,7 @@ async function onSaveMember() {
 }
 async function onRemoveMember(memberId: number) {
   if (!selectedOrgId.value) return
-  try { await api.removeOrgMember(selectedOrgId.value, memberId); await loadMembers(selectedOrgId.value); await refresh(); msg.success('已移除') }
+  try { await API.organization.removeMember(selectedOrgId.value, memberId); await loadMembers(selectedOrgId.value); await refresh(); msg.success('已移除') }
   catch (e: any) { msg.error('移除失败：' + formatError(e)) }
 }
 async function onGenMembers() {
@@ -106,7 +105,7 @@ async function onGenMembers() {
   if (!await msg.confirm('AI 将根据角色性格和组织特征，为该组织自动分配成员。确认开始？')) return
   genMembersLoading.value = true
   try {
-    const r = await api.generateOrgMembers(selectedOrgId.value, { user_prompt: '' })
+    const r = await API.organization.generateMembers(selectedOrgId.value, { user_prompt: '' })
     await loadMembers(selectedOrgId.value); await refresh()
     msg.success(`AI 分配了 ${r.count} 名成员`)
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
@@ -116,7 +115,7 @@ async function onGenMembers() {
 async function onGenerate() {
   generating.value = true
   try {
-    const { task_id } = await api.generateOrganizationAsync({ count: genCount.value, user_input: genReq.value })
+    const { task_id } = await API.organization.generateAsync({ count: genCount.value, user_input: genReq.value })
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'organizations', title: `生成 ${genCount.value} 个组织` })
     showGen.value = false
@@ -126,7 +125,7 @@ async function onGenerate() {
 }
 async function onAdd() {
   if (!newOrg.name.trim()) return
-  try { await api.createOrganization({ ...newOrg }); showAdd.value = false; newOrg.name = ''; await refresh() }
+  try { await API.organization.create({ ...newOrg }); showAdd.value = false; newOrg.name = ''; await refresh() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
 function openEdit(o: any) {
@@ -135,12 +134,12 @@ function openEdit(o: any) {
 }
 async function onSave() {
   if (!selectedOrgId.value) return
-  try { await api.updateOrganization(selectedOrgId.value, { ...editForm }); await refresh(); editing.value = null; msg.success('已保存') }
+  try { await API.organization.update(selectedOrgId.value, { ...editForm }); await refresh(); editing.value = null; msg.success('已保存') }
   catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteOrganization(id); selectedOrgId.value = null; selectedOrg.value = null; await refresh(); msg.success('已删除') }
+  try { await API.organization.delete(id); selectedOrgId.value = null; selectedOrg.value = null; await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
@@ -159,7 +158,7 @@ async function onInitAllMembers() {
   if (!await msg.confirm('AI 将为所有尚无成员的组织自动分配成员（已有成员的跳过）。确认开始？')) return
   initAllLoading.value = true
   try {
-    const r = await api.generateAllOrgMembers()
+    const r = await API.organization.generateAllMembers()
     await refresh()
     msg.success(`完成：${r.created} 个新成员分配至 ${r.results.filter((x:any) => !x.skipped && !x.error).length} 个组织`)
   } catch (e: any) { msg.error('失败：' + formatError(e)) }

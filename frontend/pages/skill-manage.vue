@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { apiGet } from '~/composables/useApi'
 useHead({ title: 'Skill 管理 — 墨语' })
 const msg = useMessage()
-const api = useBookApi()
 const { data: skills, refresh: refresh } = await useFetch(() => `/skills`)
 
 // 加载变量参考文档

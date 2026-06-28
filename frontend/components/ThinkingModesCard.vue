@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { apiGet } from '~/composables/useApi'
 
-const api = useBookApi()
 const { currentProjectId } = useProject()
 const msg = useMessage()
 
@@ -42,7 +41,7 @@ async function save() {
   if (!currentProjectId.value) return
   saving.value = true
   try {
-    await api.saveThinkingModes(modes.value)
+    await API.book.saveThinkingModes(modes.value)
     msg.success('已保存')
   } catch (e: any) { msg.error('保存失败') }
   finally { saving.value = false }

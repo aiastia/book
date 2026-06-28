@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { reactive } from 'vue'
 useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: project, refresh: refreshProject } = await useFetch(() => `/projects/${currentProjectId.value}`)
 const { data: outlines, refresh: refreshOutlines } = await useFetch(() => `/projects/${currentProjectId.value}/outlines`)
@@ -37,7 +36,7 @@ checkPendingEntities()
 // 预加载默认模型名（不阻塞，失败不影响使用）
 ;(async () => {
   try {
-    const models = await api.listAiModels()
+    const models = await API.ai.listModels()
     const def = models.find((m: any) => m.is_default) || models[0]
     if (def?.model) defaultModelName.value = def.model
   } catch {}
@@ -55,7 +54,7 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 const organizationOptions = ref<Array<{ name: string; org_type: string; label: string }>>([])
 async function loadCharacterOptions() {
   try {
-    const res = await api.getCharacters()
+    const res = await API.character.gets()
     const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({
       name: c.name,
@@ -66,7 +65,7 @@ async function loadCharacterOptions() {
 }
 async function loadOrganizationOptions() {
   try {
-    const res2 = await api.getOrganizations()
+    const res2 = await API.organization.list()
     const list2 = (res2 as any).data || (res2 as any) || []
     organizationOptions.value = list2.map(o => ({
       name: o.name,
@@ -258,7 +257,7 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
 async function onGenerate() {
   generating.value = true
   try {
-    const { task_id } = await api.generateOutlinesAsync(genCount.value)
+    const { task_id } = await API.outline.generateAsync(genCount.value)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_new', title: `生成${genCount.value}章大纲` })
     showGen.value = false
@@ -298,13 +297,13 @@ async function loadRemoteModels() {
   if (remoteModels.value.length && defaultModelName.value) return  // 已加载过
   loadingModels.value = true
   try {
-    const r = await api.fetchDefaultRemoteModels()
+    const r = await API.ai.fetchDefaultRemoteModels()
     remoteModels.value = r.models || []
     defaultModelName.value = r.default_model || ''
   } catch (e: any) {
     // 拉取失败，从本地配置取默认模型名
     try {
-      const models = await api.listAiModels()
+      const models = await API.ai.listModels()
       const def = models.find((m: any) => m.is_default) || models[0]
       if (def?.model) defaultModelName.value = def.model
     } catch {}
@@ -323,7 +322,7 @@ async function onContinue() {
     if (continueForm.other_requirements) params.other_requirements = continueForm.other_requirements
     if (continueForm.ai_model) params.ai_model = continueForm.ai_model
 
-    const { task_id } = await api.continueOutlinesAsync(params)
+    const { task_id } = await API.outline.continue(params)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_continue', title: `续写${continueForm.chapter_count}章大纲` })
     showContinue.value = false
@@ -336,7 +335,7 @@ async function onGenerateNewChars() {
   generatingChars.value = true
   try {
     for (const name of newCharNames.value) {
-      const { task_id } = await api.autoGenerateCharacterAsync({ specification: `请生成一个名为「${name}」的角色` })
+      const { task_id } = await API.character.generateAsync({ specification: `请生成一个名为「${name}」的角色` })
       const { trackTask } = useBackgroundTasks()
       trackTask({ id: task_id, task_type: 'characters', title: `生成角色「${name}」` })
     }
@@ -385,7 +384,7 @@ async function onSave() {
       const k = f.key.trim()
       if (k) extraObj[k] = f.value
     }
-    await api.updateOutline(orig.id, {
+    await API.outline.update(orig.id, {
       title: editForm.title,
       summary: editForm.summary,
       emotion: editForm.emotion,
@@ -415,7 +414,7 @@ async function onDelete(id: number) {
     : '确认删除此大纲？'
   if (!await msg.confirm(hint)) return
   try {
-    const res = await api.deleteOutline(id)
+    const res = await API.outline.delete(id)
     await refresh()
     if (res?.deleted_chapters) {
       msg.success(`已删除（含 ${res.deleted_chapters} 章正文）`)
@@ -454,7 +453,7 @@ async function doExpand() {
   const mode = expandMode.value
   expanding.value = true
   try {
-    const { task_id } = await api.expandOutlineAsync(expandTarget.value.id, {
+    const { task_id } = await API.outline.expandAsync(expandTarget.value.id, {
       target_chapter_count: expandCount.value,
       strategy: expandStrategy.value,
       mode,
@@ -499,7 +498,7 @@ function openBatchExpand() {
 async function doBatchExpand() {
   batchExpanding.value = true
   try {
-    const { task_id, pending_count } = await api.batchExpandOutlinesAsync({ target_chapter_count: batchCount.value })
+    const { task_id, pending_count } = await API.outline.batchExpand({ target_chapter_count: batchCount.value })
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_expand', title: `批量展开 ${pending_count} 卷大纲` })
     showBatchExpand.value = false
@@ -509,7 +508,7 @@ async function doBatchExpand() {
 }
 async function viewExpansion(o: any) {
   try {
-    const data = await api.getOutlineChapters(o.id)
+    const data = await API.outline.getChapters(o.id)
     previewData.value = { outline: o, ...data }
     // 默认选中第一个 tab
     activeTab.value = String(data.chapters?.[0]?.id || '')
@@ -520,7 +519,7 @@ async function viewExpansion(o: any) {
 async function deleteExpansion() {
   if (!previewData.value) return
   if (!await msg.confirm(`确认删除此大纲展开的所有 ${previewData.value.chapter_count} 章？`)) return
-  try { await api.deleteOutlineChapters(previewData.value.outline.id); await refresh(); showPreview.value = false; msg.success('已删除') }
+  try { await API.outline.deleteChapters(previewData.value.outline.id); await refresh(); showPreview.value = false; msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 </script>

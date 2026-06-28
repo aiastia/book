@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // 关系类型管理：增删改查项目中已用的关系类型
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '关系类型管理 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 
-const api = useBookApi()
 const msg = useMessage()
 const { data: types, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/relations/types`)
 
@@ -37,7 +36,7 @@ async function onAdd() {
   const name = newTypeName.value.trim()
   if (!name) { msg.warning('请输入类型名称'); return }
   try {
-    await api.createRelation({ from_character_id: 0, to_character_id: 0, relation_type: name, category: newTypeCategory.value, intimacy: 0, status: 'template' })
+    await API.relation.create({ from_character_id: 0, to_character_id: 0, relation_type: name, category: newTypeCategory.value, intimacy: 0, status: 'template' })
     newTypeName.value = ''
     newTypeCategory.value = 'social'
     showAdd.value = false
@@ -59,7 +58,7 @@ async function onRename() {
   const newName = renameTarget.value.trim()
   if (!oldName || !newName || oldName === newName) { renaming.value = null; return }
   try {
-    const res = await api.renameRelationType(oldName, newName)
+    const res = await API.relation.renameType(oldName, newName)
     renaming.value = null
     await refresh()
     msg.success(`已重命名「${oldName}」→「${newName}」（${(res as any).updated || 0} 条关系已更新）`)
@@ -71,13 +70,13 @@ function cancelRename() { renaming.value = null }
 async function onDeleteType(t: any) {
   // 排除占位模板
   if (t.count === 0 || t.name === 'template') {
-    try { await api.deleteRelationType(t.name); await refresh(); msg.success(`已删除「${t.name}」`) }
+    try { await API.relation.deleteType(t.name); await refresh(); msg.success(`已删除「${t.name}」`) }
     catch (e: any) { msg.error('删除失败：' + formatError(e)) }
     return
   }
   if (!await msg.confirm(`确定删除「${t.name}」？${t.count} 条关系将被改为"相识"。`)) return
   try {
-    await api.deleteRelationType(t.name)
+    await API.relation.deleteType(t.name)
     await refresh()
     msg.success(`已删除「${t.name}」（${t.count} 条关系已改为相识）`)
   } catch (e: any) { msg.error('删除失败：' + formatError(e)) }

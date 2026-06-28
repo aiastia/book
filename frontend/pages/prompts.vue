@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 useHead({ title: '提示词模板 — 墨语' })
-const api = useBookApi()
 const msg = useMessage()
 
 const { data: templates, refresh: refresh } = await useFetch(() => `/prompt-templates`)
@@ -48,7 +47,7 @@ async function selectTemplate(id: number) {
   versions.value = []
   activeVersion.value = null
   try {
-    const vers = await api.listPromptVersions(id)
+    const vers = await API.prompt.listVersions(id)
     versions.value = vers || []
     activeVersion.value = versions.value.find((v: any) => v.is_active) || versions.value[0] || null
   } catch {
@@ -60,7 +59,7 @@ async function selectTemplate(id: number) {
 async function activateVersion(v: any) {
   if (!selectedId.value) return
   try {
-    await api.activatePromptVersion(selectedId.value, v.id)
+    await API.prompt.activateVersion(selectedId.value, v.id)
     activeVersion.value = v
     versions.value = versions.value.map((ver: any) => ({ ...ver, is_active: ver.id === v.id }))
     msg.success(`已切换到版本 v${v.version}`)
@@ -83,7 +82,7 @@ async function onCreateVersion() {
   }
   creating.value = true
   try {
-    await api.createPromptVersion(selectedId.value, {
+    await API.prompt.createVersion(selectedId.value, {
       system_prompt: newVersionPrompt.value,
       user_prompt: '',
     })
@@ -101,7 +100,7 @@ async function onCreateVersion() {
 async function onDeleteTemplate(t: any) {
   if (!await msg.confirm('确认删除此自定义模板？此操作不可恢复。')) return
   try {
-    await api.deletePromptTemplate(t.id)
+    await API.prompt.delete(t.id)
     if (selectedId.value === t.id) selectedId.value = null
     msg.success('已删除')
     await refresh()

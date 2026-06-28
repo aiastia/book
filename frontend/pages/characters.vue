@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // 角色设定：对标参考站 — 卡片网格，每个角色内容平铺（描述列表风格）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 
 useHead({ title: '角色设定 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { onTaskCompleted } = useBackgroundTasks()
 
@@ -22,7 +21,7 @@ const { data: characters, refresh: refreshChars } = await useFetch(() => `/proje
 // 加载职业体系，供「职业」字段下拉使用
 const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 加载组织列表，供「所属组织」字段下拉使用
-const { data: organizations } = await api.getOrganizations()
+const { data: organizations } = await API.organization.list()
 const occupationOptions = computed(() => {
   const list = (careers.value || []).map((c: any) => c.name).filter(Boolean)
   // 去重
@@ -101,7 +100,7 @@ const trackableFields = [
   { key: 'main_career_stage_desc', label: '境界' },
 ]
 async function loadChangeLogs(charId: number) {
-  const res = await api.getCharacterChangeLogs(charId)
+  const res = await API.character.getChangeLogs(charId)
   const d = (res as any)?.data
   changeLogs.value = (d?.value ?? d ?? []) as any[]
 }
@@ -115,7 +114,7 @@ async function onAddLog() {
   const charId = logCharacter.value?.id
   if (!charId || !newLog.chapter_number) { msg.warning('请输入章节号'); return }
   try {
-    await api.createCharacterChangeLog(charId, {
+    await API.character.createChangeLog(charId, {
       chapter_number: newLog.chapter_number,
       summary: newLog.summary,
       changed_fields: newLog.changed_fields,
@@ -130,7 +129,7 @@ async function onDeleteLog(logId: number) {
   if (!charId) return
   if (!await msg.confirm('确认删除此变化记录？')) return
   try {
-    await api.deleteCharacterChangeLog(charId, logId)
+    await API.character.deleteChangeLog(charId, logId)
     await loadChangeLogs(charId)
     msg.success('已删除')
   } catch (e: any) { msg.error('删除失败：' + formatError(e)) }
@@ -144,7 +143,7 @@ function toggleChangedField(key: string) {
 }
 
 async function loadCharOrgs(charId: number) {
-  const res = await api.getCharacterOrganizations(charId)
+  const res = await API.character.getOrganizations(charId)
   const d = (res as any)?.data
   charOrgs.value = (d?.value ?? d ?? []) as any[]
 }
@@ -187,14 +186,14 @@ async function onGenerate() {
   try {
     if (genCount.value > 1) {
       // 数量>1 走批量生成
-      const { task_id } = await api.batchGenerateCharactersAsync({ count: genCount.value, requirements: `${genRole.value}。${extra}` })
+      const { task_id } = await API.chapter.batchGenerateCharactersAsync({ count: genCount.value, requirements: `${genRole.value}。${extra}` })
       const { trackTask } = useBackgroundTasks()
       trackTask({ id: task_id, task_type: 'characters', title: `批量生成${genCount.value}个角色` })
 	      showGen.value = false
 	      msg.success('批量生成任务已提交，可在右下角查看进度')
 	    } else {
 	      // 单个生成也走异步任务，避免前台阻塞
-	      const { task_id } = await api.batchGenerateCharactersAsync({ count: 1, requirements: `${genRole.value}。${extra}` })
+	      const { task_id } = await API.chapter.batchGenerateCharactersAsync({ count: 1, requirements: `${genRole.value}。${extra}` })
 	      const { trackTask } = useBackgroundTasks()
 	      trackTask({ id: task_id, task_type: 'characters', title: `生成${genRole.value}角色` })
 	      showGen.value = false
@@ -211,7 +210,7 @@ async function onBatch() {
     if (totalCount === 0) { msg.warning('请至少设置一种角色数量'); return }
     const roleDesc = roleList.map(r => `${r.role}${r.count}个`).join('、')
     const reqText = `请生成${roleDesc}。${batchReq.value}`
-    const { task_id } = await api.batchGenerateCharactersAsync({ count: totalCount, requirements: reqText })
+    const { task_id } = await API.chapter.batchGenerateCharactersAsync({ count: totalCount, requirements: reqText })
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'characters', title: `批量生成${totalCount}个角色（${roleDesc}）` })
 	    showBatch.value = false
@@ -249,7 +248,7 @@ async function onSave() {
         stage_desc: sc.stage_desc || '',
       }))
     const payload = { ...editForm, sub_careers: subs }
-    await api.updateCharacter(editing.value.id, payload)
+    await API.character.update(editing.value.id, payload)
     await refresh()
     editing.value = null
     msg.success('已保存')
@@ -258,7 +257,7 @@ async function onSave() {
 
 async function onDelete(id:number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteCharacter(id); await refresh(); msg.success('已删除') }
+  try { await API.character.delete(id); await refresh(); msg.success('已删除') }
   catch (e:any) { msg.error('删除失败：'+formatError(e)) }
 }
 const roleColor: Record<string,string> = { '主角':'error', '反派':'warning', '配角':'processing', '路人':'default' }
@@ -274,7 +273,7 @@ function toggleExpand(id: number) {
 const charRelations = ref<Record<number, string[]>>({})
 async function loadAllRelations() {
   try {
-    const res = await api.getRelations()
+    const res = await API.relation.list()
     const d = (res as any)?.data
     const rels = (d?.value ?? d ?? []) as any[]
     const map: Record<number, string[]> = {}

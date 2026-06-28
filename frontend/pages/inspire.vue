@@ -1,10 +1,9 @@
 <script setup lang="ts">
 // 灵感模式：逐步向导 + 快速模式
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 
 import { useProject } from '~/composables/useProject'
 useHead({ title: '灵感模式 — 墨语' })
-const api = useBookApi()
 const msg = useMessage()
 const { currentProjectId } = useProject()
 const { startLegacy } = useBackgroundTasks()
@@ -78,7 +77,7 @@ async function onStepNext() {
 
     let res: any
     // 灵感模式不依赖项目上下文，统一用全局接口（避免项目被删后 404）
-    res = await api.globalInspirationStep(stepName, body)
+    res = await API.global.inspirationStep(stepName, body)
     currentOptions.value = res?.options || []
     currentPrompt.value = res?.prompt || ''
     step.value++
@@ -125,7 +124,7 @@ async function onQuickComplete() {
     if (stepResults.title) body.title = stepResults.title
     if (stepResults.description) body.description = stepResults.description
     let res: any
-    res = await api.globalInspirationQuickComplete(body)
+    res = await API.global.inspirationQuickComplete(body)
     quickResult.value = res
   } catch (e: any) {
     msg.error('快速补全失败：' + formatError(e))

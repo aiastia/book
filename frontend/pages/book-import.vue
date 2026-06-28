@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { UploadOutlined, LoadingOutlined } from '@ant-design/icons-vue'
 useHead({ title: '拆书导入 — 墨语' })
 const msg = useMessage()
-const api = useBookApi()
 const { data: imported, refresh } = await useApi<any[]>('/api/imported-books', { key: 'imported-books' })
 const uploading = ref(false)
 const fileList = ref<any[]>([])
@@ -35,7 +34,7 @@ async function handleUpload(options: any) {
       reader.onerror = () => reject(new Error('读取文件失败'))
       reader.readAsDataURL(file)
     })
-    await api.uploadBookImport({ filename: file.name, base64 })
+    await API.bookImport.upload({ filename: file.name, base64 })
     msg.success('导入成功！已解析章节并入库')
     await refresh()
   } catch (e: any) {
@@ -48,7 +47,7 @@ async function handleUpload(options: any) {
 async function onDeleteImport(b: any) {
   if (!await msg.confirm('确认删除此导入记录？')) return
   try {
-    await api.deleteImportedBook(b.id)
+    await API.bookImport.delete(b.id)
     msg.success('已删除')
     await refresh()
   } catch { msg.error('删除失败') }
@@ -69,7 +68,7 @@ async function onDeconstruct() {
   parseLoading.value = true
   parseStep.value = 2
   try {
-    const res = await api.bookImportDeconstruct(parseTarget.value.id, {
+    const res = await API.bookImport.deconstruct(parseTarget.value.id, {
       sample_side: sampleSide.value,
       sample_count: sampleCount.value,
       outline_chapters: outlineChapters.value,

@@ -1,17 +1,16 @@
 <script setup lang="ts">
 // 章节阅读器（#8）：带记忆标注的阅读视图
 // 左侧章节正文（带高亮标注）+ 右侧标注侧边栏（按类型分组，点击定位）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 
 useHead({ title: '章节阅读 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const route = useRoute()
 
-const { data: chapters } = await api.getChapters()
+const { data: chapters } = await API.chapter.gets()
 const selectedId = ref<number | null>(null)
 const chapter = ref<any>(null)
 const annotations = ref<any[]>([])
@@ -33,9 +32,9 @@ async function selectChapter(id: number) {
   loading.value = true
   try {
     // 章节详情
-    chapter.value = await api.getChapter(id)
+    chapter.value = await API.chapter.get(id)
     // 标注（有则展示高亮，无则纯正文阅读，不打扰）
-    const r = await api.getAnnotations(id)
+    const r = await API.chapter.getAnnotations(id)
     annotations.value = r.annotations || []
     summary.value = r.summary || {}
   } catch (e: any) {

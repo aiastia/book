@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 
 const props = defineProps<{
   visible: boolean
@@ -14,7 +14,6 @@ const emit = defineEmits<{
   (e: 'rewriteComplete', content: string): void
 }>()
 
-const api = useBookApi()
 const msg = useMessage()
 
 const instructions = ref('')
@@ -50,7 +49,7 @@ async function onSubmit() {
 
   rewriting.value = true
   try {
-    const r = await api.regenerateChapter(props.chapterId, {
+    const r = await API.chapter.regenerate(props.chapterId, {
       modification_instructions: instructions.value.trim(),
       focus_areas: [],
       preserve_elements: [],

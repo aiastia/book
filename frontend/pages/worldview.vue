@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // 世界设定：对标参考站 — 基础信息卡 + 世界观卡 + 详细设定卡（标签+值描述列表）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '世界设定 — 墨语' })
 const { currentProjectId, currentProjectInfo } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: project, refresh: refreshProject } = await useFetch(() => `/projects/${currentProjectId.value}`)
 const { data: worlds, refresh: refreshWorlds } = await useFetch(() => `/projects/${currentProjectId.value}/worldview`)
@@ -24,7 +23,7 @@ function openEditBasic() {
   editingBasic.value = true
 }
 async function onSaveBasic() {
-  try { await api.updateProject({ ...basicForm }); await refreshProject(); editingBasic.value = false; msg.success('已保存') }
+  try { await API.book.update({ ...basicForm }); await refreshProject(); editingBasic.value = false; msg.success('已保存') }
   catch (e:any) { msg.error('保存失败：'+formatError(e)) }
 }
 const coreForm = reactive({ world_time_period: '', world_location: '', world_atmosphere: '', world_rules: '' })
@@ -45,7 +44,7 @@ const categories = ['地理', '历史', '种族', '势力', '修炼体系', '科
 async function onGenCore() {
   if (!await msg.confirm('AI 将重新生成核心世界观（时间/地点/氛围/规则），已有内容将被覆盖。确认开始？')) return
   genAll.value = true
-  try { await api.generateWorldCore(); await refreshCore(); msg.success('核心世界观已生成') }
+  try { await API.world.generateCore(); await refreshCore(); msg.success('核心世界观已生成') }
   catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { genAll.value = false }
 }
@@ -53,7 +52,7 @@ async function onGenDetail() {
   if (!await msg.confirm('AI 将生成详细世界观设定条目（根据题材自适应类别），已有条目不受影响。确认开始？')) return
   genAll.value = true
   try {
-    await api.generateWorld({ genre: currentProjectInfo.value?.genre || '', idea: (worldCore.value?.world_rules || '') + ' ' + (worldCore.value?.world_location || '') })
+    await API.world.generate({ genre: currentProjectInfo.value?.genre || '', idea: (worldCore.value?.world_rules || '') + ' ' + (worldCore.value?.world_location || '') })
     await refreshWorlds(); msg.success('详细设定已生成')
   } catch (e: any) { msg.error('生成失败：' + formatError(e)) }
   finally { genAll.value = false }
@@ -64,30 +63,30 @@ function openEditCore() {
   editingCore.value = true
 }
 async function onSaveCore() {
-  try { await api.updateWorldCore({ ...coreForm }); await refreshCore(); editingCore.value = false; msg.success('已保存') }
+  try { await API.world.updateCore({ ...coreForm }); await refreshCore(); editingCore.value = false; msg.success('已保存') }
   catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 function openEditDetail(w: any) { editingDetail.value = w; Object.assign(detailForm, { name: w.name, category: w.category||'其他', content: w.content||'' }) }
 async function onSaveDetail() {
-  try { await api.updateWorld(editingDetail.value.id, { ...detailForm, structure: {} }); await refreshWorlds(); editingDetail.value = null; msg.success('已保存') }
+  try { await API.world.update(editingDetail.value.id, { ...detailForm, structure: {} }); await refreshWorlds(); editingDetail.value = null; msg.success('已保存') }
   catch (e: any) { msg.error('保存失败：' + formatError(e)) }
 }
 async function onDeleteDetail(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteWorld(id); await refreshWorlds(); msg.success('已删除') }
+  try { await API.world.delete(id); await refreshWorlds(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 const showAdd = ref(false)
 const newWorld = reactive({ name: '', category: '地理', content: '' })
 async function onAdd() {
   if (!newWorld.name.trim()) return
-  try { await api.createWorld({ ...newWorld }); showAdd.value = false; newWorld.name=''; newWorld.content=''; await refreshWorlds() }
+  try { await API.world.create({ ...newWorld }); showAdd.value = false; newWorld.name=''; newWorld.content=''; await refreshWorlds() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
 async function onReindexWorldVectors() {
   reindexingWorlds.value = true
   try {
-    const r = await api.reindexWorldVectors()
+    const r = await API.world.reindexVectors()
     msg.success(r.message || `已提交 ${r.total} 条数据的向量同步`)
   } catch (e: any) { msg.error('同步失败：' + formatError(e)) }
   finally { reindexingWorlds.value = false }

@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // 故事记忆：列表 + 类型筛选 + 向量语义搜索 + 统计
 // 对标 MuMuAINovel memories 页面。记忆由剧情分析自动提取，本页提供管理与语义检索。
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '故事记忆 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: memories, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/memories?limit=100`)
 const { data: stats } = await api.getMemoryStats()
@@ -86,12 +85,12 @@ async function onReindex() {
 // 删除/清空
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除这条记忆？')) return
-  try { await api.deleteMemory(id); await refresh(); msg.success('已删除') }
+  try { await API.memory.delete(id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 async function onClearAll() {
   if (!await msg.confirm('确认清空所有记忆？此操作不可恢复！')) return
-  try { await api.clearMemories(); await refresh(); msg.success('已清空') }
+  try { await API.memory.clear(); await refresh(); msg.success('已清空') }
   catch (e: any) { msg.error('清空失败：' + formatError(e)) }
 }
 
@@ -101,7 +100,7 @@ const newMemory = reactive({ memory_type: 'manual', title: '', content: '', impo
 async function onAdd() {
   if (!newMemory.content.trim()) return
   try {
-    await api.createMemory({ ...newMemory })
+    await API.memory.create({ ...newMemory })
     showAdd.value = false
     newMemory.content = ''; newMemory.title = ''
     await refresh()

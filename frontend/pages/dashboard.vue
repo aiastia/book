@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 仪表盘：当前项目的统计 + 快捷操作
 // 基于后端项目级接口
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 
 useHead({ title: '仪表盘 — 墨语' })
@@ -9,7 +9,6 @@ useHead({ title: '仪表盘 — 墨语' })
 const { currentProjectId, currentProjectInfo, syncFromQuery, projectUrl } = useProject()
 syncFromQuery()
 
-const api = useBookApi()
 
 // 重定向：如果没有选择项目，跳到书架
 if (!currentProjectId.value) {
@@ -20,14 +19,14 @@ if (!currentProjectId.value) {
 const aiConfigured = ref<boolean | null>(null)
 async function checkAiConfig() {
   try {
-    const models = await api.listAiModels()
+    const models = await API.ai.listModels()
     aiConfigured.value = Array.isArray(models) && models.length > 0
   } catch {
     // auth 可能未就绪，2秒后重试一次
     if (aiConfigured.value === null) {
       setTimeout(async () => {
         try {
-          const models2 = await api.listAiModels()
+          const models2 = await API.ai.listModels()
           aiConfigured.value = Array.isArray(models2) && models2.length > 0
         } catch { aiConfigured.value = true /* 失败不报，静默跳过 */ }
       }, 2000)
@@ -88,7 +87,7 @@ const imageConfigured = ref(false)
 
 async function checkImageConfig() {
   try {
-    const models = await api.listAiModels()
+    const models = await API.ai.listModels()
     const def = models.find((m: any) => m.is_default) || models[0]
     imageConfigured.value = !!(def?.image_base_url && def?.image_api_key && def?.image_model)
   } catch (_) { /* ignore */ }
@@ -98,7 +97,7 @@ checkImageConfig()
 async function onGenerateCover() {
   coverLoading.value = true
   try {
-    const res = await api.generateCoverPrompt()
+    const res = await API.ai.generateCoverPrompt()
     coverPrompt.value = typeof res.cover_prompt === 'string' ? res.cover_prompt : JSON.stringify(res.cover_prompt, null, 2)
     showCover.value = true
   } catch (e: any) {
@@ -112,7 +111,7 @@ async function onGenerateImage() {
   if (!coverPrompt.value) { msg.warning('请先生成提示词'); return }
   imageLoading.value = true
   try {
-    const res = await api.generateCoverImage(coverPrompt.value)
+    const res = await API.ai.generateCoverImage(coverPrompt.value)
     msg.success('封面已生成')
     showCover.value = false
     if (project.value) project.value.cover_url = res.cover_url

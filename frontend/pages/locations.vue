@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // 地点/地图管理：树形结构 + 卡片 + AI 生成 + CRUD
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '地点地图 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: tree, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/locations/tree`)
 
@@ -78,7 +77,7 @@ async function doGenerate() {
   try {
     const params: any = { count: genCount.value, location_type: genType.value, user_prompt: genReq.value }
     if (genParentId.value) params.parent_location_id = genParentId.value
-    const r = await api.generateLocations(params)
+    const r = await API.location.generate(params)
     await refresh()
     showGen.value = false
     msg.success(`生成 ${r.count} 个${genParentId.value ? '子' : ''}地点`)
@@ -98,8 +97,8 @@ function openEdit(l: any) {
 async function onSave() {
   if (!form.name.trim()) return
   try {
-    if (editing.value) await api.updateLocation(form.id, { ...form })
-    else await api.createLocation({ ...form })
+    if (editing.value) await API.location.update(form.id, { ...form })
+    else await API.location.create({ ...form })
     showAdd.value = false
     await refresh()
     msg.success(editing.value ? '已更新' : '已添加')
@@ -107,7 +106,7 @@ async function onSave() {
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？子地点将提升为顶级。')) return
-  try { await api.deleteLocation(id); await refresh(); msg.success('已删除') }
+  try { await API.location.delete(id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 </script>

@@ -5,20 +5,19 @@ import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '角色关系 — 墨语' })
 const { currentProjectId, projectUrl } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 
-const api = useBookApi()
 const msg = useMessage()
 const { data: graph, refresh: refreshGraph } = await useFetch(() => `/projects/${currentProjectId.value}/relations/graph`)
 const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 // 全量关系列表（含 id，供表格编辑/删除用）
 const relationsData = ref<any[]>([])
 async function loadRelations() {
-  const res = await api.getRelations()
+  const res = await API.relation.list()
   // useApi 返回 AsyncData，其 data 是 Ref
   const d = (res as any)?.data
   relationsData.value = (d?.value ?? d ?? []) as any[]
@@ -86,9 +85,9 @@ async function onSave() {
   try {
     const body: any = { ...form }
     if (editing.value) {
-      await api.updateRelation(editing.value.id, body)
+      await API.relation.update(editing.value.id, body)
     } else {
-      await api.createRelation(body)
+      await API.relation.create(body)
     }
     showForm.value = false
     await refresh()
@@ -103,7 +102,7 @@ async function onSave() {
 async function onDelete(record: any) {
   if (!await msg.confirm('确认删除此关系？')) return
   try {
-    await api.deleteRelation(record.id)
+    await API.relation.delete(record.id)
     await refresh()
     await loadRelations()
     msg.success('已删除')
@@ -133,7 +132,7 @@ async function onAddType() {
   const name = newTypeName.value.trim()
   if (!name) { msg.warning('请输入类型名称'); return }
   try {
-    await api.createRelation({ from_character_id: 0, to_character_id: 0, relation_type: name, category: newTypeCategory.value, intimacy: 0, status: 'template' })
+    await API.relation.create({ from_character_id: 0, to_character_id: 0, relation_type: name, category: newTypeCategory.value, intimacy: 0, status: 'template' })
     newTypeName.value = ''; newTypeCategory.value = 'social'; showAddType.value = false
     await refreshTypes(); await refresh()
     msg.success(`已添加「${name}」`)
@@ -145,7 +144,7 @@ async function onRenameType() {
   if (!oldName || !newName) { msg.warning('名称不能为空'); return }
   try {
     if (oldName !== newName) {
-      await api.renameRelationType(oldName, newName)
+      await API.relation.renameType(oldName, newName)
     }
     renamingType.value = null; await refreshTypes(); await refresh()
     msg.success(oldName !== newName ? `已重命名「${oldName}」→「${newName}」` : '已保存')
@@ -153,7 +152,7 @@ async function onRenameType() {
 }
 async function onDeleteTypeItem(t: any) {
   if (!await msg.confirm(`确定删除「${t.name}」？${t.count || 0} 条关系将被改为"相识"。`)) return
-  try { await api.deleteRelationType(t.name); await refreshTypes(); await refresh(); msg.success(`已删除「${t.name}」`) }
+  try { await API.relation.deleteType(t.name); await refreshTypes(); await refresh(); msg.success(`已删除「${t.name}」`) }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
@@ -168,7 +167,7 @@ async function loadAllChangeLogs() {
     for (const r of relationsData.value) {
       if (!r.id) continue
       try {
-        const res = await api.getRelationChangeLogs(r.id)
+        const res = await API.relation.getChangeLogs(r.id)
         const d = (res as any)?.data
         const logs = (d?.value ?? d ?? []) as any[]
         for (const log of logs) {
@@ -215,7 +214,7 @@ function formatChanges(fields: Record<string, any>): string {
 async function onDeleteLog(logId: number, relationId: number) {
   if (!await msg.confirm('确认删除此变化记录？')) return
   try {
-    await api.deleteRelationChangeLog(relationId, logId)
+    await API.relation.deleteChangeLog(relationId, logId)
     await loadAllChangeLogs()
     msg.success('已删除')
   } catch (e: any) {
@@ -334,7 +333,7 @@ async function rebuild() {
   showRebuild.value = true
   msg.info('AI 正在分析角色关系，请耐心等待…')
   try {
-    await api.autoRebuildRelations()
+    await API.relation.autoRebuild()
     msg.success('AI 已重新分析角色关系')
     await refresh()
     await loadRelations()

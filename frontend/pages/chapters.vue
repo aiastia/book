@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 故事章节：对标 MuMuAINovel — 双模式列表 + 生成门槛 + 一键分析
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
@@ -9,13 +9,12 @@ import RewriteSuggestionModal from '~/components/RewriteSuggestionModal.vue'
 useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 
 // 预加载默认模型名（不阻塞，失败不影响使用）
 ;(async () => {
   try {
-    const models = await api.listAiModels()
+    const models = await API.ai.listModels()
     const def = models.find((m: any) => m.is_default) || models[0]
     if (def?.model) defaultModelName.value = def.model
   } catch {}
@@ -93,7 +92,7 @@ async function onRewriteSuggestionComplete(newContent: string) {
   const ch = rewriteSuggestChapter.value
   if (!ch) return
   try {
-    const full = await api.getChapter(ch.id)
+    const full = await API.chapter.get(ch.id)
     rewriteOriginal.value = full?.content || ''
   } catch {
     rewriteOriginal.value = ch.content || ''
@@ -109,7 +108,7 @@ async function onApplyRewriteCompare() {
   const ch = rewriteCompareChapter.value
   if (!ch) return
   try {
-    await api.updateChapter(ch.id, { content: rewriteNew.value })
+    await API.chapter.update(ch.id, { content: rewriteNew.value })
     msg.success('已应用新内容')
     rewriteCompareOpen.value = false
     rewriteCompareChapter.value = null
@@ -296,7 +295,7 @@ const cleaningUp = ref(false)
 async function onCleanupAnalyses() {
   cleaningUp.value = true
   try {
-    const res = await api.cleanupDuplicateAnalyses()
+    const res = await API.chapter.cleanupAnalyses()
     msg.success(`已清理 ${res?.deleted ?? 0} 条重复分析记录`)
   } catch (e: any) { msg.error('清理失败：' + formatError(e)) }
   finally { cleaningUp.value = false }
@@ -304,7 +303,7 @@ async function onCleanupAnalyses() {
 async function onBatchAnalyze() {
   batchAnalyzing.value = true
   try {
-    const res = await api.analyzeAllUnanalyzed()
+    const res = await API.chapter.analyzeAll()
     if (res?.task_id) {
       trackBgTask({ id: res.task_id, task_type: 'chapter_batch_analyze', title: '批量剧情分析', status: 'pending' })
       msg.success('批量分析任务已提交，可在右下角查看进度')
@@ -327,7 +326,7 @@ async function onExportTxt() {
     const token = localStorage.getItem('moyu_token')
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
-    const downloadUrl = api.exportProject(currentProjectId.value!, 'txt') as string
+    const downloadUrl = API.book.export(currentProjectId.value!, 'txt') as string
     const res = await fetch(downloadUrl, { headers })
     if (!res.ok) throw new Error(`导出失败：${res.status}`)
     const blob = await res.blob()
@@ -353,7 +352,7 @@ async function openEditor(c: any) {
   projectDefaultStyleId.value = projectData.value?.writing_style?.style_id
 
   // 加载章节内容
-  const ch = await api.getChapter(c.id).catch(() => null)
+  const ch = await API.chapter.get(c.id).catch(() => null)
   if (ch) editingContent.value = ch.content || ''
   rawOutput.value = ch?.raw_output || ''
 
@@ -415,7 +414,7 @@ async function loadModelsIfEmpty() {
   } catch {
     // 远程拉取失败，从本地配置取默认模型名
     try {
-      const models = await api.listAiModels()
+      const models = await API.ai.listModels()
       const def = models.find((m: any) => m.is_default) || models[0]
       if (def?.model) defaultModelName.value = def.model
     } catch {}
@@ -432,7 +431,7 @@ async function onGenerate() {
   generating.value = true
   try {
     const styleObj = selectedStyleId.value ? writingStyles.value.find((s:any) => s.id === selectedStyleId.value) : undefined
-    const { task_id } = await api.generateChapterAsync(
+    const { task_id } = await API.chapter.generateAsync(
       editing.value.id,
       selectedSkillKey.value || undefined,
       styleObj,
@@ -460,7 +459,7 @@ async function onSave() {
   if (!editing.value) return
   saving.value = true
   try {
-    await api.updateChapter(editing.value.id, {
+    await API.chapter.update(editing.value.id, {
       title: editingTitle.value,
       content: editingContent.value,
       status: 'completed',
@@ -486,7 +485,7 @@ async function clearContent() {
   )
   if (!cascade && !await msg.confirm(`确认清空第${chNum}章？`)) return
   try {
-    const res = await api.clearChapter(editing.value.id, cascade)
+    const res = await API.chapter.clear(editing.value.id, cascade)
     editingContent.value = ''
     await refreshList()
     if (cascade) {
@@ -500,7 +499,7 @@ async function clearContent() {
 // ===== 从大纲创建 =====
 async function createFromOutline(o: any) {
   try {
-    await api.createChapter({ chapter_number: o.chapter_number, title: o.title, outline_id: o.id })
+    await API.chapter.create({ chapter_number: o.chapter_number, title: o.title, outline_id: o.id })
     await refreshList()
     msg.success(`第${o.chapter_number}章已创建`)
   } catch (e: any) {
@@ -516,7 +515,7 @@ async function createAllFromOutlines() {
   let created = 0
   try {
     for (const o of uncreated) {
-      await api.createChapter({ chapter_number: o.chapter_number, title: o.title, outline_id: o.id })
+      await API.chapter.create({ chapter_number: o.chapter_number, title: o.title, outline_id: o.id })
       created++
     }
     await refreshList()
@@ -544,7 +543,7 @@ function openManualCreate() {
 
 async function onManualCreate() {
   try {
-    await api.createChapter({
+    await API.chapter.create({
       chapter_number: manualCreateNo.value,
       title: manualCreateTitle.value,
       outline_id: manualCreateOutlineId.value,
@@ -561,7 +560,7 @@ async function onManualCreate() {
 async function createNewChapter() {
   const nextNo = (chapters.value?.length || 0) + 1
   try {
-    await api.createChapter({ chapter_number: nextNo, title: `第 ${nextNo} 章` })
+    await API.chapter.create({ chapter_number: nextNo, title: `第 ${nextNo} 章` })
     await refreshList()
     msg.success('已创建')
   } catch (e: any) {
@@ -573,7 +572,7 @@ async function createNewChapter() {
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
   try {
-    await api.deleteChapter(id)
+    await API.chapter.delete(id)
     await refreshList()
     msg.success('已删除')
   } catch (e: any) {
@@ -592,7 +591,7 @@ function openModify(c: any) {
 async function onModify() {
   if (!modifyChapter.value) return
   try {
-    await api.updateChapter(modifyChapter.value.id, {
+    await API.chapter.update(modifyChapter.value.id, {
       title: modifyTitle.value,
       status: modifyStatus.value,
     })
@@ -608,7 +607,7 @@ async function onModify() {
 async function onRewriteApplied() {
   if (!editing.value) return
   try {
-    const ch = await api.getChapter(editing.value.id).catch(() => null)
+    const ch = await API.chapter.get(editing.value.id).catch(() => null)
     if (ch) {
       editingContent.value = ch.content || ''
       editingTitle.value = ch.title || editingTitle.value
@@ -641,7 +640,7 @@ async function onDenoise() {
   if (!denoiseText.value.trim()) return
   denoising.value = true
   try {
-    const r = await api.aiDenoising({ text: denoiseText.value })
+    const r = await API.chapter.aiDenoising({ text: denoiseText.value })
     denoiseResult.value = r.processed_text || ''
     denoisePreview.value = true
   } catch (e: any) {
@@ -663,7 +662,7 @@ const pureReaderChapter = ref<any>(null)
 const pureReaderLoading = ref(false)
 
 async function fetchChapterForReader(id: number): Promise<any> {
-  return await api.getChapter(id)
+  return await API.chapter.get(id)
 }
 
 // 全屏沉浸式阅读：打开纯阅读 Modal
@@ -739,9 +738,9 @@ async function openReader(c: any) {
   readerAnnotations.value = []
   readerSummary.value = {}
   try {
-    const ch = await api.getChapter(c.id)
+    const ch = await API.chapter.get(c.id)
     readerChapter.value = ch
-    const r = await api.getAnnotations(c.id)
+    const r = await API.chapter.getAnnotations(c.id)
     readerAnnotations.value = r.annotations || []
     readerSummary.value = r.summary || {}
   } catch (e: any) {
@@ -769,7 +768,7 @@ async function readerAnalyze() {
   if (!readerChapter.value) return
   readerAnalyzing.value = true
   try {
-    const r = await api.triggerAnalysisAsync(readerChapter.value.id)
+    const r = await API.chapter.triggerAnalysis(readerChapter.value.id)
     if (r?.task_id) {
       trackBgTask({ id: r.task_id, task_type: 'chapter_analyze', title: `分析第${readerChapter.value.chapter_number}章`, status: 'pending' })
       msg.success('分析任务已提交，可在右下角查看进度')
@@ -790,10 +789,10 @@ async function pollReaderAnalysis(taskId: number) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 2000))
     try {
-      const t = await api.getTaskStatus(taskId)
+      const t = await API.task.getStatus(taskId)
       if (t.status === 'completed') {
         if (readerChapter.value) {
-          const r = await api.getAnnotations(readerChapter.value.id)
+          const r = await API.chapter.getAnnotations(readerChapter.value.id)
           readerAnnotations.value = r.annotations || []
           readerSummary.value = r.summary || {}
         }
@@ -820,7 +819,7 @@ const planSummary = ref<string>('')        // 章节摘要
 async function openPlanEditor(c: any) {
   planEditingChapter.value = c
   try {
-    const detail = await api.getChapter(c.id)
+    const detail = await API.chapter.get(c.id)
     planCurrent.value = detail?.expansion_plan || null
     planSummary.value = detail?.summary || ''
   } catch {
@@ -834,7 +833,7 @@ async function openPlanEditor(c: any) {
 async function openPlanView(c: any) {
   planEditingChapter.value = c
   try {
-    const detail = await api.getChapter(c.id)
+    const detail = await API.chapter.get(c.id)
     planCurrent.value = detail?.expansion_plan || null
     planSummary.value = detail?.summary || ''
   } catch {

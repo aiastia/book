@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // 伏笔管理：统计卡片 + 筛选栏 + 表格视图（对标参考站）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 useHead({ title: '伏笔管理 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useBookApi()
 const msg = useMessage()
 const { data: foreshadows, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/foreshadows`)
 
@@ -35,7 +34,7 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 // 加载角色候选
 async function loadCharacterOptions() {
   try {
-    const res = await api.getCharacters()
+    const res = await API.character.gets()
     const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({ name: c.name, role: c.role || '', label: c.role ? `${c.name}（${c.role}）` : c.name }))
   } catch (e) { console.warn('加载角色失败', e) }
@@ -87,7 +86,7 @@ const hasSelected = computed(() => selectedRowKeys.value.length > 0)
 
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除此伏笔？')) return
-  try { await api.deleteForeshadow(id); await refresh(); msg.success('已删除') }
+  try { await API.foreshadow.delete(id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
@@ -95,7 +94,7 @@ async function onBatchDelete() {
   if (!selectedRowKeys.value.length) return
   if (!await msg.confirm(`确认删除选中的 ${selectedRowKeys.value.length} 条伏笔？`)) return
   try {
-    const res = await api.batchDeleteForeshadows(selectedRowKeys.value)
+    const res = await API.foreshadow.batchDelete(selectedRowKeys.value)
     msg.success(`已删除 ${res.deleted} 条`)
     selectedRowKeys.value = []
     await refresh()
@@ -106,7 +105,7 @@ async function onPlan() {
   if (!await msg.confirm('AI 将根据已有大纲自动规划伏笔（主线/支线/彩蛋/反转），已有伏笔不受影响。确认开始？')) return
   generating.value = true
   try {
-    const r = await api.planForeshadows()
+    const r = await API.foreshadow.plan()
     await refresh()
     msg.success(`AI 规划完成，生成 ${r.count} 条伏笔`)
   } catch (e: any) {
@@ -164,8 +163,8 @@ async function onSave() {
       include_in_context: form.include_in_context,
       remind_before_chapters: form.remind_before_chapters,
     }
-    if (editItem.value) await api.updateForeshadow(form.id, body)
-    else await api.createForeshadow(body)
+    if (editItem.value) await API.foreshadow.update(form.id, body)
+    else await API.foreshadow.create(body)
     showAdd.value = false
     await refresh()
     msg.success(editItem.value ? '已更新' : '已添加')
@@ -208,13 +207,13 @@ async function onConfirmPrompt() {
   if (!rec) return
   try {
     if (promptAction.value === 'plant') {
-      await api.plantForeshadow(rec.id, promptChapter.value || 1, promptText.value)
+      await API.foreshadow.plant(rec.id, promptChapter.value || 1, promptText.value)
       msg.success('已标记为已埋入')
     } else if (promptAction.value === 'resolve') {
-      await api.resolveForeshadow(rec.id, promptChapter.value || 1, promptText.value, promptIsPartial.value)
+      await API.foreshadow.resolve(rec.id, promptChapter.value || 1, promptText.value, promptIsPartial.value)
       msg.success('已标记为已回收')
     } else {
-      await api.abandonForeshadow(rec.id, promptText.value)
+      await API.foreshadow.abandon(rec.id, promptText.value)
       msg.success('已放弃')
     }
     showChapterPrompt.value = false
@@ -223,7 +222,7 @@ async function onConfirmPrompt() {
 }
 async function onSyncFromAnalysis() {
   try {
-    const r = await api.syncForeshadowsFromAnalysis()
+    const r = await API.chapter.syncForeshadows()
     await refresh()
     msg.success(`已从分析同步：埋入 ${r.planted}，回收 ${r.resolved}`)
   } catch (e: any) { msg.error('同步失败：' + formatError(e)) }

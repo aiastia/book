@@ -1,11 +1,10 @@
 <script setup lang="ts">
 // 我的书架：拟物书本卡片 + 删除/导出/导入 + 新建向导（AI一键生成世界观/角色/大纲）
-import { useBookApi } from '~/composables/useBookApi'
+import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 definePageMeta({ layout: 'default' })
 useHead({ title: '我的书架 — 墨语' })
 const msg = useMessage()
-const api = useBookApi()
 const { selectProject, createProject: selectAndCreate } = useProject()
 const { data: projects, refresh: refresh } = await useFetch(() => `/books`)
 
@@ -13,7 +12,7 @@ const { data: projects, refresh: refresh } = await useFetch(() => `/books`)
 const aiConfigured = ref<boolean | null>(null)
 ;(async () => {
   try {
-    const models = await api.listAiModels()
+    const models = await API.ai.listModels()
     aiConfigured.value = Array.isArray(models) && models.length > 0
   } catch { aiConfigured.value = false }
 })()
@@ -29,7 +28,7 @@ const filteredProjects = computed(() => {
 async function onDelete(p: any, e: Event) {
   e.stopPropagation()
   if (!await msg.confirm(`确认删除《${p.title}》？所有章节/角色/大纲将一并删除，不可恢复。`)) return
-  try { await api.deleteProjectById(p.id); await refresh(); msg.success('已删除') }
+  try { await API.book.delete(p.id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 async function onExport(p: any, format: string = 'json') {
@@ -37,7 +36,7 @@ async function onExport(p: any, format: string = 'json') {
     if (format === 'txt') {
       // TXT 整书下载
       const token = (import.meta.client && localStorage.getItem('moyu_token')) || ''
-      const downloadUrl = api.exportProject(p.id, 'txt') as string
+      const downloadUrl = API.book.export(p.id, 'txt') as string
       const resp = await fetch(downloadUrl, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -49,7 +48,7 @@ async function onExport(p: any, format: string = 'json') {
       URL.revokeObjectURL(url)
       msg.success('已导出 TXT')
     } else {
-      const data = await api.exportProject(p.id)
+      const data = await API.book.export(p.id)
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -65,7 +64,7 @@ const importText = ref('')
 async function onImport() {
   try {
     const data = JSON.parse(importText.value)
-    await api.importProject(data)
+    await API.book.import(data)
     showImport.value = false; importText.value = ''
     await refresh(); msg.success('导入成功')
   } catch (e: any) { msg.error('导入失败：' + formatError(e)) }
