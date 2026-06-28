@@ -48,6 +48,45 @@ docker compose up -d --build
 # 后端文档：http://localhost:8000/docs
 ```
 
+### Nginx 反向代理（生产环境）
+
+```nginx
+# WebSocket（必须在 / 之前）
+location ^~ /ws/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 86400s;
+    proxy_send_timeout 86400s;
+}
+
+# API 后端
+location ^~ /api/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# 前端（兜底）
+location ^~ / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+}
+```
+
+> 顺序不能换：`/ws/` → `/api/` → `/`。WebSocket 不加 `Connection "upgrade"` 会导致 `WebSocket is closed before the connection is established.`
+
 ### 数据持久化
 
 - SQLite 数据库：`backend/data/moyu.db`
