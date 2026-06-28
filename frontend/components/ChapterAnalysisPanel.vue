@@ -58,7 +58,7 @@ async function loadAnnotations() {
     // 并行加载章节内容和标注
     const [ch, annData] = await Promise.all([
       apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${props.chapterId}`).catch(() => null),
-      api.getAnnotations(props.chapterId).catch(() => null),
+      API.chapter.getAnnotations(props.chapterId).catch(() => null),
     ])
     if (ch) chapterContent.value = ch.content || ''
     if (annData) {

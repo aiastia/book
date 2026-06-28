@@ -271,7 +271,7 @@ async function onSave() {
     if (rebuiltShuang) merged.shuang_design = rebuiltShuang
     if (rebuiltCI) merged.character_intents = rebuiltCI
 
-    await api.updateChapter(props.chapterId, { expansion_plan: merged })
+    await API.chapter.update(props.chapterId, { expansion_plan: merged })
     msg.success('规划保存成功')
     emit('saved', merged)
     close()

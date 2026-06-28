@@ -149,7 +149,7 @@ async function onSave() {
       name: a.name.trim(),
       description: a.description || '',
     }))
-    await api.updateCareer(editing.value.id, {
+    await API.career.update(editing.value.id, {
       name: editForm.name,
       career_type: editForm.career_type,
       category: editForm.category,
@@ -162,7 +162,7 @@ async function onSave() {
 }
 async function onDelete(id: number) {
   if (!await msg.confirm('确认删除？')) return
-  try { await api.deleteCareer(id); await refresh(); msg.success('已删除') }
+  try { await API.career.delete(id); await refresh(); msg.success('已删除') }
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
@@ -178,7 +178,7 @@ async function onAutoAssign() {
   if (!await msg.confirm('AI 将根据角色性格背景和职业体系，为未分配职业的角色推荐主职业。确认开始？')) return
   autoAssigning.value = true
   try {
-    const r = await api.autoAssignCareers({ user_prompt: '' })
+    const r = await API.career.autoAssign({ user_prompt: '' })
     await refresh()
     msg.success(`已为 ${r.count} 个角色分配主职业`)
   } catch (e: any) { msg.error('分配失败：' + formatError(e)) }
