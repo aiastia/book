@@ -297,14 +297,14 @@ async def run_batch_generation(task_id: int):
                         attempt,
                         f"生成第{ch_num}章" + (f"（重试 {attempt}）" if attempt else ""),
                         phase="generating",
-                        sub_progress={
-                            "generation": {"done": completed, "total": len(chapter_ids)},
-                            "analysis": {
-                                "done": completed,
-                                "total": len(chapter_ids) if enable_analysis else 0,
-                            },
-                            "phase": "generating",
+                    sub_progress={
+                        "generation": {"done": completed, "total": len(chapter_ids)},
+                        "analysis": {
+                            "done": completed if enable_analysis else 0,
+                            "total": len(chapter_ids) if enable_analysis else 0,
                         },
+                        "phase": "generating",
+                    },
                     )
 
                     # 若已有内容则跳过
