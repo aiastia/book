@@ -17,8 +17,8 @@ const legacyTaskStatus = ref<any>(null)
 
 // 任务完成回调注册表：{ taskTypePrefix: callback[] }
 const completionCallbacks = new Map<string, Array<() => void>>()
-// 记录已触发过的 task id，避免重复回调
-const triggeredIds = new Set<string | number>()
+// 已触发的任务状态，避免重复回调（形式: "task_id:progress" 或 "task_id:done"）
+const triggeredStates = new Set<string>()
 
 function loadLegacyFromStorage() {
   if (import.meta.client) {
@@ -36,6 +36,16 @@ function loadLegacyFromStorage() {
       } catch {}
     }
   }
+}
+
+function _parseProgressDone(pd: any): number {
+  // 从 progress_details 中提取已完成数量（如 generation.done）
+  if (!pd) return 0
+  let details = pd
+  if (typeof details === 'string') {
+    try { details = JSON.parse(details) } catch { return 0 }
+  }
+  return details?.generation?.done || 0
 }
 
 export function useBackgroundTasks() {
@@ -106,10 +116,15 @@ export function useBackgroundTasks() {
     // 通过 WS 推送更新本地任务状态
     const existing = tasks.value.find(t => t.id === taskData.id)
     if (existing) {
+      const prevDone = _parseProgressDone(existing.progress_details)
+      const currDone = _parseProgressDone(taskData.progress_details)
       const wasActive = existing.status === 'pending' || existing.status === 'running'
       Object.assign(existing, taskData)
       if (wasActive && (taskData.status === 'completed' || taskData.status === 'failed')) {
         existing._doneAt = Date.now()
+        _fireCallbacks(taskData)
+      } else if (wasActive && currDone > prevDone) {
+        // 每完成一章就触发刷新
         _fireCallbacks(taskData)
       }
     } else {
@@ -141,12 +156,16 @@ export function useBackgroundTasks() {
     completionCallbacks.get(taskType)!.push(callback)
   }
 
-  // 触发匹配的回调
+  // 触发匹配的回调（完成时 + 每章进度推进时都触发）
   function _fireCallbacks(task: any) {
     const ttype = task.task_type || ''
     const tid = task.id
-    if (triggeredIds.has(tid)) return
-    triggeredIds.add(tid)
+    // 用进度值去重：相同进度不重复触发，进度推进时允许再次触发
+    const currentProgress = _parseProgressDone(task.progress_details) || task.progress || 0
+    const isComplete = task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled'
+    const stateKey = `${tid}:${isComplete ? 'done' : currentProgress}`
+    if (triggeredStates.has(stateKey)) return
+    triggeredStates.add(stateKey)
     // 收集所有匹配的回调（避免遍历时修改 Map）
     const cbs: Array<() => void> = []
     for (const [prefix, callbacks] of completionCallbacks.entries()) {
@@ -189,11 +208,16 @@ export function useBackgroundTasks() {
       for (const st of list) {
         const existing = tasks.value.find(t => t.id === st.id)
         if (existing) {
-          // 检测状态变更：running/pending → completed
+          // 检测进度变化：批量生成每完成一章就触发刷新
+          const prevDone = _parseProgressDone(existing.progress_details)
+          const currDone = _parseProgressDone(st.progress_details)
           const wasActive = existing.status === 'pending' || existing.status === 'running'
           const isDone = st.status === 'completed'
           Object.assign(existing, st)
           if (wasActive && isDone) {
+            _fireCallbacks(st)
+          } else if (wasActive && currDone > prevDone) {
+            // 进度推进（如第3/5章完成）→ 触发放射回调但不标记为完成
             _fireCallbacks(st)
           }
         } else {
