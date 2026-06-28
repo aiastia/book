@@ -614,6 +614,7 @@ async function deleteExpansion() {
                 <a-select-option value="">{{ defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型' }}</a-select-option>
                 <a-select-option v-for="m in remoteModels" :key="m.id" :value="m.id" :label="m.id">{{ m.id }}</a-select-option>
               </a-select>
+            </a-form-item>
           </a-col>
         </a-row>
         <a-form-item label="其他要求">
