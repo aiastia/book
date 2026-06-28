@@ -1,3 +1,4 @@
+import { useRuntimeConfig } from '#imports'
 /** 书（项目）API */
 import { get, post, put, del, pid } from './client'
 const P = (id?: number) => id || pid()
@@ -10,7 +11,9 @@ export const bookApi = {
   update: (body: any, id?: number) => put(`/projects/${P(id)}`, body),
   delete: (id: number) => del(`/projects/${id}`),
   import: (data: any) => post('/projects/import', data),
-  export: (id?: number) => get(`/projects/${P(id)}/export?format=json`),
+  exportJson: (id?: number) => get(`/projects/${P(id)}/export?format=json`),
+  /** 获取 TXT 下载 URL（同步返回字符串，不发起请求） */
+  exportUrl: (id?: number) => `${import.meta.client ? useRuntimeConfig().public.apiBase : ''}/api/projects/${P(id)}/export?format=txt`,
   getStats: () => get('/stats'),
   getRecentEdits: () => get('/recent-edits'),
   getThinkingModes: (id?: number) => get(`/projects/${P(id)}/thinking-modes`),

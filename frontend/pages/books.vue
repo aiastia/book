@@ -36,7 +36,7 @@ async function onExport(p: any, format: string = 'json') {
     if (format === 'txt') {
       // TXT 整书下载
       const token = (import.meta.client && localStorage.getItem('moyu_token')) || ''
-      const downloadUrl = API.book.export(p.id, 'txt') as string
+      const downloadUrl = API.book.exportUrl(p.id)
       const resp = await fetch(downloadUrl, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -48,7 +48,7 @@ async function onExport(p: any, format: string = 'json') {
       URL.revokeObjectURL(url)
       msg.success('已导出 TXT')
     } else {
-      const data = await API.book.export(p.id)
+      const data = await API.book.exportJson(p.id)
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')

@@ -326,7 +326,7 @@ async function onExportTxt() {
     const token = localStorage.getItem('moyu_token')
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
-    const downloadUrl = API.book.export(currentProjectId.value!, 'txt') as string
+    const downloadUrl = API.book.exportUrl(currentProjectId.value!)
     const res = await fetch(downloadUrl, { headers })
     if (!res.ok) throw new Error(`导出失败：${res.status}`)
     const blob = await res.blob()
