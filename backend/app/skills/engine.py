@@ -320,9 +320,7 @@ _CONTEXT_BLOCKS = {
 _SKILL_BLOCKS = {
     # 🔵 世界观生成（初始化 step1 + 页面手动）
     "world_core_generate": ["project", "world"],
-    "world_detail_generate": ["project", "world"],
-    "world_generate": ["project", "world"],
-    # 🔵🟢 地点/物品生成（初始化 step4-5 + 页面手动）
+    "world_detail_generate": ["project", "world"],    # 🔵🟢 地点/物品生成（初始化 step4-5 + 页面手动）
     "locations_generate": ["project", "world"],
     "items_generate": ["project", "world"],
     # 🔵 职业体系生成（初始化 step2）
@@ -455,9 +453,7 @@ async def _chat_with_tools_json(
 _SKILL_TO_THINKING_MODE = {
     # 世界观生成
     "world_core_generate": "world",
-    "world_detail_generate": "world",
-    "world_generate": "world",
-    # 角色生成
+    "world_detail_generate": "world",    # 角色生成
     "character_generate": "character",
     "characters_batch_generation": "character",
     # 大纲

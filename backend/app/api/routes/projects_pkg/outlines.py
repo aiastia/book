@@ -795,6 +795,7 @@ async def generate_outlines_async(
                         "items_info": ctx_full.get("items_info", ""),
                         "locations_info": ctx_full.get("locations_info", ""),
                         "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。这是第一卷，没有前文大纲或伏笔需要参考。",
+                        "outline_mode": proj.outline_mode or "one_to_one",
                     },
                 )
                 if result.get("error"):
@@ -992,6 +993,7 @@ async def generate_outlines_async(
                     "requirements": "",
                     "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。\n\n【你已查询到的信息概要】\n{collected_summary}\n\n请基于以上信息生成大纲。",
                     "_collected_data": collected_summary,
+                    "outline_mode": proj.outline_mode or "one_to_one",
                 },
                 tools=None,
                 tool_executor=None,
@@ -1374,6 +1376,7 @@ async def continue_outlines(
             "story_direction": req.story_direction or "",
             "requirements": req.other_requirements or "",
             "mcp_references": "",
+            "outline_mode": proj.outline_mode or "one_to_one",
             "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
         },
         tools=get_chapter_tools(),
@@ -1657,6 +1660,7 @@ async def continue_outlines_async(
                     "story_direction": payload.get("story_direction") or "",
                     "requirements": payload.get("other_requirements") or "",
                     "mcp_references": "",
+                    "outline_mode": proj.outline_mode or "one_to_one",
                     "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
                 },
                 tools=get_chapter_tools(),
@@ -2092,6 +2096,7 @@ async def _expand_outline_core(
             # 继承/派生指引（由 md 模板中的 <character_intent_rules> 和 <commercial_design_guide> 使用）
             "char_intent_guidance": char_intent_guidance,
             "shuang_guidance": shuang_guidance,
+            "outline_mode": proj.outline_mode or "one_to_one",
             "user_prompt": (
                 f"请将第{outline.chapter_number}卷《{outline.title}》展开为{target_chapter_count}个子章节，返回JSON数组。{existing_context}"
             ),
