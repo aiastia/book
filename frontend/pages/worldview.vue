@@ -190,7 +190,6 @@ async function onReindexWorldVectors() {
 <style scoped>
 .world-page { display: flex; flex-direction: column; gap: 16px; }
 .page-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.info-card { }
 .empty { color: #bbb; }
 .detail-list { display: flex; flex-direction: column; gap: 12px; }
 .detail-item { border: 1px solid #F0EDE6; border-radius: 8px; padding: 12px 16px; }

@@ -522,7 +522,6 @@ loadAllRelations()
 .char-card-title { display:flex; align-items:center; gap:8px; }
 .char-avatar { width:32px; height:32px; border-radius:50%; background:#4D8088; color:#fff; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; flex-shrink:0; }
 .char-name { font-size:15px; font-weight:600; }
-.char-desc { }
 .desc-row { display:flex; gap:8px; padding:4px 0; border-bottom:1px solid #F8F6F1; font-size:13px; line-height:1.6; }
 .desc-row:last-child { border-bottom:none; }
 .desc-label { color:#8C8C8C; min-width:60px; flex-shrink:0; }

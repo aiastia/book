@@ -48,7 +48,8 @@ export interface Character {
   age?: string; identity?: string; personality?: string
   appearance?: string; background?: string; status?: string
   main_career_id?: number; main_career_stage?: number; main_career_stage_desc?: string
-  sub_careers?: string; avatar_url?: string; tags?: string[]
+  sub_careers?: { career_id: number; name?: string; stage_desc?: string }[]
+  avatar_url?: string; tags?: string[]
   organization_id?: number
 }
 
