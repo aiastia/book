@@ -39,6 +39,7 @@ const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
 const defaultModelName = ref('')
 const loadingModels = ref(false)
 const projectDefaultStyleName = ref('')
+const projectDefaultStyleId = ref<number | null>(null)
 
 // 可选起始章（空章节 + 下一章号）
 const emptyChapters = computed(() => {
@@ -77,7 +78,12 @@ function openPanel() {
   narrativePerspective.value = ''
   loadWritingStyles()
   loadRemoteModels()
-  loadProjectDefault()
+  loadProjectDefault().then(() => {
+    // 自动选中默认风格
+    if (projectDefaultStyleId.value) {
+      styleId.value = projectDefaultStyleId.value
+    }
+  })
   checkActiveTask()
   open.value = true
 }
@@ -114,6 +120,7 @@ async function loadProjectDefault() {
     if (p) {
       projectDefaultPov.value = p.narrative_pov || '第三人称'
       projectDefaultStyleName.value = p.writing_style?.name || ''
+      projectDefaultStyleId.value = p.writing_style?.style_id || null
     }
   } catch {}
 }
