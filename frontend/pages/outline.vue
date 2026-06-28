@@ -337,7 +337,7 @@ async function onContinue() {
     if (continueForm.other_requirements) params.other_requirements = continueForm.other_requirements
     if (continueForm.ai_model) params.ai_model = continueForm.ai_model
 
-    const { task_id } = await API.outline.continue(params)
+    const { task_id } = await API.outline.continue(currentProjectId.value, params)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_continue', title: `续写${continueForm.chapter_count}章大纲` })
     showContinue.value = false
