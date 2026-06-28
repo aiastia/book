@@ -594,12 +594,11 @@ async function deleteExpansion() {
           <a-col :span="12">
             <a-form-item :label="`叙事视角`">
               <a-select v-model:value="continueForm.narrative_pov" :placeholder="`按小说设定（${projectDefaultPov}）`" allow-clear>
-                <a-select-option value="">按小说设定</a-select-option>
+                <a-select-option value="">{{ `按小说设定（${projectDefaultPov}）` }}</a-select-option>
                 <a-select-option value="第三人称">第三人称（他/她）</a-select-option>
                 <a-select-option value="第一人称">第一人称（我）</a-select-option>
                 <a-select-option value="全知视角">全知视角</a-select-option>
               </a-select>
-              <div class="field-hint">留空使用项目默认：{{ projectDefaultPov }}</div>
             </a-form-item>
           </a-col>
           <a-col :span="12">
@@ -612,11 +611,9 @@ async function deleteExpansion() {
                 option-filter-prop="label"
                 :loading="loadingModels"
               >
-                <a-select-option value="">使用默认模型</a-select-option>
+                <a-select-option value="">{{ defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型' }}</a-select-option>
                 <a-select-option v-for="m in remoteModels" :key="m.id" :value="m.id" :label="m.id">{{ m.id }}</a-select-option>
               </a-select>
-              <div v-if="!remoteModels.length && !loadingModels" class="field-hint">未拉到模型列表，将使用默认模型</div>
-            </a-form-item>
           </a-col>
         </a-row>
         <a-form-item label="其他要求">

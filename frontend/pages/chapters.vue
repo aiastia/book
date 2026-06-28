@@ -51,6 +51,11 @@ if (import.meta.client) {
 const writingStyles = ref<any[]>([])
 const selectedStyleId = ref<number | undefined>()
 const projectDefaultStyleId = ref<number | undefined>()  // 项目默认风格 ID（用于选项标记）
+const projectDefaultStyleName = computed(() => {
+  if (!projectDefaultStyleId.value || !writingStyles.value?.length) return ''
+  const s = writingStyles.value.find((w: any) => w.id === projectDefaultStyleId.value)
+  return s?.name || ''
+})
 const availableSkills = ref<any[]>([])
 const selectedSkillKey = ref<string | undefined>()
 const availableModels = ref<Array<{ value: string; label: string }>>([])
@@ -1051,7 +1056,7 @@ async function onPlanSaved() {
         <div class="editor-settings">
           <div class="settings-row">
             <span class="settings-label">🎨 风格</span>
-            <a-select v-model:value="selectedStyleId" size="small" style="width: 160px" placeholder="项目默认" allow-clear>
+            <a-select v-model:value="selectedStyleId" size="small" style="width: 160px" :placeholder="projectDefaultStyleName ? `默认（${projectDefaultStyleName}）` : '项目默认'" allow-clear>
               <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id">{{ s.name }}{{ s.id === projectDefaultStyleId ? ' ★' : '' }}</a-select-option>
             </a-select>
           </div>
