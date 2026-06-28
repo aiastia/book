@@ -296,6 +296,7 @@ async def list_analyses(
     return [
         {
             "id": a.id,
+            "chapter_id": a.chapter_id,
             "chapter_number": a.chapter_number,
             "plot_stage": a.plot_stage or "",
             "hooks": a.hooks,

@@ -272,7 +272,7 @@ async function pollBatchAnalysisTask(taskId: number) {
 
 function chapterIdByNumber(num: number): number | null {
   const c = (chapters || []).find((x: any) => x.chapter_number === num)
-  return c?.id || null
+  return c?.chapter_id || c?.id || null
 }
 
 // ===== 章节导航（上一章/下一章）=====
