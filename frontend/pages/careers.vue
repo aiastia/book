@@ -101,7 +101,7 @@ async function doGenerate() {
   generating.value = true
   try {
     const hasExisting = (careers.value || []).length > 0
-    const r = await api.generateCareerSystem({
+    const r = await API.career.generate({
       append: hasExisting,  // 已有职业时追加，不覆盖
       count: genCount.value,
       career_type: genType.value === 'all' ? '' : genType.value,
@@ -115,7 +115,7 @@ async function doGenerate() {
 }
 async function onAdd() {
   if (!newCareer.name.trim()) return
-  try { await api.createCareer({ ...newCareer, stages: [], abilities: [], attributes: {} }); showAdd.value = false; newCareer.name = ''; await refresh() }
+  try { await API.career.create({ ...newCareer, stages: [], abilities: [], attributes: {} }); showAdd.value = false; newCareer.name = ''; await refresh() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
 function openEdit(c: any) {

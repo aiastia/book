@@ -8,7 +8,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const { data: memories, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/memories?limit=100`)
-const { data: stats } = await api.getMemoryStats()
+const { data: stats } = await API.memory.getStats()
 
 // 类型筛选
 const filterType = ref('')
@@ -48,7 +48,7 @@ async function onSearch() {
   }
   searching.value = true
   try {
-    const res = await api.searchMemories({
+    const res = await API.memory.search({
       query: searchQuery.value,
       limit: 15,
       memory_types: filterType.value ? [filterType.value] : undefined,
@@ -72,7 +72,7 @@ async function onReindex() {
   if (!await msg.confirm('将为所有未向量化的记忆生成向量（可能耗时较长），确认开始？')) return
   reindexing.value = true
   try {
-    const r = await api.reindexMemories()
+    const r = await API.memory.reindex()
     msg.success(`完成：已索引 ${r.indexed}/${r.total} 条记忆`)
     await refresh()
   } catch (e: any) {

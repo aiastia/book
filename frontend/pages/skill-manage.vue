@@ -38,40 +38,40 @@ const categoryLabels: Record<string, string> = {
 }
 
 async function onToggle(s: any) {
-  try { await api.updateSkill(s.id, { is_enabled: !s.is_enabled }); await refresh() } catch (e: any) { msg.error('操作失败') }
+  try { await API.skill.update(s.id, { is_enabled: !s.is_enabled }); await refresh() } catch (e: any) { msg.error('操作失败') }
 }
 async function onToggleCustom(s: any) {
   const newVal = !s.is_customized
-  try { await api.updateSkill(s.id, { is_customized: newVal }); await refresh(); msg.success(newVal ? '已开启自定义' : '已恢复系统默认') } catch (e: any) { msg.error('操作失败') }
+  try { await API.skill.update(s.id, { is_customized: newVal }); await refresh(); msg.success(newVal ? '已开启自定义' : '已恢复系统默认') } catch (e: any) { msg.error('操作失败') }
 }
 async function onToggleTool(s: any) {
-  try { await api.updateSkill(s.id, { as_tool: !s.as_tool }); await refresh() } catch (e: any) { msg.error('操作失败') }
+  try { await API.skill.update(s.id, { as_tool: !s.as_tool }); await refresh() } catch (e: any) { msg.error('操作失败') }
 }
 async function onAcceptSystem(s: any) {
   if (!await msg.confirm('确认用系统最新版本覆盖你的自定义版本？')) return
-  try { await api.updateSkill(s.id, { system_prompt: s.system_prompt, is_customized: true }); await refresh(); msg.success('已更新为系统版本') } catch (e: any) { msg.error('更新失败') }
+  try { await API.skill.update(s.id, { system_prompt: s.system_prompt, is_customized: true }); await refresh(); msg.success('已更新为系统版本') } catch (e: any) { msg.error('更新失败') }
 }
 function openEdit(s: any) {
   editing.value = s
   editPrompt.value = s.is_customized ? (s.custom_prompt || s.system_prompt) : s.system_prompt
 }
 async function onSavePrompt() {
-  try { await api.updateSkill(editing.value.id, { system_prompt: editPrompt.value }); editing.value = null; await refresh() } catch (e: any) { msg.error('保存失败') }
+  try { await API.skill.update(editing.value.id, { system_prompt: editPrompt.value }); editing.value = null; await refresh() } catch (e: any) { msg.error('保存失败') }
 }
 async function onReset(s: any) {
   if (!await msg.confirm('确认重置到系统默认？')) return
-  try { await api.resetSkill(s.id); await refresh() } catch (e: any) { msg.error('重置失败') }
+  try { await API.skill.reset(s.id); await refresh() } catch (e: any) { msg.error('重置失败') }
 }
 async function onResetAll() {
   if (!await msg.confirm('确认将所有提示词重置为系统默认版本？这将清除所有你自定义过的提示词，不可恢复。')) return
-  try { await api.resetAllSkills(); await refresh(); msg.success('已全部重置') } catch (e: any) { msg.error('重置失败：' + formatError(e)) }
+  try { await API.skill.resetAll(); await refresh(); msg.success('已全部重置') } catch (e: any) { msg.error('重置失败：' + formatError(e)) }
 }
 async function onReload() {
-  try { await api.reloadSkills(); await refresh(); msg.success('已从磁盘重新加载模板（用户自定义版本已保留）') } catch (e: any) { msg.error('加载失败：' + formatError(e)) }
+  try { await API.skill.reload(); await refresh(); msg.success('已从磁盘重新加载模板（用户自定义版本已保留）') } catch (e: any) { msg.error('加载失败：' + formatError(e)) }
 }
 async function onDeleteCustom(s: any) {
   if (!await msg.confirm(`确认删除自定义 Skill「${s.display_name || s.name}」？此操作不可恢复。`)) return
-  try { await api.deleteCustomSkill(s.id); await refresh() } catch (e: any) { msg.error('删除失败：' + formatError(e)) }
+  try { await API.skill.deleteCustom(s.id); await refresh() } catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
 /** 解析 MD 内容为 Skill 创建参数 */
@@ -123,7 +123,7 @@ async function onCreateFromForm() {
   }
   creating.value = true
   try {
-    await api.createSkill(createForm)
+    await API.skill.create(createForm)
     showCreate.value = false
     Object.assign(createForm, { name: '', display_name: '', description: '', category: 'custom', system_prompt: '' })
     await refresh()
@@ -139,7 +139,7 @@ async function onCreateFromMd() {
   creating.value = true
   try {
     const parsed = parseMdToSkill(createFromMd.value)
-    await api.createSkill(parsed)
+    await API.skill.create(parsed)
     showCreate.value = false
     createFromMd.value = ''
     await refresh()

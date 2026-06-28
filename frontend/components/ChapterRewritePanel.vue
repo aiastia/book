@@ -136,7 +136,7 @@ async function onPartialRewrite() {
   }
   partialLoading.value = true
   try {
-    const r = await api.partialRegenerate(props.chapterId, {
+    const r = await API.chapter.partialRegenerate(props.chapterId, {
       selected_text: selection.value,
       start_position: partialResult.value?.start_position || 0,
       end_position: partialResult.value?.end_position || 0,
@@ -155,7 +155,7 @@ async function onApplyPartial() {
   if (!partialResult.value || !props.chapterId) return
   if (!await msg.confirm('确认替换选中的片段？')) return
   try {
-    await api.applyPartialRegen(props.chapterId, {
+    await API.chapter.applyPartialRegen(props.chapterId, {
       new_text: partialResult.value.regenerated_text,
       start_position: partialResult.value.start_position,
       end_position: partialResult.value.end_position,

@@ -58,7 +58,7 @@ async function onRegenerate() {
   )) return
   regenerating.value = true
   try {
-    const { task_id } = await api.expandOutlineAsync(props.outlineId, {
+    const { task_id } = await API.outline.expand(props.outlineId, {
       target_chapter_count: existingCount,
       mode: 'replace',
     })

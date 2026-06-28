@@ -108,7 +108,7 @@ async function onDirectParse() {
   directParsing.value = true
   directResult.value = null
   try {
-    const r = await api.parseTxt({ text: directText.value })
+    const r = await API.bookImport.parseTxt({ text: directText.value })
     directResult.value = r
     if (r.chapters?.length) {
       msg.success(`解析成功：${r.chapters.length} 章`)
@@ -125,7 +125,7 @@ async function onDirectImport() {
   if (!directTitle.value.trim()) { msg.warning('请输入书名'); return }
   directImporting.value = true
   try {
-    const r = await api.fullImport({
+    const r = await API.bookImport.fullImport({
       title: directTitle.value,
       genre: directGenre.value,
       chapters: directResult.value.chapters.map((c: any, i: number) => ({

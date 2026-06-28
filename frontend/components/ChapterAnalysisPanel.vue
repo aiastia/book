@@ -339,7 +339,7 @@ const { trackTask } = useBackgroundTasks()
 async function onAnalyze() {
   analyzing.value = true
   try {
-    const r = await api.triggerAnalysisAsync(props.chapterId)
+    const r = await API.chapter.triggerAnalysis(props.chapterId)
     if (r?.task_id) {
       trackTask({ id: r.task_id, task_type: 'chapter_analyze', title: `分析第${props.chapterNumber}章`, status: 'pending' })
       msg.success(`分析任务已提交，可在右下角查看进度`)
