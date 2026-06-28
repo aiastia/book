@@ -19,9 +19,7 @@ const { data: characters, refresh: refresh } = await useFetch<Character[]>(() =>
 const relationsData = ref<any[]>([])
 async function loadRelations() {
   const res = await API.relation.list(currentProjectId.value)
-  // useApi 返回 AsyncData，其 data 是 Ref
-  const d = (res as any)?.data
-  relationsData.value = (d?.value ?? d ?? []) as any[]
+  relationsData.value = (Array.isArray(res) ? res : []) as any[]
 }
 await loadRelations()
 
@@ -275,62 +273,48 @@ function buildGraph() {
   if (!graph.value) return
   const ns = graph.value.nodes || []
   const es = graph.value.edges || []
-  // 圆形布局作为初始位置（根据角色区分半径，主角居中）
-  const cx = 450, cy = 320
-  const mainNodes = ns.filter((n: any) => n.role === '主角')
-  const otherNodes = ns.filter((n: any) => n.role !== '主角')
+  // 环形布局：所有节点均匀分布
+  const cx = 450, cy = 320, r = 200
 
-  // 主角放在中心附近，其他角色环绕
-  const mainR = 60
-  const outerR = 220
-
-  vfNodes.value = []
-  let idx = 0
-
-  // 主角节点
-  mainNodes.forEach((n: any) => {
-    const angle = (2 * Math.PI * idx) / Math.max(mainNodes.length, 1) - Math.PI / 2
-    vfNodes.value.push({
+  vfNodes.value = ns.map((n: any, i: number) => {
+    const angle = (2 * Math.PI * i) / Math.max(ns.length, 1) - Math.PI / 2
+    return {
       id: String(n.id),
-      position: { x: cx + mainR * Math.cos(angle), y: cy + mainR * Math.sin(angle) },
-      data: { label: n.name, role: n.role, isMain: true },
+      position: { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) },
+      data: { label: n.name, role: n.role, isMain: n.role === '主角' },
       style: nodeStyleFor(n),
-    })
-    idx++
+    }
   })
 
-  // 其他角色环绕
-  otherNodes.forEach((n: any, i: number) => {
-    const angle = (2 * Math.PI * i) / Math.max(otherNodes.length, 1) - Math.PI / 2
-    vfNodes.value.push({
-      id: String(n.id),
-      position: { x: cx + outerR * Math.cos(angle), y: cy + outerR * Math.sin(angle) },
-      data: { label: n.name, role: n.role, isMain: false },
-      style: nodeStyleFor(n),
-    })
-  })
-  // 去重：同一个角色对同一关系类型只保留一条边（按 source→target 排序去重）
-  const seenEdges = new Set<string>()
-  const dedupedEdges: any[] = []
+  // 合并同一角色对的多条关系为一条线，负面关系走向下方端口
+  const pairMap = new Map<string, any[]>()
   for (const e of es) {
-    const pair = [String(e.source), String(e.target), e.relation_type || ''].sort().join('|')
-    if (seenEdges.has(pair)) continue
-    seenEdges.add(pair)
-    dedupedEdges.push(e)
+    const pair = [String(e.source), String(e.target)].sort().join('|')
+    if (!pairMap.has(pair)) pairMap.set(pair, [])
+    pairMap.get(pair)!.push(e)
   }
 
-  vfEdges.value = dedupedEdges.map((e: any, i: number) => {
-    const color = categoryColor[e.category] || '#999'
+  vfEdges.value = Array.from(pairMap.entries()).map(([pair, entry], i) => {
+    const items = entry
+    const first = items[0]
+    const uniqueTypes = Array.from(new Set(items.map((it: any) => it.relation_type).filter(Boolean)))
+    const label = uniqueTypes.join(' ↔ ')
+    const color = categoryColor[first.category] || '#999'
+    const avgIntimacy = items.reduce((sum: number, it: any) => sum + Math.abs(it.intimacy || 0), 0) / items.length
+    const hasNegative = items.some((it: any) => (it.intimacy || 0) < 0)
     return {
       id: `e${i}`,
-      source: String(e.source),
-      target: String(e.target),
-      label: e.relation_type,
-      animated: Math.abs(e.intimacy) > 50,
-      style: { stroke: color, strokeWidth: Math.abs(e.intimacy) > 50 ? 2.5 : 1.5 },
+      source: String(first.source),
+      target: String(first.target),
+      sourcePosition: hasNegative ? 'bottom' : 'top',
+      targetPosition: 'top',
+      label,
+      labelBgPadding: [8, 4],
+      animated: avgIntimacy > 50,
+      style: { stroke: color, strokeWidth: avgIntimacy > 50 ? 2.5 : 1.5 },
       labelStyle: { fill: color, fontSize: 11, fontWeight: 600 },
       labelBgStyle: { fill: '#fff' },
-      type: e.intimacy < 0 ? 'smoothstep' : 'default',
+      type: hasNegative ? 'smoothstep' : 'default',
     }
   })
 }
