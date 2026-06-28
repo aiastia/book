@@ -301,23 +301,17 @@ function buildGraph() {
     const label = uniqueTypes.join(' ↔ ')
     const color = categoryColor[first.category] || '#999'
     const avgIntimacy = items.reduce((sum: number, it: any) => sum + Math.abs(it.intimacy || 0), 0) / items.length
-    const allNegative = items.every((it: any) => (it.intimacy || 0) < 0)
-    const allPositive = items.every((it: any) => (it.intimacy || 0) >= 0)
-    const pos = allNegative ? 'bottom' : allPositive ? 'top' : 'top' // mixed: source=top
-    const tpos = allNegative ? 'bottom' : allPositive ? 'top' : 'bottom' // mixed: target=bottom
     return {
       id: `e${i}`,
       source: String(first.source),
       target: String(first.target),
-      sourcePosition: pos as any,
-      targetPosition: tpos as any,
       label,
       labelBgPadding: [8, 4],
       animated: avgIntimacy > 50,
       style: { stroke: color, strokeWidth: avgIntimacy > 50 ? 2.5 : 1.5 },
       labelStyle: { fill: color, fontSize: 11, fontWeight: 600 },
       labelBgStyle: { fill: '#fff' },
-      type: !allPositive ? 'smoothstep' : 'default',
+      type: negCount > 0 ? 'smoothstep' : 'default',
     }
   })
 }
