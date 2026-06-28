@@ -565,9 +565,13 @@ async def get_pending_entities(
         .scalars().all()
     )
 
-    # 收集大纲中声明的所有新物品/地点
+    # 收集大纲和展开章节中声明的所有新物品/地点
+    from app.models.chapter import Chapter
+
     all_items: dict[str, dict] = {}
     all_locs: dict[str, dict] = {}
+
+    # 1) 从大纲 structure 读取（1-1 模式）
     for o in outlines:
         raw = o.structure or {}
         for ni in raw.get("new_items") or []:
@@ -587,6 +591,36 @@ async def get_pending_entities(
                         "name": name, "location_type": nl.get("location_type", "其他"),
                         "description": nl.get("description", "")[:200],
                         "from_chapter": o.chapter_number,
+                    }
+
+    # 2) 从展开章节的 expansion_plan 读取（1-N 模式）
+    chapters = (
+        (await db.execute(
+            select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
+        ))
+        .scalars().all()
+    )
+    for c in chapters:
+        raw = c.expansion_plan or {}
+        if not isinstance(raw, dict):
+            continue
+        for ni in raw.get("new_items") or []:
+            if isinstance(ni, dict) and ni.get("name"):
+                name = ni["name"].strip()
+                if name and name not in all_items:
+                    all_items[name] = {
+                        "name": name, "category": ni.get("category", "杂物"),
+                        "description": ni.get("description", "")[:200],
+                        "from_chapter": c.chapter_number,
+                    }
+        for nl in raw.get("new_locations") or []:
+            if isinstance(nl, dict) and nl.get("name"):
+                name = nl["name"].strip()
+                if name and name not in all_locs:
+                    all_locs[name] = {
+                        "name": name, "location_type": nl.get("location_type", "其他"),
+                        "description": nl.get("description", "")[:200],
+                        "from_chapter": c.chapter_number,
                     }
 
     # 检查 DB 中是否存在
@@ -619,8 +653,9 @@ async def generate_pending_entities(
     from app.models.item import Item
     from app.models.location import Location
     from app.models.outline import Outline
+    from app.models.chapter import Chapter
 
-    # 复用 pending-entities 的收集逻辑
+    # 复用 pending-entities 的收集逻辑（大纲 + 展开章节）
     outlines = (
         (await db.execute(
             select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number)
@@ -632,6 +667,28 @@ async def generate_pending_entities(
     all_locs: dict[str, dict] = {}
     for o in outlines:
         raw = o.structure or {}
+        for ni in raw.get("new_items") or []:
+            if isinstance(ni, dict) and ni.get("name"):
+                name = ni["name"].strip()
+                if name and name not in all_items:
+                    all_items[name] = {"category": ni.get("category", "杂物"), "description": ni.get("description", "")[:200]}
+        for nl in raw.get("new_locations") or []:
+            if isinstance(nl, dict) and nl.get("name"):
+                name = nl["name"].strip()
+                if name and name not in all_locs:
+                    all_locs[name] = {"location_type": nl.get("location_type", "其他"), "description": nl.get("description", "")[:200]}
+
+    # 1-N 模式：从展开章节的 expansion_plan 读取
+    chapters = (
+        (await db.execute(
+            select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
+        ))
+        .scalars().all()
+    )
+    for c in chapters:
+        raw = c.expansion_plan or {}
+        if not isinstance(raw, dict):
+            continue
         for ni in raw.get("new_items") or []:
             if isinstance(ni, dict) and ni.get("name"):
                 name = ni["name"].strip()
@@ -856,7 +913,7 @@ async def generate_outlines_async(
                     messages=phase1_messages,
                     tools=tools,
                     tool_executor=tool_executor,
-                    max_rounds=5,
+                    max_rounds=3,  # 2轮查询 + 1轮输出
                 )
                 if collection_result.get("error"):
                     await tracker.fail(collection_result["error"])

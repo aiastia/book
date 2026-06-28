@@ -423,7 +423,7 @@ async def _chat_with_tools_json(
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        max_rounds=5,  # 4轮查询 + 1轮输出，支持多跳查询
+        max_rounds=3,  # 大纲/展开：2轮查询 + 1轮输出
     )
     if raw.get("error"):
         return raw

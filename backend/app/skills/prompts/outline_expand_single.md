@@ -90,9 +90,13 @@
     "rhythm_tag": "起/承/小高潮（该大纲节点拆分的最后一章必须填'小高潮'）",
     "scene_anchor": "（必填，50-80字）核心空间的感官锚点",
     "character_intents": [{"character": "角色名", "this_chapter_goal": "本章目标", "immediate_want": "此刻最想要的"}],
+    "new_items": [{"name": "新物品名", "category": "装备/消耗品/材料/关键道具/杂物", "description": "一句话描述"}],
+    "new_locations": [{"name": "新地点名", "location_type": "建筑/自然景观/秘境/城市/室内", "description": "一句话描述"}],
     "estimated_words": 3000
   }
 ]
+
+如果本节引入了新的物品或地点（已有列表中不存在的），在 new_items / new_locations 中列出。同一物品/地点只在首次出现的节声明。
 
 【格式规范】
 - 纯JSON数组输出，无其他文字
