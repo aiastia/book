@@ -99,7 +99,7 @@ async def generate_cover_prompt(
         messages=[{"role": "user", "content": prompt_text}],
         model=None,
         temperature=0.7,
-        max_tokens=2000,
+        max_tokens=3000,
     )
     cover_prompt = result.get("content", "").strip()
     if not cover_prompt:
