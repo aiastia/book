@@ -32,9 +32,9 @@ const importanceMeta: Record<string, { label: string; color: string }> = {
 }
 const dangerMeta: Record<string, { label: string; color: string }> = {
   safe: { label: '安全', color: 'success' },
-  dangerous: { label: '危险', color: 'warning' },
-  forbidden: { label: '禁区', color: 'error' },
-  unknown: { label: '未知', color: 'default' },
+  low: { label: '低危', color: 'default' },
+  medium: { label: '中危', color: 'warning' },
+  high: { label: '高危', color: 'error' },
 }
 
 // 展开/折叠

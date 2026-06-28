@@ -799,18 +799,22 @@ async def generate_pending_entities(
             data = result.get("json") or []
             if isinstance(data, dict):
                 data = data.get("locations") or data.get("data") or []
+            _VALID_DANGER = {"safe", "low", "medium", "high"}
             for loc in data:
                 if not isinstance(loc, dict) or not loc.get("name"):
                     continue
                 name = loc["name"].strip()
                 if name in existing_locs:
                     continue
+                dl = (loc.get("danger_level") or "safe").strip().lower()
+                if dl not in _VALID_DANGER:
+                    dl = "safe"
                 db.add(Location(
                     project_id=project_id, name=name,
                     location_type=loc.get("location_type", "其他"),
                     description=loc.get("description", "")[:500],
                     atmosphere=loc.get("atmosphere", ""),
-                    danger_level=loc.get("danger_level", "safe"),
+                    danger_level=dl,
                 ))
                 created_locs += 1
                 existing_locs.add(name)
