@@ -11,10 +11,10 @@ const msg = useMessage()
 const collapsed = ref(true)
 const resuming = ref(false)
 
-function retryTask(t: any) {
+async function retryTask(t: any) {
   if (t.task_type === 'chapter_batch') {
     dismissTask(t.id)
-    // 异步调重试 API（清空失败章节 + 重新提交）
+    // 批量生成有专用重试 API（清空失败章节）
     apiPost(`/api/projects/${t.project_id}/batch-generate/${t.id}/retry`, {})
       .then((r: any) => {
         if (r?.task_id) {
@@ -26,8 +26,19 @@ function retryTask(t: any) {
       })
       .catch((e: any) => msg.error('重试失败：' + formatError(e)))
   } else {
+    // 通用重试：用原 payload 重新提交
     dismissTask(t.id)
-    msg.info('请在对应页面重新操作')
+    try {
+      const r = await apiPost<any>(`/api/tasks/${t.id}/retry`, {})
+      if (r?.task_id) {
+        trackTask({ id: r.task_id, task_type: t.task_type, title: `重试：${t.title || t.task_type}` })
+        msg.success('已重新提交任务')
+      }
+    } catch (e: any) {
+      msg.error('重试失败：' + formatError(e))
+      // 重试失败时恢复任务显示
+      t._dismissed = false
+    }
   }
 }
 const failedTasks = ref<any[]>([])

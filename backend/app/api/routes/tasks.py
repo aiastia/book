@@ -66,3 +66,15 @@ async def delete_task(task_id: int, user: User = Depends(get_current_user)):
     if not ok:
         raise HTTPException(400, "任务不存在/无权操作/仍在运行")
     return {"ok": True}
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(task_id: int, user: User = Depends(get_current_user)):
+    """重试失败的任务：用原 payload 重新提交。"""
+    from app.services.async_ai_service import retry_task as do_retry
+
+    try:
+        new_id = await do_retry(task_id, user.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"task_id": new_id}
