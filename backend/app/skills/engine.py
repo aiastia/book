@@ -687,14 +687,25 @@ class SkillEngine:
 
         # 写作风格前置：从 context 提取 style 块，作为第一条 system 消息（角色设定之前）
         # 让 AI 在"理解任务"之前先进入"文风模式"，风格指令的优先级最高
+        # 注意：只有章节生成类 skill 才需要注入写作风格，其他 skill（大纲/拆书/角色等）不应注入
+        _CHAPTER_SKILLS = {
+            "chapter_generation_one_to_one",
+            "chapter_generation_one_to_one_next",
+            "chapter_generation_one_to_many",
+            "chapter_generation_one_to_many_next",
+            "chapter_regeneration_system",
+            "chapter_full_rewrite",
+            "partial_regenerate",
+        }
         _style_prefix = ""
-        if context.get("writing_style_block"):
-            _style_prefix = str(context["writing_style_block"])
-            logger.info(f"[skill] 写作风格前置注入成功，长度={len(_style_prefix)}")
-        else:
-            logger.warning(
-                f"[skill] writing_style_block 为空，写作风格未前置注入。context keys: {list(context.keys())}"
-            )
+        if skill_name in _CHAPTER_SKILLS:
+            if context.get("writing_style_block"):
+                _style_prefix = str(context["writing_style_block"])
+                logger.info(f"[skill] 写作风格前置注入成功，长度={len(_style_prefix)}")
+            else:
+                logger.warning(
+                    f"[skill] {skill_name} 未提供 writing_style_block，章节生成将不注入写作风格"
+                )
 
         messages = []
         if _style_prefix:
