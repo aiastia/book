@@ -1,8 +1,7 @@
 <script setup lang="ts">
 // 故事章节：对标 MuMuAINovel — 双模式列表 + 生成门槛 + 一键分析
-import { useProjectApi } from '~/composables/useProjectApi'
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
-import { apiGet } from '~/composables/useApi'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
 import RewriteSuggestionModal from '~/components/RewriteSuggestionModal.vue'
@@ -10,7 +9,7 @@ import RewriteSuggestionModal from '~/components/RewriteSuggestionModal.vue'
 useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 
 // 预加载默认模型名（不阻塞，失败不影响使用）
@@ -23,12 +22,12 @@ const msg = useMessage()
 })()
 
 // ===== 项目信息（含 outline_mode） =====
-const { data: projectData } = await api.getProject()
+const { data: projectData } = await useFetch(() => `/api/projects/${currentProjectId.value}`)
 const outlineMode = computed(() => projectData.value?.outline_mode || 'one_to_one')
 
 // ===== 章节 + 大纲数据 =====
-const { data: chapters, refresh: refreshList } = await api.getChapters()
-const { data: outlines } = await api.getOutlines()
+const { data: chapters, refresh: refreshList } = await useFetch(() => `/api/projects/${currentProjectId.value}/chapters`)
+const { data: outlines } = await useFetch(() => `/api/projects/${currentProjectId.value}/outlines`)
 
 // ===== 编辑器状态 =====
 const editorOpen = ref(false)
@@ -94,7 +93,7 @@ async function onRewriteSuggestionComplete(newContent: string) {
   const ch = rewriteSuggestChapter.value
   if (!ch) return
   try {
-    const full = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${ch.id}`)
+    const full = await api.getChapter(ch.id)
     rewriteOriginal.value = full?.content || ''
   } catch {
     rewriteOriginal.value = ch.content || ''
@@ -354,7 +353,7 @@ async function openEditor(c: any) {
   projectDefaultStyleId.value = projectData.value?.writing_style?.style_id
 
   // 加载章节内容
-  const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`).catch(() => null)
+  const ch = await api.getChapter(c.id).catch(() => null)
   if (ch) editingContent.value = ch.content || ''
   rawOutput.value = ch?.raw_output || ''
 
@@ -609,7 +608,7 @@ async function onModify() {
 async function onRewriteApplied() {
   if (!editing.value) return
   try {
-    const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${editing.value.id}`).catch(() => null)
+    const ch = await api.getChapter(editing.value.id).catch(() => null)
     if (ch) {
       editingContent.value = ch.content || ''
       editingTitle.value = ch.title || editingTitle.value
@@ -664,7 +663,7 @@ const pureReaderChapter = ref<any>(null)
 const pureReaderLoading = ref(false)
 
 async function fetchChapterForReader(id: number): Promise<any> {
-  return await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${id}`)
+  return await api.getChapter(id)
 }
 
 // 全屏沉浸式阅读：打开纯阅读 Modal
@@ -740,7 +739,7 @@ async function openReader(c: any) {
   readerAnnotations.value = []
   readerSummary.value = {}
   try {
-    const ch = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`)
+    const ch = await api.getChapter(c.id)
     readerChapter.value = ch
     const r = await api.getAnnotations(c.id)
     readerAnnotations.value = r.annotations || []
@@ -791,7 +790,7 @@ async function pollReaderAnalysis(taskId: number) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 2000))
     try {
-      const t = await apiGet<any>(`/api/tasks/${taskId}`)
+      const t = await api.getTaskStatus(taskId)
       if (t.status === 'completed') {
         if (readerChapter.value) {
           const r = await api.getAnnotations(readerChapter.value.id)
@@ -821,7 +820,7 @@ const planSummary = ref<string>('')        // 章节摘要
 async function openPlanEditor(c: any) {
   planEditingChapter.value = c
   try {
-    const detail = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`)
+    const detail = await api.getChapter(c.id)
     planCurrent.value = detail?.expansion_plan || null
     planSummary.value = detail?.summary || ''
   } catch {
@@ -835,7 +834,7 @@ async function openPlanEditor(c: any) {
 async function openPlanView(c: any) {
   planEditingChapter.value = c
   try {
-    const detail = await apiGet<any>(`/api/projects/${currentProjectId.value}/chapters/${c.id}`)
+    const detail = await api.getChapter(c.id)
     planCurrent.value = detail?.expansion_plan || null
     planSummary.value = detail?.summary || ''
   } catch {

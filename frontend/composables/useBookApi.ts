@@ -71,8 +71,8 @@ export function useBookApi() {
     listChapters: (id?: number) => _get(`/projects/${id || pid()}/chapters`),
     /** 单章完整内容 */
     getChapter: (chapterId: number, id?: number) => _get(`/projects/${id || pid()}/chapters/${chapterId}`),
-    createChapter: (chapterNumber: number, title: string, id?: number) =>
-      _post(`/projects/${id || pid()}/chapters`, { chapter_number: chapterNumber, title }),
+    createChapter: (body: { chapter_number: number; title: string; outline_id?: number }, id?: number) =>
+      _post(`/projects/${id || pid()}/chapters`, body),
     updateChapter: (chapterId: number, body: any, id?: number) =>
       _put(`/projects/${id || pid()}/chapters/${chapterId}`, body),
     deleteChapter: (chapterId: number, id?: number) =>
@@ -135,8 +135,8 @@ export function useBookApi() {
       return _post(`/projects/${id}/chapters/batch-generate`, body)
     },
     /** 清空章节 */
-    clearChapter: (chapterId: number, id?: number) =>
-      _post(`/projects/${id || pid()}/chapters/${chapterId}/clear`),
+    clearChapter: (chapterId: number, cascade = false, id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/${chapterId}/clear`, { cascade }),
     /** 重写/润色章节 */
     regenerateChapter: (chapterId: number, instructions = '', id?: number, targetWords?: number) =>
       _post(`/projects/${id || pid()}/chapters/${chapterId}/regenerate`, { instructions, target_word_count: targetWords }),
@@ -274,5 +274,14 @@ export function useBookApi() {
     /** 注释 */
     getAnnotations: (chapterId: number, id?: number) =>
       _get(`/projects/${id || pid()}/chapters/${chapterId}/annotations`),
+    /** 去 AI 味 */
+    aiDenoising: (body: { text: string }) =>
+      _post(`/projects/${pid()}/ai-denoising`, body),
+    /** 清理重复分析 */
+    cleanupDuplicateAnalyses: (id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/cleanup-duplicate-analyses`),
+    /** 异步触发分析 */
+    triggerAnalysisAsync: (chapterId: number, id?: number) =>
+      _post(`/projects/${id || pid()}/chapters/${chapterId}/analyze`),
   }
 }
