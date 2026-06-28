@@ -17,8 +17,7 @@ const showGen = ref(false)
 // 待补充物品/地点
 const pendingEntities = ref<{ pending_items: any[]; pending_locations: any[]; total: number } | null>(null)
 const fillingEntities = ref(false)
-async function checkPendingEntities() {
-  try {
+async function checkPendingEntities() {  try {
     const res = await $fetch(`/api/projects/${currentProjectId.value}/outlines/pending-entities`)
     if (res.total > 0) pendingEntities.value = res
     else pendingEntities.value = null
@@ -35,6 +34,14 @@ async function fillPendingEntities() {
 }
 // 页面加载和轮询完成后检查
 checkPendingEntities()
+// 预加载默认模型名（不阻塞，失败不影响使用）
+;(async () => {
+  try {
+    const models = await api.listAiModels()
+    const def = models.find((m: any) => m.is_default) || models[0]
+    if (def?.model) defaultModelName.value = def.model
+  } catch {}
+})()
 const editing = ref<any>(null)
 const editForm = reactive({
   title: '', summary: '', emotion: '', goal: '',
@@ -288,15 +295,19 @@ function openContinue() {
 }
 
 async function loadRemoteModels() {
-  if (remoteModels.value.length) return  // 已加载过
+  if (remoteModels.value.length && defaultModelName.value) return  // 已加载过
   loadingModels.value = true
   try {
     const r = await api.fetchDefaultRemoteModels()
     remoteModels.value = r.models || []
     defaultModelName.value = r.default_model || ''
   } catch (e: any) {
-    // 拉取失败不阻塞，用户可仍用默认模型
-    console.warn('拉取模型列表失败', e)
+    // 拉取失败，从本地配置取默认模型名
+    try {
+      const models = await api.listAiModels()
+      const def = models.find((m: any) => m.is_default) || models[0]
+      if (def?.model) defaultModelName.value = def.model
+    } catch {}
   } finally {
     loadingModels.value = false
   }

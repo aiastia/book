@@ -13,6 +13,15 @@ if (!currentProjectId.value) await navigateTo('/books')
 const api = useProjectApi()
 const msg = useMessage()
 
+// 预加载默认模型名（不阻塞，失败不影响使用）
+;(async () => {
+  try {
+    const models = await api.listAiModels()
+    const def = models.find((m: any) => m.is_default) || models[0]
+    if (def?.model) defaultModelName.value = def.model
+  } catch {}
+})()
+
 // ===== 项目信息（含 outline_mode） =====
 const { data: projectData } = await api.getProject()
 const outlineMode = computed(() => projectData.value?.outline_mode || 'one_to_one')
@@ -394,12 +403,19 @@ async function loadSkillsIfEmpty() {
 }
 
 async function loadModelsIfEmpty() {
-  if (availableModels.value.length > 0) return
+  if (availableModels.value.length > 0 && defaultModelName.value) return
   try {
     const r = await fetchRemoteModels()
     availableModels.value = r.models
     defaultModelName.value = r.default_model
-  } catch {}
+  } catch {
+    // 远程拉取失败，从本地配置取默认模型名
+    try {
+      const models = await api.listAiModels()
+      const def = models.find((m: any) => m.is_default) || models[0]
+      if (def?.model) defaultModelName.value = def.model
+    } catch {}
+  }
 }
 
 // ===== AI 创作（异步后台任务）=====
