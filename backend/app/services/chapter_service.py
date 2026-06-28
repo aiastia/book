@@ -181,12 +181,12 @@ def _check_content_degradation(content: str) -> str | None:
     import re as _re
 
     lines = content.split("\n")
-    eng_lines = sum(1 for l in lines if l.strip() and _re.match(r"^[a-zA-Z]", l.strip()))
+    eng_lines = sum(1 for line in lines if line.strip() and _re.match(r"^[a-zA-Z]", line.strip()))
     if eng_lines > 10 and eng_lines / max(len(lines), 1) > 0.3:
         return "检测到大量英文行（可能是词典/代码泄露）"
 
     # 2. 连续分隔符检测：超过 15 个连续的 --- 分隔符
-    sep_count = sum(1 for l in lines if l.strip() == "---")
+    sep_count = sum(1 for line in lines if line.strip() == "---")
     if sep_count > 15:
         return f"检测到 {sep_count} 个分隔符堆砌"
 
@@ -211,7 +211,7 @@ def _check_content_degradation(content: str) -> str | None:
 
     # 4. 碎片对话检测：连续短行对话（<10字）且无旁白动作
     short_dialogue = sum(
-        1 for l in lines if l.strip() and len(l.strip()) < 15 and ('"' in l or '"' in l or '"' in l)
+        1 for line in lines if line.strip() and len(line.strip()) < 15 and ('"' in line or '"' in line or '"' in line)
     )
     if short_dialogue > 15 and short_dialogue / max(len(lines), 1) > 0.5:
         return "检测到碎片化对话堆砌（无旁白动作）"
@@ -1925,7 +1925,7 @@ class ChapterService:
                 self.db.add(chapter)  # 确保 commit 后不丢失
             elif chapter.content:
                 chapter.summary = chapter.content.strip()[:150]
-            key_events = (
+            _key_events = (
                 analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
             )
 
@@ -2529,7 +2529,7 @@ class ChapterService:
         )
         if len(chars) < 2:
             return
-        name_map = {c.name: c for c in chars}
+        _name_map = {c.name: c for c in chars}
 
         # 已有关系
         existing = (
@@ -2579,7 +2579,7 @@ class ChapterService:
                 new_intimacy = max(-100, min(100, old_intimacy + intimacy_delta))
 
                 if intimacy_delta != 0:
-                    old_snapshot = {
+                    _old_snapshot = {
                         c.name: getattr(existing_rel, c.name)
                         for c in existing_rel.__table__.columns
                         if c.name not in ("created_at", "updated_at")

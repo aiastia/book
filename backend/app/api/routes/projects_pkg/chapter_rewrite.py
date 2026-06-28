@@ -297,7 +297,7 @@ async def partial_regenerate(
     user=Depends(get_current_user),
 ):
     """局部重写：只重写选中的片段（#13）。"""
-    project = await get_user_project(db, project_id, user)
+    _project = await get_user_project(db, project_id, user)
     chapter = (
         await db.execute(
             select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)

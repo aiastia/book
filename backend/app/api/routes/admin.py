@@ -310,4 +310,4 @@ async def test_smtp(
         server.quit()
         return {"ok": True, "message": f"测试邮件已发送至 {req.to_email}"}
     except Exception as e:
-        raise HTTPException(400, f"发送失败: {str(e)}")
+        raise HTTPException(400, f"发送失败: {str(e)}") from e

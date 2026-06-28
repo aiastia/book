@@ -628,7 +628,7 @@ async def get_pending_entities(
         i.name for i in (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
     }
     existing_locs = {
-        l.name for l in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
+        loc.name for loc in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
     }
 
     pending_items = [v for k, v in all_items.items() if k not in existing_items]
@@ -704,7 +704,7 @@ async def generate_pending_entities(
         i.name for i in (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
     }
     existing_locs = {
-        l.name for l in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
+        loc.name for loc in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
     }
 
     created = 0
@@ -741,7 +741,7 @@ async def generate_outlines_async(
     user=Depends(get_current_user),
 ):
     """异步生成大纲：立即返回 task_id，后台执行。"""
-    project = await get_user_project(db, project_id, user)
+    _project = await get_user_project(db, project_id, user)
 
     from app.services.async_ai_service import submit_async_task
 
@@ -2193,7 +2193,7 @@ async def expand_outline_async(
 
     完成后通过 WebSocket 推送，前端浮窗查看进度。task_type = outline_expand。
     """
-    proj = await get_user_project(db, project_id, user)
+    _proj = await get_user_project(db, project_id, user)
     outline = (
         await db.execute(
             select(Outline).where(Outline.id == outline_id, Outline.project_id == project_id)

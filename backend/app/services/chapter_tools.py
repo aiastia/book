@@ -976,7 +976,7 @@ async def _list_available_entities(db: AsyncSession, project_id: int) -> str:
             "location_type": l.location_type or "",
             "danger_level": l.danger_level or "safe",
         }
-        for l in locs
+        for loc in locs
     ]
 
     # 物品
@@ -1032,11 +1032,11 @@ async def _query_location(db: AsyncSession, project_id: int, name: str) -> str:
         .scalars()
         .all()
     )
-    matched = [l for l in locs if name in l.name or l.name in name]
+    matched = [loc for loc in locs if name in loc.name or loc.name in name]
     if not matched:
         return json.dumps({"error": f"未找到地点「{name}」"}, ensure_ascii=False)
     results = []
-    for l in matched[:3]:
+    for loc in matched[:3]:
         parent_name = ""
         if l.parent_location_id:
             parent = (
@@ -1246,9 +1246,9 @@ async def _generate_location(
         (await db.execute(select(Location).where(Location.project_id == project_id)))
         .scalars().all()
     )
-    matched = [l for l in existing if name in l.name or l.name in name]
+    matched = [item for item in existing if name in item.name or item.name in name]
     if matched:
-        l = matched[0]
+        _item = matched[0]
         return json.dumps({
             "name": l.name, "location_type": l.location_type,
             "description": (l.description or "")[:200],

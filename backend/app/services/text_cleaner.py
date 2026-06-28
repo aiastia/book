@@ -181,7 +181,7 @@ def _dedupe_consecutive_likes(text: str) -> str:
             lines[j] = ""
     elif like_streak == 2:
         lines[like_indices[0]] = ""
-    return "\n".join(l for l in lines if l.strip() or l == "")
+    return "\n".join(line for line in lines if line.strip() or line == "")
 
 
 def _dedupe_consecutive_negations(text: str) -> str:
@@ -351,7 +351,7 @@ def _dedupe_repeated_paragraphs(text: str) -> tuple[str, dict]:
             if prev and len(prev) > 30:
                 # 取两段较短的那个长度的 80% 作为阈值
                 min_len = min(len(prev), len(para_stripped))
-                threshold = min_len * 0.8
+                _threshold = min_len * 0.8
                 # 简单方法：短段是否是长段的子串，或长段包含短段 80% 的字符
                 if para_stripped in prev or prev in para_stripped:
                     is_dup = True

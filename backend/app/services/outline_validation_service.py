@@ -179,7 +179,7 @@ async def validate_outline_entities(
                     pv = item.get("power_value", 50)
                     try:
                         pv = int(pv)
-                    except:
+                    except Exception:
                         pv = 50
                     db.add(
                         Organization(

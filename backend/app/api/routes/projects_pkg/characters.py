@@ -958,7 +958,7 @@ async def list_change_logs(
         .scalars()
         .all()
     )
-    return [l.to_dict() for l in logs]
+    return [log.to_dict() for log in logs]
 
 
 @router.post("/{project_id}/characters/{character_id}/change-logs")

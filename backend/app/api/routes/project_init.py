@@ -398,7 +398,7 @@ async def _save_characters(db, pid, chars_data, existing_names: set):
     """保存角色到数据库，含职业体系匹配。"""
     import logging
 
-    logger = logging.getLogger(__name__)
+    _logger = logging.getLogger(__name__)
     from app.models.career import Career
     from app.models.character import Character
 
@@ -851,7 +851,7 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
         return None
 
     name_to_id = {c.name: c.id for c in chars}
-    id_set = {c.id for c in chars}
+    _id_set = {c.id for c in chars}
 
     # 构建详细角色信息（让 AI 基于性格/背景/目标生成有深度的关系）
     char_parts = []
@@ -969,7 +969,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
     await db.commit()
 
     # 检查是否已有成员关联（可能 _link_org_memberships 已部分成功）
-    existing_members = (
+    _existing_members = (
         await db.execute(
             select(func.count(OrganizationMember.id)).where(
                 OrganizationMember.organization_id.in_(
@@ -1398,7 +1398,7 @@ async def _step_items(db, task, pid, proj, engine, ai_client):
     chars = (await db.execute(select(Character).where(Character.project_id == pid))).scalars().all()
     locs = (await db.execute(select(Location).where(Location.project_id == pid))).scalars().all()
     char_hint = "、".join(f"{c.name}({c.role})" for c in chars[:8]) if chars else "暂无"
-    loc_hint = "、".join(l.name for l in locs[:5]) if locs else "暂无"
+    loc_hint = "、".join(loc.name for loc in locs[:5]) if locs else "暂无"
 
     item_result, ierr = await _safe_skill_call(
         engine,

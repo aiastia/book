@@ -551,7 +551,7 @@ async def generate_organization(
     pv = org_data.get("power_value", org_data.get("power_level", 50))
     try:
         pv = int(pv)
-    except:
+    except Exception:
         pv = 50
     org = Organization(
         project_id=project_id,
@@ -677,7 +677,7 @@ async def generate_organization_async(
                     pv = org_data.get("power_value", org_data.get("power_level", 50))
                     try:
                         pv = int(pv)
-                    except:
+                    except Exception:
                         pv = 50
                     org = Organization(
                         project_id=pid,
@@ -704,7 +704,7 @@ async def generate_organization_async(
         except Exception as e:
             try:
                 await tracker.fail(str(e))
-            except:
+            except Exception:
                 pass
 
     task_id = await submit_async_task(
@@ -836,7 +836,7 @@ async def auto_generate_organization(
     pv = org_data.get("power_value", org_data.get("power_level", 50))
     try:
         pv = int(pv)
-    except:
+    except Exception:
         pv = 50
     org = Organization(
         project_id=project_id,

@@ -50,7 +50,7 @@ async def list_locations(
         q = q.where(Location.name.like(f"%{keyword}%"))
     q = q.order_by(Location.sort_order.asc(), Location.id.asc())
     locs = (await db.execute(q)).scalars().all()
-    return [l.to_dict() for l in locs]
+    return [loc.to_dict() for loc in locs]
 
 
 @router.get("/{project_id}/locations/tree")
@@ -72,9 +72,9 @@ async def location_tree(
         .scalars()
         .all()
     )
-    by_id = {l.id: {**l.to_dict(), "children": []} for l in locs}
+    by_id = {loc.id: {**loc.to_dict(), "children": []} for loc in locs}
     roots = []
-    for l in locs:
+    for loc in locs:
         node = by_id[l.id]
         if l.parent_location_id and l.parent_location_id in by_id:
             by_id[l.parent_location_id]["children"].append(node)
@@ -249,7 +249,7 @@ async def generate_locations(
         data = data.get("locations") or data.get("data") or []
 
     created = []
-    for l in data[: req.count * 2]:
+    for item in data[: req.count * 2]:
         if not isinstance(l, dict) or not l.get("name"):
             continue
         try:

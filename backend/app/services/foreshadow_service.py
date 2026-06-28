@@ -442,7 +442,7 @@ class ForeshadowService:
                         ref_id = int(ref_id)
                     except ValueError:
                         ref_id = None
-                title = fs_data.get("title", "")
+                _title = fs_data.get("title", "")
                 if fs_type == "planted" and ref_id:
                     fs = await self.get(ref_id)
                     if fs and fs.status == "pending":
