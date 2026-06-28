@@ -100,7 +100,6 @@ async def generate_cover_prompt(
         pen_name_line=pen_name_line,
         genre=proj.genre or "网文",
         narrative_pov=proj.narrative_pov or "第三人称",
-        target_words=str(proj.target_word_count) if proj.target_word_count else "未设定",
         world_desc=world_desc + " " if world_desc else "",
         description=proj.synopsis or "暂无简介",
     )
