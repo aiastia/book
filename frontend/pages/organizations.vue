@@ -11,8 +11,8 @@ if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
 const { onTaskCompleted } = useBackgroundTasks()
-const { data: tree, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/organizations/tree`)
-const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
+const { data: tree, refresh: refreshTree } = await useFetch(() => `/projects/${currentProjectId.value}/organizations/tree`)
+const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 
 // 当组织生成/初始化任务完成时自动刷新列表
 onTaskCompleted('organizations', () => { refresh() })

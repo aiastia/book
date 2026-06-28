@@ -8,11 +8,11 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const api = useBookApi()
 const msg = useMessage()
-const { data: careers, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
+const { data: careers, refresh: refreshCareers } = await useFetch(() => `/projects/${currentProjectId.value}/careers`)
 // 角色职业关联（#19，显示持有此职业的角色）
 const { data: charCareers } = await api.getCharCareers()
 // 角色名映射
-const { data: characters, refresh: refresh } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
+const { data: characters, refresh: refreshChars } = await useFetch(() => `/projects/${currentProjectId.value}/characters`)
 const charNameMap = computed(() => {
   const m: Record<number, string> = {}
   for (const c of (characters.value || [])) m[c.id] = c.name
