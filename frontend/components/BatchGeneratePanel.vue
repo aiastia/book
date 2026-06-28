@@ -88,14 +88,19 @@ async function loadWritingStyles() {
 }
 
 async function loadRemoteModels() {
-  if (remoteModels.value.length) return
+  if (remoteModels.value.length && defaultModelName.value) return
   loadingModels.value = true
   try {
     const r = await api.fetchDefaultRemoteModels()
     remoteModels.value = r.models || []
     defaultModelName.value = r.default_model || ''
   } catch (e: any) {
-    console.warn('拉取模型列表失败', e)
+    // 远程拉取失败，从本地配置取默认模型名
+    try {
+      const models = await api.listAiModels()
+      const def = models.find((m: any) => m.is_default) || models[0]
+      if (def?.model) defaultModelName.value = def.model
+    } catch {}
   } finally {
     loadingModels.value = false
   }
@@ -256,12 +261,15 @@ const statusMeta = (s: string) => {
         <div class="form-row-2">
           <div class="form-col">
             <label class="form-label">起始章节</label>
-            <a-select v-model:value="startChapterNumber" style="width:100%" placeholder="选择起始章">
+            <a-select v-model:value="startChapterNumber" style="width:100%" :placeholder="defaultStartChapter ? `第${defaultStartChapter}章` : '选择起始章'">
+              <a-select-option v-if="!emptyChapters.length" :value="defaultStartChapter">
+                第{{ defaultStartChapter }}章（接续生成）
+              </a-select-option>
               <a-select-option v-for="c in emptyChapters" :key="c.id" :value="c.chapter_number">
                 第{{ c.chapter_number }}章：{{ c.title || '无标题' }}
               </a-select-option>
             </a-select>
-            <div class="field-hint">从该章起连续生成（只列出空章节）</div>
+            <div class="field-hint">从该章起连续生成{{ emptyChapters.length ? '（只列出空章节）' : '' }}</div>
           </div>
           <div class="form-col">
             <label class="form-label">生成数量</label>
@@ -280,7 +288,7 @@ const statusMeta = (s: string) => {
         <div class="form-row-2">
           <div class="form-col">
             <label class="form-label">写作风格</label>
-            <a-select v-model:value="styleId" style="width:100%" placeholder="项目默认风格" allow-clear show-search option-filter-prop="label">
+            <a-select v-model:value="styleId" style="width:100%" :placeholder="projectDefaultStyleName ? `默认（${projectDefaultStyleName}）` : '项目默认风格'" allow-clear show-search option-filter-prop="label">
               <a-select-option v-for="s in writingStyles" :key="s.id" :value="s.id" :label="s.name + (projectDefaultStyleName === s.name ? ' (默认)' : '')">
                 {{ s.name }}{{ projectDefaultStyleName === s.name ? ' (项目默认)' : '' }}
               </a-select-option>
@@ -303,14 +311,14 @@ const statusMeta = (s: string) => {
               allow-clear show-search option-filter-prop="label"
               :loading="loadingModels"
             >
-              <a-select-option value="">使用默认模型</a-select-option>
+              <a-select-option value="">{{ defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型' }}</a-select-option>
               <a-select-option v-for="m in remoteModels" :key="m.id" :value="m.id" :label="m.id">{{ m.id }}</a-select-option>
             </a-select>
           </div>
           <div class="form-col">
             <label class="form-label">叙事视角</label>
             <a-select v-model:value="narrativePerspective" style="width:100%" :placeholder="`按小说设定（${projectDefaultPov}）`" allow-clear>
-              <a-select-option value="">按小说设定</a-select-option>
+              <a-select-option value="">{{ `按小说设定（${projectDefaultPov}）` }}</a-select-option>
               <a-select-option value="第三人称">第三人称（他/她）</a-select-option>
               <a-select-option value="第一人称">第一人称（我）</a-select-option>
               <a-select-option value="全知视角">全知视角</a-select-option>
