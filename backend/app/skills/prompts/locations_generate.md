@@ -20,7 +20,7 @@ importance 不是指"场面最宏大"或"名字最炫酷"。importance=major 或
 
 【输出格式】
 只返回纯JSON数组：
-[{"name":"地点名（中文。多位面题材冠以位面标签）","location_type":"城市/区域/建筑/秘境/自然景观/国家/大陆/枢纽空间/其他","description":"100-200字中文描述","atmosphere":"氛围（中文）","importance":"normal/major/key"}]
+[{"name":"地点名（中文。多位面题材冠以位面标签）","location_type":"城市/区域/建筑/秘境/自然景观/国家/大陆/枢纽空间/其他","description":"100-200字中文描述","atmosphere":"氛围（中文）","importance":"normal/major/key","danger_level":"safe/low/medium/high（安全/低危/中危/高危）"}]
 
 生成 5-8 个地点，至少 1 个 importance=major 或 key。
 
