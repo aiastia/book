@@ -22,7 +22,6 @@ const submitting = ref(false)
 // 表单
 const startChapterNumber = ref<number>(1)
 const count = ref(5)
-const countOptions = [5, 10, 20, 40]
 const targetWords = ref(4000)
 const styleId = ref<number | null>(null)
 const narrativePerspective = ref<string>('')  // 空 = 按小说设定
@@ -41,33 +40,35 @@ const defaultModelName = ref('')
 const loadingModels = ref(false)
 const projectDefaultStyleName = ref('')
 
-// 可选起始章（空章节，优先）
+// 可选起始章（空章节 + 下一章号）
 const emptyChapters = computed(() => {
   return (props.chapters || []).filter((c: any) => !c.content || c.content.trim().length < 100)
 })
-// 默认起始章 = 第一个空章节
+// 默认起始章 = 第一个空章节，无空章节时 = 最后一章+1（接续生成）
 const defaultStartChapter = computed(() => {
   if (emptyChapters.value.length) return emptyChapters.value[0].chapter_number
   const list = props.chapters || []
   return list.length ? list[list.length - 1].chapter_number + 1 : 1
 })
 
-// 从起始章开始，可用的空章节数量
+// 从起始章开始，可用的空章节数量（无空章节时算接续生成，无上限限制）
 const availableCount = computed(() => {
   const start = startChapterNumber.value || 1
-  return emptyChapters.value.filter((c: any) => c.chapter_number >= start).length
+  const empties = emptyChapters.value.filter((c: any) => c.chapter_number >= start).length
+  if (empties > 0) return empties
+  // 无空章节 = 接续生成，数量不受已有章节限制
+  return 40
 })
-// 实际生成数量 = 取用户选择和可用数的较小值
+// 实际生成数量
 const actualCount = computed(() => {
-  return Math.min(count.value, availableCount.value || 0)
+  return Math.min(count.value, availableCount.value || 1)
 })
 
 // 项目默认叙事视角（用于 placeholder / 「按小说设定」展示）
 const projectDefaultPov = ref('第三人称')
 
-// 当前任务状态
+// 当前任务状态（仅用于展示已完成的结果，进行中由悬浮栏跟踪）
 const currentTask = ref<any>(null)
-let pollTimer: any = null
 
 function openPanel() {
   startChapterNumber.value = defaultStartChapter.value
@@ -120,9 +121,8 @@ async function loadProjectDefault() {
 async function checkActiveTask() {
   try {
     const t = await api.getActiveBatchTask()
-    if (t && ['pending', 'running'].includes(t.status)) {
-      currentTask.value = t
-      startPolling(t.id)
+    if (t && ['completed', 'failed', 'cancelled'].includes(t.status)) {
+      currentTask.value = t  // 只记录已完成的状态用于展示结果
     }
   } catch {}
 }
@@ -149,8 +149,9 @@ async function onSubmit() {
       narrative_perspective: narrativePerspective.value || undefined,
     })
     msg.success(`已提交批量生成任务，从第${startChapterNumber.value}章起共 ${actualCount.value} 章`)
-    currentTask.value = await api.getBatchStatus(r.task_id)
-    startPolling(r.task_id)
+    trackTask({ id: r.task_id, task_type: 'chapter_batch', title: `批量生成 ${actualCount.value} 章` })
+    open.value = false  // 关闭弹窗，进度由悬浮栏显示
+    emit('done')
   } catch (e: any) {
     msg.error('提交失败：' + formatError(e))
   } finally {
@@ -158,46 +159,7 @@ async function onSubmit() {
   }
 }
 
-function startPolling(taskId: number) {
-  stopPolling()
-  const poll = async () => {
-    try {
-      const t = await api.getBatchStatus(taskId)
-      currentTask.value = t
-        if (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled') {
-          stopPolling()
-          if (t.status === 'completed') {
-            msg.success(`批量生成完成：${t.completed_chapters}/${t.total_chapters} 章`)
-            emit('done')
-          }
-        }
-    } catch (e) {
-      console.warn('轮询失败', e)
-    }
-  }
-  poll()
-  pollTimer = setInterval(poll, 3000)
-}
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
-
-async function onCancel() {
-  if (!currentTask.value) return
-  if (!await msg.confirm('确认取消批量生成？')) return
-  stopPolling()
-  const taskId = currentTask.value.id
-  currentTask.value = null
-  try {
-    await api.cancelBatchTask(taskId)
-    msg.success('已取消')
-    emit('done')  // 通知父组件刷新，让已生成的章节不再出现在空章节列表
-  } catch (e: any) {
-    msg.error('取消失败：' + formatError(e))
-  }
-}
-
-onUnmounted(() => stopPolling())
+onUnmounted(() => {})
 
 const statusMeta = (s: string) => {
   const map: Record<string, { label: string; color: string }> = {
@@ -216,31 +178,14 @@ const statusMeta = (s: string) => {
     <a-button type="primary" @click="openPanel">📚 批量生成</a-button>
 
     <a-modal v-model:open="open" title="批量生成章节" width="680px" :footer="null">
-      <!-- 任务进行中 -->
-      <div v-if="currentTask && ['pending', 'running'].includes(currentTask.status)" class="task-active">
-        <div class="task-header">
-          <span class="task-status-tag" :style="{ background: statusMeta(currentTask.status).color + '20', color: statusMeta(currentTask.status).color }">
-            {{ statusMeta(currentTask.status).label }}
-          </span>
-          <span class="task-progress-text">{{ currentTask.completed_chapters }}/{{ currentTask.total_chapters }} 章</span>
-          <a-button danger size="small" style="margin-left:auto" @click="onCancel">取消生成</a-button>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: currentTask.progress + '%', background: statusMeta(currentTask.status).color }"></div>
-        </div>
-        <div class="task-message">{{ currentTask.status_message || '处理中…' }}</div>
-        <div v-if="currentTask.current_chapter_number" class="current-chap">
-          正在生成：第 {{ currentTask.current_chapter_number }} 章
-          <span v-if="currentTask.current_retry_count > 0" class="retry-badge">重试 {{ currentTask.current_retry_count }}</span>
-        </div>
-      </div>
-
-      <!-- 任务完成/失败 -->
+      <!-- 任务完成/失败提示（进行中由悬浮栏显示，不在此重复） -->
       <a-alert
-        v-else-if="currentTask && ['completed', 'failed', 'cancelled'].includes(currentTask.status)"
+        v-if="currentTask && ['completed', 'failed', 'cancelled'].includes(currentTask.status)"
         :type="currentTask.status === 'completed' ? 'success' : currentTask.status === 'failed' ? 'error' : 'warning'"
         show-icon
         style="margin-bottom: 16px"
+        closable
+        @close="currentTask = null"
       >
         <template #message>
           {{ statusMeta(currentTask.status).label }}：{{ currentTask.completed_chapters }}/{{ currentTask.total_chapters }} 章完成
@@ -261,25 +206,24 @@ const statusMeta = (s: string) => {
         <div class="form-row-2">
           <div class="form-col">
             <label class="form-label">起始章节</label>
-            <a-select v-model:value="startChapterNumber" style="width:100%" :placeholder="defaultStartChapter ? `第${defaultStartChapter}章` : '选择起始章'">
+            <a-select v-model:value="startChapterNumber" style="width:100%" :placeholder="`第${defaultStartChapter}章`">
               <a-select-option v-if="!emptyChapters.length" :value="defaultStartChapter">
                 第{{ defaultStartChapter }}章（接续生成）
               </a-select-option>
               <a-select-option v-for="c in emptyChapters" :key="c.id" :value="c.chapter_number">
-                第{{ c.chapter_number }}章：{{ c.title || '无标题' }}
+                第{{ c.chapter_number }}章{{ c.title ? '：' + c.title : '（空）' }}
               </a-select-option>
             </a-select>
-            <div class="field-hint">从该章起连续生成{{ emptyChapters.length ? '（只列出空章节）' : '' }}</div>
+            <div class="field-hint">
+              {{ emptyChapters.length ? `可选 ${emptyChapters.length} 个空章节` : '无空章节，将接续生成新章节' }}
+            </div>
           </div>
           <div class="form-col">
-            <label class="form-label">生成数量</label>
-            <a-radio-group v-model:value="count" button-style="solid" style="width:100%">
-              <a-radio-button v-for="n in countOptions" :key="n" :value="n" :style="{ width: (100 / countOptions.length) + '%' }">{{ n }} 章</a-radio-button>
-            </a-radio-group>
+            <label class="form-label">生成数量：{{ count }} 章</label>
+            <a-slider v-model:value="count" :min="1" :max="40" :marks="{ 1: '1', 5: '5', 10: '10', 20: '20', 40: '40' }" />
             <div class="field-hint">
-              可用空章节 {{ availableCount }} 章
-              <template v-if="actualCount < count">，实际将生成 {{ actualCount }} 章</template>
-              <template v-else>，将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + actualCount - 1 }} 章</template>
+              <template v-if="actualCount < count">可用空章节 {{ availableCount }} 章，实际将生成 {{ actualCount }} 章</template>
+              <template v-else>将生成第 {{ startChapterNumber }} ~ {{ (startChapterNumber || 1) + actualCount - 1 }} 章</template>
             </div>
           </div>
         </div>
@@ -342,15 +286,6 @@ const statusMeta = (s: string) => {
 </template>
 
 <style scoped>
-.task-active { background: #F8F6F1; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-.task-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.task-status-tag { font-size: 12px; padding: 2px 10px; border-radius: 4px; font-weight: 600; }
-.task-progress-text { font-size: 14px; font-weight: 600; color: #2B2B2B; }
-.progress-bar { height: 6px; background: #E8E4DC; border-radius: 999; overflow: hidden; margin-bottom: 10px; }
-.progress-fill { height: 100%; border-radius: 999; transition: width .5s; }
-.task-message { font-size: 13px; color: #595959; }
-.current-chap { font-size: 12px; color: #4D8088; margin-top: 6px; font-weight: 500; }
-.retry-badge { background: #FFF7E6; color: #D49A4E; padding: 1px 6px; border-radius: 4px; font-size: 11px; margin-left: 6px; }
 .config-section { }
 .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
 .form-col { display: flex; flex-direction: column; gap: 4px; }
