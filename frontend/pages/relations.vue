@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 角色关系：Vue Flow 图谱视图 + 表格视图 + 手动增删改（#17 增强）
 // Vue Flow 提供拖拽/缩放/自动布局，对标 MuMuAINovel ReactFlow
+import { markRaw } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
