@@ -73,12 +73,10 @@ function isAdminGroup(group: any) {
       </button>
     </div>
 
-    <ClientOnly>
-      <div v-if="currentProjectInfo" class="sidebar-project">
-        <div class="sidebar-project-label">当前作品</div>
-        <div class="sidebar-project-name"><span>📖</span>{{ currentProjectInfo.title }}</div>
-      </div>
-    </ClientOnly>
+    <div v-if="currentProjectInfo" class="sidebar-project">
+      <div class="sidebar-project-label">当前作品</div>
+      <div class="sidebar-project-name"><span>📖</span>{{ currentProjectInfo.title }}</div>
+    </div>
 
     <nav class="sidebar-nav">
       <template v-for="(group, gi) in groupedNav" :key="group.title + '-' + gi">

@@ -309,7 +309,17 @@ function buildGraph() {
       style: nodeStyleFor(n),
     })
   })
-  vfEdges.value = es.map((e: any, i: number) => {
+  // 去重：同一个角色对同一关系类型只保留一条边（按 source→target 排序去重）
+  const seenEdges = new Set<string>()
+  const dedupedEdges: any[] = []
+  for (const e of es) {
+    const pair = [String(e.source), String(e.target), e.relation_type || ''].sort().join('|')
+    if (seenEdges.has(pair)) continue
+    seenEdges.add(pair)
+    dedupedEdges.push(e)
+  }
+
+  vfEdges.value = dedupedEdges.map((e: any, i: number) => {
     const color = categoryColor[e.category] || '#999'
     return {
       id: `e${i}`,

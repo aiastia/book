@@ -72,6 +72,21 @@ export function useProject() {
       }
     }
 
+    // SSR: 从 cookie 加载项目信息（避免 hydration mismatch）
+    if (currentProjectInfo.value === null) {
+      try {
+        if (import.meta.server) {
+          const event = useRequestEvent()
+          if (event) {
+            const infoRaw = (event.headers?.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${INFO_COOKIE_KEY}=([^;]*)`))
+            if (infoRaw) {
+              currentProjectInfo.value = JSON.parse(decodeURIComponent(infoRaw[1]))
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
     // 客户端同步：将 cookie 和 localStorage 统一到当前权威值
     if (import.meta.client && currentProjectId.value !== null) {
       const cookieVal = projectIdCookie.value && projectIdCookie.value !== false
