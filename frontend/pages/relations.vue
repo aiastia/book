@@ -256,7 +256,6 @@ function buildGraph() {
       id: String(n.id),
       position: { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) },
       data: { label: n.name, role: n.role, isMain },
-      type: 'character',
       style: {
         background: isMain ? '#4D8088' : '#5A9098',
         color: '#fff',
@@ -284,7 +283,7 @@ function buildGraph() {
       style: { stroke: color, strokeWidth: Math.abs(e.intimacy) > 50 ? 2.5 : 1.5 },
       labelStyle: { fill: color, fontSize: 11, fontWeight: 600 },
       labelBgStyle: { fill: '#fff' },
-      type: e.intimacy < 0 ? 'step' : 'default',
+      type: e.intimacy < 0 ? 'smoothstep' : 'default',
     }
   })
 }

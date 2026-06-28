@@ -110,20 +110,22 @@ function isAdminGroup(group: any) {
         >{{ collapsed ? '' : item.label }}</SidebarNavItem>
       </template>
 
-      <!-- 管理员入口 -->
-      <template v-if="adminGroup">
-        <div class="sidebar-group-title">{{ collapsed ? '' : adminGroup.title }}</div>
-        <button
-          v-for="item in adminGroup.items"
-          :key="item.to"
-          class="sidebar-nav-item"
-          :class="{ active: currentPath === item.to }"
-          @click="navigateToAdmin(item.to)"
-        >
-          <span class="sidebar-nav-icon"><AppIcon :name="item.icon" /></span>
-          <span v-if="!collapsed" class="sidebar-nav-label">{{ item.label }}</span>
-        </button>
-      </template>
+      <!-- 管理员入口（仅客户端渲染，避免 SSR hydration mismatch） -->
+      <ClientOnly>
+        <template v-if="adminGroup">
+          <div class="sidebar-group-title">{{ collapsed ? '' : adminGroup.title }}</div>
+          <button
+            v-for="item in adminGroup.items"
+            :key="item.to"
+            class="sidebar-nav-item"
+            :class="{ active: currentPath === item.to }"
+            @click="navigateToAdmin(item.to)"
+          >
+            <span class="sidebar-nav-icon"><AppIcon :name="item.icon" /></span>
+            <span v-if="!collapsed" class="sidebar-nav-label">{{ item.label }}</span>
+          </button>
+        </template>
+      </ClientOnly>
     </nav>
 
     <ClientOnly>
