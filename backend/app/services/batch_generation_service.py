@@ -228,7 +228,7 @@ async def run_batch_generation(task_id: int):
         # 构造覆盖项 dict（每章通用）
         overrides = {
             "target_word_count": target_word_count,
-            "skip_analysis": True,  # 批量模式：分析放到生成完成后统一执行
+            "skip_analysis": True,  # 批量模式：分析推迟到进度更新之后
         }
         if narrative_perspective:
             overrides["narrative_perspective"] = narrative_perspective
@@ -301,7 +301,7 @@ async def run_batch_generation(task_id: int):
                     sub_progress={
                         "generation": {"done": completed, "total": len(chapter_ids)},
                         "analysis": {
-                            "done": 0,  # 分析在生成完成后统一执行
+                            "done": max(0, completed - 1),  # 上一章分析中
                             "total": len(chapter_ids) if enable_analysis else 0,
                         },
                         "phase": "generating",
@@ -345,6 +345,40 @@ async def run_batch_generation(task_id: int):
                     # 刷新项目总字数
                     await _refresh_project_wc(project_id)
                     logger.info(f"[batch] 第{ch_num}章生成完成 ({completed}/{len(chapter_ids)})")
+
+                    # 分析刚写完的章节
+                    if enable_analysis:
+                        analysis_done = max(0, completed - 1)
+                        await _sync_bg_task(
+                            task_id,
+                            f"分析第{ch_num}章...",
+                            sub_progress={
+                                "generation": {"done": completed, "total": len(chapter_ids)},
+                                "analysis": {"done": analysis_done, "total": len(chapter_ids)},
+                                "phase": "analyzing",
+                            },
+                        )
+                        try:
+                            async with async_session() as adb:
+                                ch2 = (
+                                    await adb.execute(select(Chapter).where(Chapter.id == chapter_id))
+                                ).scalar_one_or_none()
+                                if ch2 and ch2.content:
+                                    from app.services.chapter_service import ChapterService
+                                    svc2 = ChapterService(adb, project_id, user_id)
+                                    await svc2._auto_analyze(ch2)
+                        except Exception as e:
+                            logger.warning(f"[batch] 第{ch_num}章分析失败: {e}")
+                        # 分析完成后更新
+                        await _sync_bg_task(
+                            task_id,
+                            f"第{ch_num}章分析完成",
+                            sub_progress={
+                                "generation": {"done": completed, "total": len(chapter_ids)},
+                                "analysis": {"done": completed, "total": len(chapter_ids)},
+                                "phase": "generating",
+                            },
+                        )
                     break
             except Exception as e:
                 last_err = str(e)
@@ -402,35 +436,6 @@ async def run_batch_generation(task_id: int):
                 )
             )
             await pdb.commit()
-
-    # ===== 批量剧情分析（生成完成后统一执行） =====
-    if enable_analysis and completed > 0:
-        from app.services.chapter_service import ChapterService
-
-        analyzed = 0
-        for idx, chapter_id in enumerate(chapter_ids):
-            async with async_session() as adb:
-                try:
-                    ch = (
-                        await adb.execute(select(Chapter).where(Chapter.id == chapter_id))
-                    ).scalar_one_or_none()
-                    if not ch or not ch.content:
-                        continue
-                    svc = ChapterService(adb, project_id, user_id)
-                    await svc._auto_analyze(ch)
-                    analyzed += 1
-                except Exception as e:
-                    logger.warning(f"[batch] 第{chapter_id}章分析失败: {e}")
-            # 更新分析进度
-            await _sync_bg_task(
-                task_id,
-                f"分析第{ch.chapter_number if ch else '?'}章 ({analyzed}/{len(chapter_ids)})",
-                sub_progress={
-                    "generation": {"done": len(chapter_ids), "total": len(chapter_ids)},
-                    "analysis": {"done": analyzed, "total": len(chapter_ids)},
-                    "phase": "analyzing",
-                },
-            )
 
     # 全部完成
     await _mark_status(task_id, "completed", f"批量完成（{completed}/{len(chapter_ids)} 章）")
