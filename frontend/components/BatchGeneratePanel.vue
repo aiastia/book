@@ -1,17 +1,15 @@
 <script setup lang="ts">
-// 批量生成面板（连续模式，对标 MuMuAINovel）：
-// 选「起始章 + 数量(5/10/20/40) + 风格 + 字数 + 模型 + 视角」→ 提交 → 进度轮询 + 取消
-import { useProjectApi } from '~/composables/useProjectApi'
+// 批量生成面板（连续模式）
+import { useBookApi } from '~/composables/useBookApi'
 import { useProject } from '~/composables/useProject'
 import { useBackgroundTasks } from '~/composables/useBackgroundTasks'
-import { apiGet } from '~/composables/useApi'
 
 const props = defineProps<{
   chapters: any[]
 }>()
 const emit = defineEmits<{ (e: 'done'): void }>()
 
-const api = useProjectApi()
+const api = useBookApi()
 const msg = useMessage()
 const { trackTask } = useBackgroundTasks()
 const { currentProjectId } = useProject()
@@ -24,8 +22,8 @@ const startChapterNumber = ref<number>(1)
 const count = ref(5)
 const targetWords = ref(4000)
 const styleId = ref<number | null>(null)
-const narrativePerspective = ref<string>('')  // 空 = 按小说设定
-const aiModel = ref<string>('')               // 空 = 使用默认模型
+const narrativePerspective = ref<string>('')
+const aiModel = ref<string>('')
 const enableAnalysis = ref(true)
 
 if (import.meta.client) {
@@ -90,7 +88,7 @@ function openPanel() {
 
 async function loadWritingStyles() {
   try {
-    writingStyles.value = await apiGet<any[]>('/api/writing-styles') || []
+    writingStyles.value = await api.listWritingStyles() || []
   } catch {}
 }
 
@@ -101,8 +99,7 @@ async function loadRemoteModels() {
     const r = await api.fetchDefaultRemoteModels()
     remoteModels.value = r.models || []
     defaultModelName.value = r.default_model || ''
-  } catch (e: any) {
-    // 远程拉取失败，从本地配置取默认模型名
+  } catch {
     try {
       const models = await api.listAiModels()
       const def = models.find((m: any) => m.is_default) || models[0]
@@ -116,7 +113,7 @@ async function loadRemoteModels() {
 async function loadProjectDefault() {
   if (!currentProjectId.value) return
   try {
-    const p = await apiGet<any>(`/api/projects/${currentProjectId.value}`)
+    const p = await api.getProject()
     if (p) {
       projectDefaultPov.value = p.narrative_pov || '第三人称'
       projectDefaultStyleName.value = p.writing_style?.name || ''
@@ -129,7 +126,7 @@ async function checkActiveTask() {
   try {
     const t = await api.getActiveBatchTask()
     if (t && ['completed', 'failed', 'cancelled'].includes(t.status)) {
-      currentTask.value = t  // 只记录已完成的状态用于展示结果
+      currentTask.value = t
     }
   } catch {}
 }
@@ -146,14 +143,14 @@ async function onSubmit() {
   submitting.value = true
   try {
     if (import.meta.client) localStorage.setItem('moyu_chapter_words', String(targetWords.value))
-    const r = await api.batchGenerate({
-      start_chapter_number: startChapterNumber.value,
+    const r = await api.generateChapters(currentProjectId.value!, {
+      start: startChapterNumber.value,
       count: actualCount.value,
-      enable_analysis: enableAnalysis.value,
-      target_word_count: targetWords.value,
-      model_override: aiModel.value || undefined,
-      style_id: styleId.value || undefined,
-      narrative_perspective: narrativePerspective.value || undefined,
+      targetWords: targetWords.value,
+      modelOverride: aiModel.value || undefined,
+      styleId: styleId.value || undefined,
+      narrativePerspective: narrativePerspective.value || undefined,
+      enableAnalysis: enableAnalysis.value,
     })
     msg.success(`已提交批量生成任务，从第${startChapterNumber.value}章起共 ${actualCount.value} 章`)
     trackTask({ id: r.task_id, task_type: 'chapter_batch', title: `批量生成 ${actualCount.value} 章` })
