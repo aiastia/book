@@ -326,11 +326,230 @@ async def export_project(
     }
 
 
+def _convert_mumu_to_native(mumu: dict) -> dict:
+    """将 MuMuAINovel 导出格式转换为本系统原生导入格式。
+
+    mumu 格式特征：
+      - version: "1.x.x"
+      - project: {title, genre, synopsis, narrative_pov, ...}
+      - chapters: [{title, content, chapter_number, status, word_count, summary, expansion_plan}]
+      - characters: [{name, role, personality, background, appearance, age, gender, ...}]
+      - outlines: [{title, content, structure, order_index}]
+      - relationships: [{source_name, target_name, relationship_name, intimacy_level}]
+      - organizations: [{character_name, parent_org_name, power_level, ...}]
+      - organization_members: [{organization_name, character_name, position, rank}]
+      - careers: [{name, type, stages, ...}]
+      - character_careers: [{character_name, career_name, current_stage}]
+      - story_memories: [{chapter_title, memory_type, title, content, ...}]
+      - plot_analysis: [{chapter_title, plot_stage, conflict_level, ...}]
+      - writing_styles: [{name, style_type, prompt_content}]
+    """
+    import json as _json
+
+    # project
+    proj = mumu.get("project", {}) or {}
+
+    # characters → 同时分离 organization（is_organization=True 的）
+    char_list = []
+    org_list = []
+    for c in mumu.get("characters", []):
+        item = {
+            "name": c.get("name", ""),
+            "age": c.get("age", ""),
+            "gender": c.get("gender", ""),
+            "role": c.get("role_type") or c.get("role", ""),
+            "personality": c.get("personality", ""),
+            "background": c.get("background", ""),
+            "appearance": c.get("appearance", ""),
+            "avatar_url": c.get("avatar_url", ""),
+        }
+        if c.get("is_organization"):
+            org_list.append({
+                "name": c.get("name", ""),
+                "power_level": c.get("power_level", 50),
+                "location": c.get("location", ""),
+                "motto": c.get("motto", ""),
+                "color": c.get("color", ""),
+            })
+        else:
+            char_list.append(item)
+
+    # relationships → character_relations（用 name 不用 id，导入时建完角色再映射）
+    rel_list = []
+    for r in mumu.get("relationships", []):
+        rel_list.append({
+            "from_character_name": r.get("source_name", ""),
+            "to_character_name": r.get("target_name", ""),
+            "relation_type": r.get("relationship_name", ""),
+            "intimacy": r.get("intimacy_level", 50),
+            "status": r.get("status", "active"),
+            "description": r.get("description", ""),
+        })
+
+    # organizations + members
+    for o in mumu.get("organizations", []):
+        org_list.append({
+            "name": o.get("character_name", ""),  # mumu 用 character_name 存组织名
+            "power_level": o.get("power_level", 50),
+            "location": o.get("location", ""),
+            "motto": o.get("motto", ""),
+            "color": o.get("color", ""),
+        })
+    org_member_list = []
+    for m in mumu.get("organization_members", []):
+        org_member_list.append({
+            "organization_name": m.get("organization_name", ""),
+            "character_name": m.get("character_name", ""),
+            "position": m.get("position", ""),
+            "rank": m.get("rank", 0),
+            "status": m.get("status", "active"),
+            "loyalty": m.get("loyalty", 50),
+            "contribution": m.get("contribution", 0),
+        })
+
+    # outlines
+    outline_list = []
+    for o in mumu.get("outlines", []):
+        struct = o.get("structure")
+        if isinstance(struct, str):
+            try:
+                struct = _json.loads(struct)
+            except Exception:
+                struct = None
+        outline_list.append({
+            "title": o.get("title", ""),
+            "summary": o.get("content", ""),
+            "structure": struct,
+            "chapter_number": o.get("order_index") or 1,
+        })
+
+    # chapters
+    chapter_list = []
+    for c in mumu.get("chapters", []):
+        chapter_list.append({
+            "title": c.get("title", ""),
+            "content": c.get("content", ""),
+            "chapter_number": c.get("chapter_number", 1),
+            "status": c.get("status", "draft"),
+            "word_count": c.get("word_count", 0),
+            "summary": c.get("summary", ""),
+            "expansion_plan": c.get("expansion_plan"),
+        })
+
+    # careers
+    career_list = []
+    for c in mumu.get("careers", []):
+        career_list.append({
+            "name": c.get("name", ""),
+            "type": c.get("type", "main"),
+            "description": c.get("description", ""),
+            "category": c.get("category", ""),
+            "stages": c.get("stages", "[]"),
+            "max_stage": c.get("max_stage", 10),
+            "requirements": c.get("requirements", ""),
+            "special_abilities": c.get("special_abilities", ""),
+            "source": c.get("source", "ai"),
+        })
+
+    # story_memories
+    memory_list = []
+    for m in mumu.get("story_memories", []):
+        memory_list.append({
+            "memory_type": m.get("memory_type", "plot"),
+            "title": m.get("title", ""),
+            "content": m.get("content", ""),
+            "full_context": m.get("full_context", ""),
+            "related_characters": m.get("related_characters", []),
+            "related_locations": m.get("related_locations", []),
+            "tags": m.get("tags", []),
+            "importance_score": m.get("importance_score", 0.5),
+            "story_timeline": m.get("story_timeline", 0),
+            "is_foreshadow": m.get("is_foreshadow", 0),
+        })
+
+    # plot_analysis
+    analysis_list = []
+    for p in mumu.get("plot_analysis", []):
+        analysis_list.append({
+            "plot_stage": p.get("plot_stage"),
+            "conflict_level": p.get("conflict_level"),
+            "conflict_types": p.get("conflict_types", []),
+            "emotional_tone": p.get("emotional_tone"),
+            "emotional_intensity": p.get("emotional_intensity"),
+            "emotional_curve": p.get("emotional_curve"),
+            "hooks": p.get("hooks", []),
+            "hooks_count": p.get("hooks_count", 0),
+            "foreshadows": p.get("foreshadows", []),
+            "plot_points": p.get("plot_points", []),
+            "pacing": p.get("pacing"),
+            "overall_quality_score": p.get("overall_quality_score"),
+            "analysis_report": p.get("analysis_report"),
+            "suggestions": p.get("suggestions", []),
+        })
+
+    # foreshadows（mumu 没有独立的 foreshadow 表，从 story_memories 里 is_foreshadow=1 提取）
+    foreshadow_list = []
+    for m in mumu.get("story_memories", []):
+        if m.get("is_foreshadow"):
+            foreshadow_list.append({
+                "title": m.get("title", ""),
+                "content": m.get("content", ""),
+                "status": "active",
+                "type": "foreshadow",
+                "strength": m.get("foreshadow_strength", 0.5),
+            })
+
+    return {
+        "project": {
+            "title": proj.get("title", "导入项目"),
+            "genre": proj.get("genre", ""),
+            "synopsis": proj.get("synopsis", ""),
+            "narrative_pov": proj.get("narrative_pov", "第三人称"),
+            "world_time_period": proj.get("world_time_period", ""),
+            "world_location": proj.get("world_location", ""),
+            "world_atmosphere": proj.get("world_atmosphere", ""),
+            "world_rules": proj.get("world_rules", ""),
+            "cover_url": proj.get("cover_url", ""),
+            "outline_mode": proj.get("outline_mode", "one_to_one"),
+        },
+        "characters": char_list,
+        "character_relations": rel_list,
+        "organizations": org_list,
+        "organization_members": org_member_list,
+        "outlines": outline_list,
+        "chapters": chapter_list,
+        "foreshadows": foreshadow_list,
+        "careers": career_list,
+        "items": [],
+        "locations": [],
+        "memories": memory_list,
+        "analyses": analysis_list,
+        "worlds": [],
+        "_version": 2,
+        "_converted_from": "mumu",
+    }
+
+
 @router.post("/import")
 async def import_project(
     req: dict, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
 ):
-    """导入项目数据（从 export 的 JSON 恢复，创建为新项目，含全量表 #22）。"""
+    """导入项目数据（从 export 的 JSON 恢复，创建为新项目，含全量表 #22）。
+
+    自动识别两种格式：
+    - 原生格式（_version=2, project/characters/outlines/... 顶层键）
+    - mumu 格式（version=1.x, project/chapters/characters/relationships/...）
+    """
+
+    # ===== 格式识别 + 转换 =====
+    is_mumu = (
+        "version" in req and isinstance(req.get("version"), str)
+        and req.get("version", "").startswith("1.")
+        and "chapters" in req
+        and "_version" not in req
+    )
+    if is_mumu:
+        req = _convert_mumu_to_native(req)
 
     from app.models.career import Career
     from app.models.character import Character, CharacterRelation
@@ -382,6 +601,7 @@ async def import_project(
     char_items = req.get("characters", [])
     old_char_ids = []
     new_chars = []
+    char_name_map = {}  # name → new id（用于 mumu 格式的关系映射）
     for it in char_items:
         if isinstance(it, dict):
             data = {k: v for k, v in it.items() if k != "id"}
@@ -389,19 +609,32 @@ async def import_project(
             db.add(obj)
             new_chars.append((it.get("id"), obj))
             old_char_ids.append(it.get("id"))
+            if obj.name:
+                char_name_map[obj.name] = obj
     await db.flush()
     for old_id, obj in new_chars:
         char_id_map[old_id] = obj.id
 
-    # 关系表（重映射角色 id）
+    # 关系表（支持 id 重映射 或 name 查找）
     for it in req.get("character_relations", []):
         if isinstance(it, dict):
             data = {k: v for k, v in it.items() if k != "id"}
+            # id 重映射（原生格式）
             if "from_character_id" in data and data["from_character_id"] in char_id_map:
                 data["from_character_id"] = char_id_map[data["from_character_id"]]
             if "to_character_id" in data and data["to_character_id"] in char_id_map:
                 data["to_character_id"] = char_id_map[data["to_character_id"]]
-            db.add(CharacterRelation(project_id=new_proj.id, **data))
+            # name 查找（mumu 格式）
+            if "from_character_name" in data:
+                obj = char_name_map.get(data.pop("from_character_name"))
+                if obj:
+                    data["from_character_id"] = obj.id
+            if "to_character_name" in data:
+                obj = char_name_map.get(data.pop("to_character_name"))
+                if obj:
+                    data["to_character_id"] = obj.id
+            if data.get("from_character_id") and data.get("to_character_id"):
+                db.add(CharacterRelation(project_id=new_proj.id, **data))
 
     # 其余表（无 id 依赖）
     add_all(WorldSetting, req.get("worlds", []))
@@ -412,7 +645,31 @@ async def import_project(
     add_all(Career, req.get("careers", []))
     add_all(Item, req.get("items", []))
     add_all(Location, req.get("locations", []))
-    add_all(OrganizationMember, req.get("organization_members", []))
+    await db.flush()
+
+    # 组织成员表：需要 name→id 映射（mumu 格式用 name，原生格式用 id）
+    org_name_map = {}
+    if req.get("organization_members"):
+        orgs_db = (
+            (await db.execute(select(Organization).where(Organization.project_id == new_proj.id)))
+            .scalars().all()
+        )
+        org_name_map = {o.name: o.id for o in orgs_db if o.name}
+    for it in req.get("organization_members", []):
+        if isinstance(it, dict):
+            data = {k: v for k, v in it.items() if k != "id"}
+            # name → id（mumu）
+            if "organization_name" in data:
+                oid = org_name_map.get(data.pop("organization_name"))
+                if oid:
+                    data["organization_id"] = oid
+            if "character_name" in data:
+                obj = char_name_map.get(data.pop("character_name"))
+                if obj:
+                    data["character_id"] = obj.id
+            if data.get("organization_id") and data.get("character_id"):
+                db.add(OrganizationMember(project_id=new_proj.id, **data))
+
     add_all(StoryMemory, req.get("memories", []))
     add_all(PlotAnalysis, req.get("analyses", []))
     await db.commit()
