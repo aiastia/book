@@ -27,6 +27,10 @@ const form = reactive({
   rewrite_base_url: '' as string,
   rewrite_api_key: '' as string,
   rewrite_model: '' as string,
+  // 图像生成 API（独立，可选）
+  image_base_url: '' as string,
+  image_api_key: '' as string,
+  image_model: '' as string,
 })
 const testing = ref<number | null>(null)
 // 模型测试结果持久化到 localStorage，刷新页面也能看到上次的测试状态
@@ -76,6 +80,7 @@ function openAdd() {
     inspiration_custom: false,
     backend_type: 'openai', provider: 'openai', embedding_model: '',
     rewrite_base_url: '', rewrite_api_key: '', rewrite_model: '',
+    image_base_url: '', image_api_key: '', image_model: '',
   })
   remoteModels.value = []
   modelSearch.value = ''
@@ -278,6 +283,11 @@ const testingRewrite = ref(false)
 const rewriteResult = ref('')
 const rewriteLoaded = ref(false)
 
+// ===== 图像生成 API =====
+const imageForm = reactive({ base_url: '', api_key: '', model: '' })
+const savingImage = ref(false)
+const imageLoaded = ref(false)
+
 function loadRewriteConfig() {
   if (rewriteLoaded.value || !models.value?.length) return
   const def = defaultModel.value || models.value[0]
@@ -288,7 +298,17 @@ function loadRewriteConfig() {
   rewriteEnabled.value = !!(def.rewrite_base_url || def.rewrite_api_key || def.rewrite_model)
   rewriteLoaded.value = true
 }
-watch(models, () => loadRewriteConfig(), { immediate: true })
+
+function loadImageConfig() {
+  if (imageLoaded.value || !models.value?.length) return
+  const def = defaultModel.value || models.value[0]
+  if (!def) return
+  imageForm.base_url = def.image_base_url || ''
+  imageForm.api_key = def.image_api_key || ''
+  imageForm.model = def.image_model || ''
+  imageLoaded.value = true
+}
+watch(models, () => { loadRewriteConfig(); loadImageConfig() }, { immediate: true })
 
 async function onSaveRewrite() {
   const def = defaultModel.value || models.value?.[0]
@@ -304,6 +324,21 @@ async function onSaveRewrite() {
     msg.success('润色 API 已保存')
   } catch (e: any) { msg.error('保存失败') }
   finally { savingRewrite.value = false }
+}
+
+async function onSaveImage() {
+  const def = defaultModel.value || models.value?.[0]
+  if (!def) { msg.warning('请先添加一个 AI 模型'); return }
+  savingImage.value = true
+  try {
+    await api.updateAiModel(def.id, {
+      image_base_url: imageForm.base_url || '',
+      image_api_key: imageForm.api_key || '',
+      image_model: imageForm.model || '',
+    })
+    msg.success('图像 API 已保存')
+  } catch (e: any) { msg.error('保存失败') }
+  finally { savingImage.value = false }
 }
 
 async function onTestRewrite() {
@@ -760,6 +795,38 @@ function selectRewriteModel(id: string) {
     </div>
     <div v-if="rewriteResult" class="test-result" :class="{ ok: rewriteResult.startsWith('✅'), err: rewriteResult.startsWith('❌') }" style="margin-top:8px">
       {{ rewriteResult }}
+    </div>
+  </a-card>
+
+  <!-- 图像生成 API 配置（用于封面生成） -->
+  <a-card class="section-card" size="small" style="margin-top:16px">
+    <template #title>
+      <span>🖼️ 图像生成 API（封面生成）</span>
+    </template>
+    <template #extra>
+      <a-tag v-if="imageForm.base_url && imageForm.api_key && imageForm.model" color="success" style="margin-left:12px">已配置</a-tag>
+      <a-tag v-else color="default" style="margin-left:12px">未配置</a-tag>
+    </template>
+    <a-alert
+      message="独立配置图像生成 API，用于小说封面生成。不填则封面功能只提供提示词，用户可复制到 Midjourney/DALL-E 手动出图。"
+      type="info" show-icon :closable="false" style="margin-bottom:12px;"
+    />
+    <div class="form-row-2">
+      <div>
+        <label style="font-size:12px;color:#666">Base URL</label>
+        <a-input v-model:value="imageForm.base_url" placeholder="https://api.openai.com/v1" size="small" style="margin-top:4px" />
+      </div>
+      <div>
+        <label style="font-size:12px;color:#666">API Key</label>
+        <a-input-password v-model:value="imageForm.api_key" placeholder="sk-..." size="small" style="margin-top:4px" />
+      </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:12px;align-items:flex-end">
+      <div>
+        <label style="font-size:12px;color:#666">模型</label>
+        <a-input v-model:value="imageForm.model" placeholder="dall-e-3 / flux-1-schnell / sd3" size="small" style="margin-top:4px;width:240px" />
+      </div>
+      <a-button type="primary" size="small" :loading="savingImage" @click="onSaveImage">保存</a-button>
     </div>
   </a-card>
 

@@ -53,6 +53,10 @@ class AIModelCreate(BaseModel):
     rewrite_base_url: str = ""
     rewrite_api_key: str = ""
     rewrite_model: str = ""
+    # 图像生成 API（独立，可选）
+    image_base_url: str = ""
+    image_api_key: str = ""
+    image_model: str = ""
 
 
 class AIModelUpdate(BaseModel):
@@ -81,6 +85,10 @@ class AIModelUpdate(BaseModel):
     rewrite_base_url: str | None = None
     rewrite_api_key: str | None = None
     rewrite_model: str | None = None
+    # 图像生成 API
+    image_base_url: str | None = None
+    image_api_key: str | None = None
+    image_model: str | None = None
 
 
 @router.get("/ai-models")
@@ -115,6 +123,9 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
             "rewrite_base_url": m.rewrite_base_url or "",
             "rewrite_api_key": m.rewrite_api_key or "",
             "rewrite_model": m.rewrite_model or "",
+            "image_base_url": m.image_base_url or "",
+            "image_api_key": m.image_api_key or "",
+            "image_model": m.image_model or "",
             "created_at": m.created_at.isoformat() if m.created_at else "",
         }
         for m in models

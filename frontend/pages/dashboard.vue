@@ -63,6 +63,17 @@ const msg = useMessage()
 const coverLoading = ref(false)
 const coverPrompt = ref('')
 const showCover = ref(false)
+const imageLoading = ref(false)
+const imageConfigured = ref(false)
+
+async function checkImageConfig() {
+  try {
+    const models = await api.listAiModels()
+    const def = models.find((m: any) => m.is_default) || models[0]
+    imageConfigured.value = !!(def?.image_base_url && def?.image_api_key && def?.image_model)
+  } catch (_) { /* ignore */ }
+}
+checkImageConfig()
 
 async function onGenerateCover() {
   coverLoading.value = true
@@ -75,6 +86,19 @@ async function onGenerateCover() {
   } finally {
     coverLoading.value = false
   }
+}
+
+async function onGenerateImage() {
+  if (!coverPrompt.value) { msg.warning('请先生成提示词'); return }
+  imageLoading.value = true
+  try {
+    const res = await api.generateCoverImage(coverPrompt.value)
+    msg.success('封面已生成')
+    showCover.value = false
+    if (project.value) project.value.cover_url = res.cover_url
+  } catch (e: any) {
+    msg.error('出图失败：' + formatError(e))
+  } finally { imageLoading.value = false }
 }
 
 function copyCoverPrompt() {
@@ -172,7 +196,11 @@ function copyCoverPrompt() {
     <div style="background:#f9f9f9;border:1px solid #e5e7eb;border-radius:8px;padding:16px;font-size:14px;line-height:1.8;white-space:pre-wrap;max-height:400px;overflow-y:auto;">{{ coverPrompt }}</div>
     <template #footer>
       <a-button @click="showCover = false">关闭</a-button>
-      <a-button type="primary" @click="copyCoverPrompt">复制提示词</a-button>
+      <a-button @click="copyCoverPrompt">复制提示词</a-button>
+      <a-button v-if="imageConfigured" type="primary" :loading="imageLoading" @click="onGenerateImage">生成封面图片</a-button>
+      <a-tooltip v-else title="请在 AI 设置中配置图像生成 API">
+        <a-button type="primary" disabled>生成封面图片（未配置 API）</a-button>
+      </a-tooltip>
     </template>
   </a-modal>
 </template>

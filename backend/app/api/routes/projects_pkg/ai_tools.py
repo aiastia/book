@@ -113,12 +113,25 @@ async def generate_cover_image(
     if not prompt:
         raise HTTPException(400, "请提供封面提示词")
 
-    ai_client = await AIClient.from_user_config(db, user.id)
-    image_url = (ai_client.base_url or "").rstrip("/") + "/images/generations"
+    # 读取独立的图像生成 API 配置（用户必须在 AI 设置中配置）
+    from app.models.ai_model import AIModelConfig
+    from sqlalchemy import select as sa_select
 
-    headers = {"Authorization": f"Bearer {ai_client.api_key}", "Content-Type": "application/json"}
+    models = (
+        await db.execute(sa_select(AIModelConfig).where(AIModelConfig.user_id == user.id))
+    ).scalars().all()
+    img_cfg = next((m for m in models if m.is_default), None) or (models[0] if models else None)
+    if not img_cfg or not img_cfg.image_base_url or not img_cfg.image_api_key or not img_cfg.image_model:
+        raise HTTPException(
+            400,
+            "未配置图像生成 API。请在「AI 设置」中填写图像生成的 Base URL、API Key 和模型名称后重试。"
+            "你也可以复制上方提示词到 Midjourney/DALL-E 等工具手动生成。"
+        )
+
+    image_url = img_cfg.image_base_url.rstrip("/") + "/images/generations"
+    headers = {"Authorization": f"Bearer {img_cfg.image_api_key}", "Content-Type": "application/json"}
     payload = {
-        "model": req.get("model", "dall-e-3"),
+        "model": img_cfg.image_model,
         "prompt": prompt,
         "n": 1,
         "size": req.get("size", "1024x1024"),

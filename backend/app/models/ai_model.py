@@ -47,5 +47,9 @@ class AIModelConfig(Base):
     rewrite_base_url = Column(String(500), default="")
     rewrite_api_key = Column(String(500), default="")
     rewrite_model = Column(String(100), default="")
+    # 图像生成 API（独立配置，用于小说封面生成；不填则封面功能不可用）
+    image_base_url = Column(String(500), default="")
+    image_api_key = Column(String(500), default="")
+    image_model = Column(String(100), default="")  # 如 dall-e-3 / flux-1 / sd3 等
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

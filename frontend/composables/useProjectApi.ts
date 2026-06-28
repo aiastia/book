@@ -353,6 +353,9 @@ export function useProjectApi() {
   function generateCoverPrompt() {
     return apiPost<{ cover_prompt: string }>(`/api/projects/${pid()}/cover/generate-prompt`, {}, { timeout: 60000 })
   }
+  function generateCoverImage(prompt: string, size?: string) {
+    return apiPost<{ cover_url: string; cover_prompt: string }>(`/api/projects/${pid()}/cover/generate-image`, { prompt, size }, { timeout: 120000 })
+  }
 
   // ---- 拆书导入反向解析 ----
   function bookImportSuggest(body: { title?: string; sampled_text: string }) {
@@ -911,6 +914,7 @@ export function useProjectApi() {
     globalInspirationQuickComplete,
     // 封面
     generateCoverPrompt,
+    generateCoverImage,
     // 拆书导入
     bookImportSuggest,
     bookImportReverseOutlines,
