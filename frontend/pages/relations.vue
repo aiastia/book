@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // 角色关系：Vue Flow 图谱视图 + 表格视图 + 手动增删改（#17 增强）
 // Vue Flow 提供拖拽/缩放/自动布局，对标 MuMuAINovel ReactFlow
-import { markRaw } from 'vue'
+import { defineAsyncComponent } from 'vue'
 import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import RelationNode from '~/components/RelationNode.vue'
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import type { Character, RelationType } from '~/composables/api/types'
@@ -271,7 +270,10 @@ const usedRelationTypes = computed(() => {
 const vfNodes = ref<any[]>([])
 const vfEdges = ref<any[]>([])
 const vueFlowRef = ref()
-const nodeTypes = { relation: markRaw(RelationNode) }
+// 仅在客户端加载自定义节点（SSR 时 @vue-flow/core 无 DOM 会报错）
+const nodeTypes = import.meta.client
+  ? { relation: defineAsyncComponent(() => import('~/components/RelationNode.vue')) }
+  : {}
 
 function buildGraph() {
   if (!graph.value) return
