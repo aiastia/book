@@ -77,16 +77,6 @@ async def generate_cover_prompt(
             "输出英文图片生成提示词。"
         )
 
-    # 构建丰富的风格描述
-    style_desc = ""
-    if proj.writing_style and isinstance(proj.writing_style, dict):
-        style_name = proj.writing_style.get("name", "")
-        if style_name:
-            style_desc = f"写作风格为「{style_name}」。"
-        traits = (proj.writing_style.get("config", {}) or {}).get("traits", "")
-        if traits:
-            style_desc += f"风格特征：{traits}。"
-
     # 构建世界观描述
     world_parts = []
     if proj.world_atmosphere:
@@ -100,10 +90,7 @@ async def generate_cover_prompt(
     prompt_text = template.format(
         title=proj.title,
         genre=proj.genre or "网文",
-        theme_desc=f"核心主题为「{proj.synopsis[:60] if proj.synopsis else '奇幻冒险'}」。"
-                  if proj.synopsis else "",
         narrative_pov=proj.narrative_pov or "第三人称",
-        style_desc=style_desc + " " if style_desc else "",
         target_words=str(proj.target_word_count) if proj.target_word_count else "未设定",
         world_desc=world_desc + " " if world_desc else "",
         description=proj.synopsis or "暂无简介",

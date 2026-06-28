@@ -5,7 +5,7 @@
 - 类型：{genre}
 - 叙事视角：{narrative_pov}
 - 目标字数：{target_words} 字
-- {style_desc}{world_desc}
+- {world_desc}
 - 故事摘要：{description}
 
 【视觉要求】
