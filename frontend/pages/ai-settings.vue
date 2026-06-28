@@ -550,7 +550,7 @@ function selectRewriteModel(id: string) {
             <a-input v-model:value="form.base_url" :placeholder="providerMeta[form.provider]?.defaultUrl || 'https://api.openai.com/v1'" />
           </a-form-item>
           <a-form-item label="API Key">
-            <a-input-password v-model:value="form.api_key" :placeholder="editing ? '留空不修改（获取模型时使用已存 Key）' : 'sk-...'" />
+            <a-input-password v-model:value="form.api_key" autocomplete="off" :placeholder="editing ? '留空不修改（获取模型时使用已存 Key）' : 'sk-...'" />
             <div class="field-hint">{{ editing ? '留空保留原密钥，获取模型时自动使用已存 Key' : '在对应平台获取的 API Key' }}</div>
           </a-form-item>
         </div>
@@ -772,10 +772,10 @@ function selectRewriteModel(id: string) {
         <label style="font-size:12px;color:#666">Base URL</label>
         <a-input v-model:value="rewriteForm.base_url" placeholder="https://api.openai.com/v1" size="small" style="margin-top:4px" />
       </div>
-      <div>
+      <form @submit.prevent>
         <label style="font-size:12px;color:#666">API Key</label>
-        <a-input-password v-model:value="rewriteForm.api_key" placeholder="sk-..." size="small" style="margin-top:4px" />
-      </div>
+        <a-input-password v-model:value="rewriteForm.api_key" autocomplete="off" placeholder="sk-..." size="small" style="margin-top:4px" />
+      </form>
     </div>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:flex-end">
       <div>
@@ -816,10 +816,10 @@ function selectRewriteModel(id: string) {
         <label style="font-size:12px;color:#666">Base URL</label>
         <a-input v-model:value="imageForm.base_url" placeholder="https://api.openai.com/v1" size="small" style="margin-top:4px" />
       </div>
-      <div>
+      <form @submit.prevent>
         <label style="font-size:12px;color:#666">API Key</label>
-        <a-input-password v-model:value="imageForm.api_key" placeholder="sk-..." size="small" style="margin-top:4px" />
-      </div>
+        <a-input-password v-model:value="imageForm.api_key" autocomplete="off" placeholder="sk-..." size="small" style="margin-top:4px" />
+      </form>
     </div>
     <div style="margin-top:12px;display:flex;gap:12px;align-items:flex-end">
       <div>

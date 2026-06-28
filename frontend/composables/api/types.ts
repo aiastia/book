@@ -5,7 +5,7 @@ export interface Project {
   id: number; title: string; genre: string; synopsis: string
   outline_mode: string; narrative_pov: string
   target_word_count?: number; current_word_count?: number
-  chapter_count?: number; status?: string; cover_url?: string
+  chapter_count?: number; status?: string; cover_url?: string; cover_prompt?: string
   writing_style?: { name?: string; style_id?: number; config?: any }
   settings?: Record<string, any>
   world_time_period?: string; world_location?: string
@@ -13,7 +13,7 @@ export interface Project {
 }
 
 export interface BookSummary {
-  id: number; title: string; genre?: string; synopsis?: string
+  id: number; title: string; genre?: string; synopsis?: string; desc?: string
   outline_mode?: string; chapter_count?: number
   word_count?: number; current_word_count?: number
   status?: string; cover_url?: string; target_word_count?: number
@@ -40,6 +40,11 @@ export interface Outline {
   key_points?: string[]; scenes?: any[]
   structure?: Record<string, any>; expansion_plan?: Record<string, any>
   chapter_count?: number; has_chapters?: boolean
+}
+
+export interface OutlineListResponse {
+  total: number; limit: number; offset: number
+  items: Outline[]
 }
 
 // ==================== 角色 ====================

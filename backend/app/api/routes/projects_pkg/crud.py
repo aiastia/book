@@ -53,6 +53,7 @@ async def list_projects(db: AsyncSession = Depends(get_db), user=Depends(get_cur
             "outline_mode": p.outline_mode or "one_to_one",
             "narrative_pov": p.narrative_pov or "第三人称",
             "cover_url": p.cover_url,
+            "cover_prompt": p.cover_prompt or "",
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         }
@@ -86,6 +87,7 @@ async def get_project(
         "narrative_pov": p.narrative_pov,
         "outline_mode": p.outline_mode or "one_to_one",
         "cover_url": p.cover_url,
+        "cover_prompt": p.cover_prompt or "",
         "writing_style": p.writing_style,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,

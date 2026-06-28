@@ -180,7 +180,7 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
                 {{ (p.outline_mode || 'one_to_one') === 'one_to_many' ? '1→N' : '1→1' }}
               </span>
             </div>
-            <div class="book-desc">{{ p.synopsis || '暂无简介' }}</div>
+            <div class="book-desc">{{ p.synopsis || p.desc || '暂无简介' }}</div>
             <div class="book-progress">
               <div class="progress-bar"><div class="progress-fill" :style="{width:progress(p)+'%'}"></div></div>
               <span class="progress-text">{{ progress(p) }}%</span>

@@ -2,13 +2,27 @@
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import { reactive } from 'vue'
-import type { Character, Outline, Project } from '~/composables/api/types'
+import type { Character, Outline, OutlineListResponse, Project } from '~/composables/api/types'
 useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const { data: project, refresh: refreshProject } = await useFetch<Project>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}`)
-const { data: outlines, refresh: refreshOutlines } = await useFetch<Outline[]>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/outlines`)
+
+// 大纲分页
+const pageSize = ref(20)
+const currentPage = ref(1)
+const outlineTotal = ref(0)
+const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineListResponse>(() => {
+  const query = `limit=${pageSize.value}&offset=${(currentPage.value - 1) * pageSize.value}`
+  return `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/outlines?${query}`
+})
+const outlines = computed<Outline[]>(() => outlineData.value?.items || [])
+
+// 同步 total（仅在成功响应时更新）
+watchEffect(() => {
+  if (outlineData.value?.total != null) outlineTotal.value = outlineData.value.total
+})
 
 const generating = ref(false)
 const genCount = ref(10)
@@ -556,7 +570,19 @@ async function deleteExpansion() {
         @delete="onDelete"
       />
     </div>
-    <a-empty v-else description="暂无大纲，点击 AI 生成" />
+    <div v-if="outlineTotal > pageSize" class="outline-pagination">
+      <a-pagination
+        v-model:current="currentPage"
+        v-model:page-size="pageSize"
+        :total="outlineTotal"
+        :page-size-options="['10', '20', '50']"
+        show-size-changer
+        show-total
+        size="small"
+        @change="() => {}"
+      />
+    </div>
+    <a-empty v-else-if="!outlines || !outlines.length" description="暂无大纲，点击 AI 生成" />
 
     <!-- 生成弹窗 -->
     <a-modal v-model:open="showGen" title="AI 生成大纲" width="400px">

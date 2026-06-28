@@ -98,7 +98,7 @@ checkImageConfig()
 async function onGenerateCover() {
   coverLoading.value = true
   try {
-    const res = await API.ai.generateCoverPrompt()
+    const res = await API.ai.generateCoverPrompt(currentProjectId.value)
     coverPrompt.value = typeof res.cover_prompt === 'string' ? res.cover_prompt : JSON.stringify(res.cover_prompt, null, 2)
     showCover.value = true
   } catch (e: any) {
@@ -112,7 +112,7 @@ async function onGenerateImage() {
   if (!coverPrompt.value) { msg.warning('请先生成提示词'); return }
   imageLoading.value = true
   try {
-    const res = await API.ai.generateCoverImage(coverPrompt.value)
+    const res = await API.ai.generateCoverImage(coverPrompt.value, currentProjectId.value)
     msg.success('封面已生成')
     showCover.value = false
     if (project.value) project.value.cover_url = res.cover_url

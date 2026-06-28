@@ -1059,23 +1059,34 @@ async def generate_outlines_async(
 
 @router.get("/{project_id}/outlines")
 async def list_outlines(
-    project_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+    project_id: int,
+    limit: int = 0,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
-    await get_user_project(db, project_id, user)  # 权限校验
-    outlines = (
-        (
-            await db.execute(
-                select(Outline)
-                .where(Outline.project_id == project_id)
-                .order_by(Outline.chapter_number)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    # 预查每个大纲关联的章节数（1对多用）
     from sqlalchemy import func
 
+    await get_user_project(db, project_id, user)  # 权限校验
+
+    # 总数
+    total = (
+        await db.execute(
+            select(func.count(Outline.id)).where(Outline.project_id == project_id)
+        )
+    ).scalar() or 0
+
+    query = (
+        select(Outline)
+        .where(Outline.project_id == project_id)
+        .order_by(Outline.chapter_number)
+    )
+    if limit > 0:
+        query = query.offset(offset).limit(limit)
+
+    outlines = (await db.execute(query)).scalars().all()
+
+    # 预查每个大纲关联的章节数
     chapter_counts = {}
     if outlines:
         rows = (
@@ -1086,7 +1097,8 @@ async def list_outlines(
             )
         ).all()
         chapter_counts = {r[0]: r[1] for r in rows}
-    return [
+
+    items = [
         {
             "id": o.id,
             "chapter_number": o.chapter_number,
@@ -1097,12 +1109,17 @@ async def list_outlines(
             "key_points": o.key_points,
             "emotion": o.emotion,
             "goal": o.goal,
-            "structure": o.structure or {},  # 含 AI 生成的全部额外字段（爽点/钩子/伏笔/组织等）
+            "structure": o.structure or {},
             "has_chapters": chapter_counts.get(o.id, 0) > 0,
             "chapter_count": chapter_counts.get(o.id, 0),
         }
         for o in outlines
     ]
+
+    # 分页模式：返回 total + items；兼容模式：返回纯数组
+    if limit > 0:
+        return {"total": total, "limit": limit, "offset": offset, "items": items}
+    return items
 
 
 @router.post("/{project_id}/outlines")
