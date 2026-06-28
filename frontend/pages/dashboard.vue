@@ -10,6 +10,8 @@ useHead({ title: '仪表盘 — 墨语' })
 const { currentProjectId, currentProjectInfo, syncFromQuery, projectUrl } = useProject()
 syncFromQuery()
 
+const genres = ['玄幻', '都市', '科幻', '言情', '历史', '武侠', '游戏', '悬疑', '修仙', '末世', '无限流', '二次元', '同人', '其他']
+
 
 // 重定向：如果没有选择项目，跳到书架
 if (!currentProjectId.value) {
@@ -85,6 +87,14 @@ const coverPrompt = ref(project.value?.cover_prompt || '')
 const showCover = ref(false)
 const imageLoading = ref(false)
 const imageConfigured = ref(false)
+
+// 项目字段自动保存
+async function saveField(field: string, value: any) {
+  if (!currentProjectId.value) return
+  try {
+    await apiPut(`/api/projects/${currentProjectId.value}`, { [field]: value })
+  } catch { /* 静默失败 */ }
+}
 
 // 查看已保存的封面提示词
 function viewSavedPrompt() {
@@ -167,6 +177,33 @@ function copyCoverPrompt() {
         <NuxtLink to="/ai-settings"><a-button size="small" type="primary">前往配置</a-button></NuxtLink>
       </template>
     </a-alert>
+
+    <!-- 项目设置 -->
+    <a-card class="project-settings-card">
+      <template #title><span style="font-weight:600;">📝 项目信息</span></template>
+      <a-form layout="vertical" v-if="project">
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item label="书名"><a-input v-model:value="project.title" placeholder="书名" @blur="saveField('title', project.title)" /></a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="作者笔名"><a-input v-model:value="project.pen_name" placeholder="用于封面展示（可选）" @blur="saveField('pen_name', project.pen_name)" /></a-form-item>
+          </a-col>
+        </a-row>
+        <a-row :gutter="16">
+          <a-col :span="8">
+            <a-form-item label="类型"><a-auto-complete v-model:value="project.genre" :options="genres.map((g:string) => ({ value: g }))" :filter-option="(input:string, option:any) => option.value.toLowerCase().includes(input.toLowerCase())" allow-clear placeholder="类型" @blur="saveField('genre', project.genre)" /></a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="叙事视角"><a-select v-model:value="project.narrative_pov" @change="(v: string) => saveField('narrative_pov', v)"><a-select-option label="第三人称" value="第三人称" /><a-select-option label="第一人称" value="第一人称" /><a-select-option label="全知视角" value="全知视角" /></a-select></a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item label="目标字数"><a-input-number v-model:value="project.target_word_count" :min="10000" :max="5000000" :step="10000" style="width:100%" @blur="saveField('target_word_count', project.target_word_count)" /> 字</a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="简介"><a-textarea v-model:value="project.synopsis" :rows="2" :maxlength="300" show-count placeholder="一句话描述故事" @blur="saveField('synopsis', project.synopsis)" /></a-form-item>
+      </a-form>
+    </a-card>
 
     <!-- 创作引导：当项目还是空的时候展示 -->
     <a-card v-if="stats.chapters === 0 && stats.outlines === 0" class="guide-card">
@@ -274,6 +311,7 @@ function copyCoverPrompt() {
 .recent-item-info { flex:1; min-width:0; }
 .recent-item-title { font-size:14px; font-weight:500; margin-bottom:2px; }
 .recent-item-meta { font-size:12px; color:#999; }
+.project-settings-card { border-radius:10px; margin-bottom:24px; }
 @media (max-width:1024px) { .stats-grid{grid-template-columns:repeat(2,1fr);} }
 @media (max-width:768px) { .stats-grid{grid-template-columns:1fr;} }
 </style>

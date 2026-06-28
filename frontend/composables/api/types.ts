@@ -3,6 +3,7 @@
 // ==================== 项目 ====================
 export interface Project {
   id: number; title: string; genre: string; synopsis: string
+  pen_name?: string
   outline_mode: string; narrative_pov: string
   target_word_count?: number; current_word_count?: number
   chapter_count?: number; status?: string; cover_url?: string; cover_prompt?: string

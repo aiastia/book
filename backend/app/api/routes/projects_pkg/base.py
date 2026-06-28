@@ -42,6 +42,7 @@ class ProjectCreate(BaseModel):
     narrative_pov: str = "第三人称"
     writing_style: dict = {}
     outline_mode: str = "one_to_one"  # one_to_one / one_to_many
+    pen_name: str = ""  # 笔名/作者名
 
     @field_validator("title", "genre", "synopsis", "narrative_pov", mode="before")
     @classmethod
@@ -69,6 +70,7 @@ class ProjectUpdate(BaseModel):
     writing_style: dict | None = None
     status: str | None = None
     target_word_count: int | None = None
+    pen_name: str | None = None
 
 
 class ChapterCreate(BaseModel):

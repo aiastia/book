@@ -72,9 +72,9 @@ async def generate_cover_prompt(
             template = f.read()
     except FileNotFoundError:
         template = (
-            "创作一幅高质量小说封面插图提示词。\n"
-            "标题：{title}\n类型：{genre}\n简介：{description}\n"
-            "输出英文图片生成提示词。"
+            "你是专业的小说封面图像提示词设计专家。根据以下小说信息，直接输出中文图像生成提示词（纯提示词，无元叙述）。\n"
+            "标题：{title}\n作者：{pen_name}\n类型：{genre}\n世界观：{world_desc}\n简介：{description}\n"
+            "{pen_name_line}\n"
         )
 
     # 构建世界观描述
@@ -87,8 +87,17 @@ async def generate_cover_prompt(
         world_parts.append(f"地理设定：{proj.world_location}")
     world_desc = "。".join(world_parts) + "。" if world_parts else ""
 
+    pen_name = (proj.pen_name or "").strip()
+    pen_name_line = (
+        f"作者名「{pen_name}」需以小号字体自然置于标题下方，与标题风格统一，不抢标题视觉权重。"
+        if pen_name
+        else "封面中除标题外，不得出现任何其他文字，包括作者名、副标题、英文、数字、Logo、品牌、水印、二维码、UI 元素、按钮、样机展示或任何无关文字。"
+    )
+
     prompt_text = template.format(
         title=proj.title,
+        pen_name=pen_name or "未设定",
+        pen_name_line=pen_name_line,
         genre=proj.genre or "网文",
         narrative_pov=proj.narrative_pov or "第三人称",
         target_words=str(proj.target_word_count) if proj.target_word_count else "未设定",
@@ -99,7 +108,7 @@ async def generate_cover_prompt(
         messages=[{"role": "user", "content": prompt_text}],
         model=None,
         temperature=0.7,
-        max_tokens=3000,
+        max_tokens=1200,
     )
     cover_prompt = result.get("content", "").strip()
     if not cover_prompt:

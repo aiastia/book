@@ -187,6 +187,8 @@ async def _auto_migrate():
         ("ai_model_configs", "ADD COLUMN rewrite_model VARCHAR(100) DEFAULT ''"),
         # 第21批：存储清理/改写前的原始 AI 输出
         ("chapters", "ADD COLUMN raw_output TEXT DEFAULT ''"),
+        # 第22批：项目笔名/作者名
+        ("projects", "ADD COLUMN pen_name VARCHAR(100) DEFAULT ''"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:

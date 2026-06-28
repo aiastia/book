@@ -83,6 +83,7 @@ const showCreate = ref(false)
 const genres = ['玄幻', '都市', '科幻', '言情', '历史', '武侠', '游戏', '悬疑', '修仙', '末世', '无限流', '二次元', '同人', '其他']
 const wizard = reactive({
   title: '', genre: '玄幻', synopsis: '', theme: '',
+  pen_name: '',
   outline_mode: 'one_to_many', narrative_pov: '第三人称',
   character_count: 5, target_word_count: 100000, protagonist_name: '',
   chapter_count: 3,
@@ -101,6 +102,7 @@ async function onCreate() {
     // 1. 创建项目（带完整字段）
     const proj = await apiPost<any>('/api/projects', {
       title: wizard.title, genre: wizard.genre, synopsis: wizard.synopsis,
+      pen_name: wizard.pen_name,
       narrative_pov: wizard.narrative_pov, target_word_count: wizard.target_word_count,
       outline_mode: wizard.outline_mode,
     })
@@ -226,6 +228,7 @@ function progress(p: any) { const t = p.target_word_count || 200000; return Math
     </div>
     <a-form v-else layout="vertical">
       <a-form-item label="书名" required><a-input v-model:value="wizard.title" placeholder="请输入书名" /></a-form-item>
+      <a-form-item label="作者笔名"><a-input v-model:value="wizard.pen_name" placeholder="用于封面展示（可选）" /></a-form-item>
       <a-form-item label="小说简介"><a-textarea v-model:value="wizard.synopsis" :rows="2" :maxlength="300" show-count placeholder="一句话描述故事" /></a-form-item>
       <a-form-item label="主题"><a-textarea v-model:value="wizard.theme" :rows="2" :maxlength="500" show-count placeholder="故事的核心主题（如：复仇与救赎）" /></a-form-item>
       <a-row :gutter="12">

@@ -29,6 +29,7 @@ class Project(Base):
     world_atmosphere = Column(Text, default="")  # 氛围基调
     world_rules = Column(Text, default="")  # 世界规则（力量体系/社会法则）
     cover_prompt = Column(Text, default="")  # 封面提示词
+    pen_name = Column(String(100), default="")  # 笔名/作者名（用于封面和导出）
     # ---- 大纲章节模式（对标 MuMuAINovel，创建后不可更改）----
     # one_to_one: 传统模式，1大纲→1章节（生成大纲时自动建章）
     # one_to_many: 细化模式，1大纲→N章节（大纲是"卷"，需手动展开为多章）
