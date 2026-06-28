@@ -16,13 +16,13 @@ const outlineTotal = ref(0)
 const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineListResponse>(() => {
   const query = `limit=${pageSize.value}&offset=${(currentPage.value - 1) * pageSize.value}`
   return `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/outlines?${query}`
+}, {
+  onResponse({ response }) {
+    const data = response._data
+    if (data?.total != null) outlineTotal.value = data.total
+  }
 })
 const outlines = computed<Outline[]>(() => outlineData.value?.items || [])
-
-// 同步 total（仅在成功响应时更新）
-watchEffect(() => {
-  if (outlineData.value?.total != null) outlineTotal.value = outlineData.value.total
-})
 
 const generating = ref(false)
 const genCount = ref(10)
@@ -546,18 +546,6 @@ async function deleteExpansion() {
         {{ outlines && outlines.length ? '续写大纲' : 'AI 生成大纲' }}
       </a-button>
     </div>
-
-    <a-alert
-      v-if="pendingEntities"
-      type="warning" show-icon style="margin-bottom:12px;"
-    >
-      <template #message>
-        大纲引入了 {{ pendingEntities.pending_items.length }} 个新物品、{{ pendingEntities.pending_locations.length }} 个新地点
-        <a-button size="small" type="primary" :loading="fillingEntities" @click="fillPendingEntities" style="margin-left:12px;">
-          补充入库
-        </a-button>
-      </template>
-    </a-alert>
 
     <div v-if="outlines && outlines.length" class="outline-list">
       <OutlineCard

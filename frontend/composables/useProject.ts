@@ -6,6 +6,7 @@ import { apiPost } from './useApi'
 const PROJECT_KEY = 'moyu_current_project'
 const PROJECT_INFO_KEY = 'moyu_current_project_info'
 const COOKIE_KEY = 'moyu_current_project'
+const INFO_COOKIE_KEY = 'moyu_current_project_info'
 
 interface ProjectInfo {
   id: number
@@ -99,6 +100,7 @@ export function useProject() {
       currentProjectInfo.value = info
       if (import.meta.client) {
         localStorage.setItem(PROJECT_INFO_KEY, JSON.stringify(info))
+        document.cookie = `${INFO_COOKIE_KEY}=${encodeURIComponent(JSON.stringify(info))}; path=/; max-age=31536000; SameSite=Lax`
       }
     }
     // 同步到 cookie 和 localStorage
