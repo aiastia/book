@@ -249,19 +249,19 @@ async def generate_locations(
         data = data.get("locations") or data.get("data") or []
 
     created = []
-    for _item in data[: req.count * 2]:
-        if not isinstance(l, dict) or not l.get("name"):
+    for item in data[: req.count * 2]:
+        if not isinstance(item, dict) or not item.get("name"):
             continue
         try:
             loc = Location(
                 project_id=project_id,
-                name=str(l.get("name", ""))[:100],
-                location_type=str(l.get("location_type", "城市"))[:50],
-                description=str(l.get("description", ""))[:2000],
-                atmosphere=str(l.get("atmosphere", ""))[:500],
-                faction_control=str(l.get("faction_control", ""))[:200],
-                importance=str(l.get("importance", "normal"))[:20],
-                danger_level=str(l.get("danger_level", "safe"))[:20],
+                name=str(item.get("name", ""))[:100],
+                location_type=str(item.get("location_type", "城市"))[:50],
+                description=str(item.get("description", ""))[:2000],
+                atmosphere=str(item.get("atmosphere", ""))[:500],
+                faction_control=str(item.get("faction_control", ""))[:200],
+                importance=str(item.get("importance", "normal"))[:20],
+                danger_level=str(item.get("danger_level", "safe"))[:20],
                 parent_location_id=req.parent_location_id,
                 level=0,
                 source="ai",
