@@ -9,7 +9,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const { data: analyses, refresh: refresh } = await useFetch<PlotAnalysis[]>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/analyses`)
-const { data: chapters } = await API.chapter.getAnalyses()
+const chapters = await API.chapter.getAnalyses(currentProjectId.value)
 
 // 选择章节查看详情
 const selectedChapter = ref<number | null>(null)
@@ -271,13 +271,13 @@ async function pollBatchAnalysisTask(taskId: number) {
 }
 
 function chapterIdByNumber(num: number): number | null {
-  const c = (chapters.value || []).find((x: any) => x.chapter_number === num)
+  const c = (chapters || []).find((x: any) => x.chapter_number === num)
   return c?.id || null
 }
 
 // ===== 章节导航（上一章/下一章）=====
 const sortedChapterNumbers = computed(() =>
-  [...(chapters.value || [])].map((c: any) => c.chapter_number).sort((a, b) => a - b)
+  [...(chapters || [])].map((c: any) => c.chapter_number).sort((a, b) => a - b)
 )
 
 const navInfo = computed(() => {
@@ -301,7 +301,7 @@ function goNextChapter() {
 
 const unanalyzedChapters = computed(() => {
   const analyzedNums = new Set((analyses.value || []).map((a: any) => a.chapter_number))
-  return (chapters.value || []).filter((c: any) =>
+  return (chapters || []).filter((c: any) =>
     c.content && c.content.length > 50 && !analyzedNums.has(c.chapter_number)
   )
 })

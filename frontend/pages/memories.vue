@@ -8,7 +8,7 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const { data: memories, refresh: refresh } = await useFetch<any>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/memories?limit=100`)
-const { data: stats } = await API.memory.getStats()
+const stats = await API.memory.getStats(currentProjectId.value)
 
 // 类型筛选
 const filterType = ref('')

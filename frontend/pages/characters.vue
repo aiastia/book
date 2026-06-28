@@ -22,7 +22,7 @@ const { data: characters, refresh: refreshChars } = await useFetch<Character[]>(
 // 加载职业体系，供「职业」字段下拉使用
 const { data: careers, refresh: refreshCareers } = await useFetch<Career[]>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/careers`)
 // 加载组织列表，供「所属组织」字段下拉使用
-const { data: organizations } = await API.organization.list(currentProjectId.value)
+const organizations = await API.organization.list(currentProjectId.value)
 const occupationOptions = computed(() => {
   const list = (careers.value || []).map((c: any) => c.name).filter(Boolean)
   // 去重
@@ -54,7 +54,7 @@ const availableSubCareers = (currentIdx: number) => {
 // 组织名映射
 const orgNameById = (id: number | null) => {
   if (!id) return ''
-  const o = (organizations.value || []).find((x: any) => x.id === id)
+  const o = (organizations || []).find((x: any) => x.id === id)
   return o?.name || ''
 }
 
@@ -180,7 +180,7 @@ const displayFields = [
 
 async function onGenerate() {
   // 组织补充要求（让 AI 知道有哪些组织可选）
-  const orgName = genOrgId.value ? (organizations.value || []).find((o:any)=>o.id===genOrgId.value)?.name : ''
+  const orgName = genOrgId.value ? (organizations || []).find((o:any)=>o.id===genOrgId.value)?.name : ''
   const orgHint = orgName ? `该角色应属于「${orgName}」组织。` : (genOrgId.value === null ? '' : '')
   const extra = (genExtra.value ? genExtra.value + ' ' : '') + orgHint
   generating.value = true
