@@ -647,15 +647,15 @@ async def generate_pending_entities(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """用户确认后，生成 pending-entities 中缺失的物品和地点。"""
-    await get_user_project(db, project_id, user)
+    """AI 生成大纲和展开计划中引用但尚未录入的物品和地点。"""
+    proj = await get_user_project(db, project_id, user)
 
     from app.models.chapter import Chapter
     from app.models.item import Item
     from app.models.location import Location
     from app.models.outline import Outline
 
-    # 复用 pending-entities 的收集逻辑（大纲 + 展开章节）
+    # ---- 收集待补充项 ----
     outlines = (
         (await db.execute(
             select(Outline).where(Outline.project_id == project_id).order_by(Outline.chapter_number)
@@ -678,7 +678,6 @@ async def generate_pending_entities(
                 if name and name not in all_locs:
                     all_locs[name] = {"location_type": nl.get("location_type", "其他"), "description": nl.get("description", "")[:200]}
 
-    # 1-N 模式：从展开章节的 expansion_plan 读取
     chapters = (
         (await db.execute(
             select(Chapter).where(Chapter.project_id == project_id).order_by(Chapter.chapter_number)
@@ -707,30 +706,119 @@ async def generate_pending_entities(
         loc.name for loc in (await db.execute(select(Location).where(Location.project_id == project_id))).scalars().all()
     }
 
-    created = 0
-    for name, info in all_items.items():
-        if name in existing_items:
-            continue
-        db.add(Item(
-            project_id=project_id, name=name, category=info["category"],
-            rarity="普通", item_type="道具", description=info["description"],
-            status="available",
-        ))
-        created += 1
-    for name, info in all_locs.items():
-        if name in existing_locs:
-            continue
-        db.add(Location(
-            project_id=project_id, name=name, location_type=info["location_type"],
-            description=info["description"], atmosphere="", danger_level="safe",
-        ))
-        created += 1
+    pending_items = {n: i for n, i in all_items.items() if n not in existing_items}
+    pending_locs = {n: l for n, l in all_locs.items() if n not in existing_locs}
 
-    if created:
-        await db.commit()
-        logger.warning(f"[outline] 用户补全: {len(all_items)} 物品 + {len(all_locs)} 地点 → 入库 {created}")
+    if not pending_items and not pending_locs:
+        return {"created": 0, "items": 0, "locations": 0}
 
-    return {"created": created, "items": len(all_items), "locations": len(all_locs)}
+    # ---- AI 生成 ----
+    engine, ai_client = await make_engine_and_client(db, user.id)
+
+    # 世界观上下文
+    world_parts = []
+    if proj.world_time_period:
+        world_parts.append(f"时间：{proj.world_time_period}")
+    if proj.world_location:
+        world_parts.append(f"地点：{proj.world_location}")
+    if proj.world_atmosphere:
+        world_parts.append(f"氛围：{proj.world_atmosphere}")
+    if proj.world_rules:
+        world_parts.append(f"规则：{proj.world_rules}")
+    world_info = "\n".join(world_parts) if world_parts else f"简介：{proj.synopsis or '暂无'}"
+
+    # 角色
+    chars = (
+        (await db.execute(select(Character).where(Character.project_id == project_id).limit(20)))
+        .scalars().all()
+    )
+    char_names = "、".join(c.name for c in chars) if chars else "暂无"
+
+    created_items = 0
+    created_locs = 0
+
+    # 生成物品
+    if pending_items:
+        item_hint = "\n".join(
+            f"- {n}：{i['description'] or '道具'}" for n, i in list(pending_items.items())[:15]
+        )
+        user_prompt = (
+            f"请为《{proj.title}》生成以下大纲中已引用但尚未录入的物品（共{len(pending_items)}个）：\n"
+            f"{item_hint}\n"
+            f"主要角色：{char_names}\n"
+            f"每个物品必须包含：name（名称）、category（分类）、rarity（稀有度）、"
+            f"description（外观与用途描述，80-150字）、status（available/owned_by_xxx）"
+        )
+        result = await engine.execute_skill(
+            "items_generate", ai_client,
+            {"title": proj.title, "world_info": world_info, "user_prompt": user_prompt},
+        )
+        if result.get("error"):
+            logger.warning(f"[outline] 物品 AI 生成失败: {result['error']}")
+        else:
+            data = result.get("json") or []
+            if isinstance(data, dict):
+                data = data.get("items") or data.get("data") or []
+            for it in data:
+                if not isinstance(it, dict) or not it.get("name"):
+                    continue
+                name = it["name"].strip()
+                if name in existing_items:
+                    continue
+                db.add(Item(
+                    project_id=project_id, name=name,
+                    category=it.get("category", "杂物"),
+                    rarity=it.get("rarity", "普通"),
+                    item_type=it.get("item_type") or it.get("type") or "道具",
+                    description=it.get("description", "")[:500],
+                    status=it.get("status", "available"),
+                ))
+                created_items += 1
+                existing_items.add(name)
+            await db.commit()
+
+    # 生成地点
+    if pending_locs:
+        loc_hint = "\n".join(
+            f"- {n}：{l['description'] or '地点'}" for n, l in list(pending_locs.items())[:15]
+        )
+        user_prompt = (
+            f"请为《{proj.title}》生成以下大纲中已引用但尚未录入的地点（共{len(pending_locs)}个）：\n"
+            f"{loc_hint}\n"
+            f"主要角色：{char_names}\n"
+            f"每个地点必须包含：name（名称）、location_type（类型）、"
+            f"description（详细描述，80-150字）、atmosphere（氛围）、danger_level（safe/low/medium/high）"
+        )
+        result = await engine.execute_skill(
+            "locations_generate", ai_client,
+            {"title": proj.title, "world_info": world_info, "user_prompt": user_prompt},
+        )
+        if result.get("error"):
+            logger.warning(f"[outline] 地点 AI 生成失败: {result['error']}")
+        else:
+            data = result.get("json") or []
+            if isinstance(data, dict):
+                data = data.get("locations") or data.get("data") or []
+            for loc in data:
+                if not isinstance(loc, dict) or not loc.get("name"):
+                    continue
+                name = loc["name"].strip()
+                if name in existing_locs:
+                    continue
+                db.add(Location(
+                    project_id=project_id, name=name,
+                    location_type=loc.get("location_type", "其他"),
+                    description=loc.get("description", "")[:500],
+                    atmosphere=loc.get("atmosphere", ""),
+                    danger_level=loc.get("danger_level", "safe"),
+                ))
+                created_locs += 1
+                existing_locs.add(name)
+            await db.commit()
+
+    total = created_items + created_locs
+    logger.warning(f"[outline] AI 补全: {len(pending_items)} 物品 + {len(pending_locs)} 地点 → 入库 {total}")
+    return {"created": total, "items": len(pending_items), "locations": len(pending_locs)}
 
 
 @router.post("/{project_id}/outlines/generate-async")

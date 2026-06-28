@@ -31,6 +31,7 @@ const showGen = ref(false)
 // 待补充物品/地点
 const pendingEntities = ref<{ pending_items: any[]; pending_locations: any[]; total: number } | null>(null)
 const fillingEntities = ref(false)
+const showPendingModal = ref(false)
 async function checkPendingEntities() {  try {
     const res = await $fetch(`/api/projects/${currentProjectId.value}/outlines/pending-entities`)
     if ((res as any).total > 0) pendingEntities.value = res as any
@@ -42,6 +43,7 @@ async function fillPendingEntities() {
   try {
     await $fetch(`/api/projects/${currentProjectId.value}/outlines/generate-pending-entities`, { method: 'POST' })
     pendingEntities.value = null
+    showPendingModal.value = false
     msg.success('物品和地点已补充')
   } catch (e: any) { msg.error('补充失败：' + formatError(e)) }
   finally { fillingEntities.value = false }
@@ -550,16 +552,48 @@ async function deleteExpansion() {
     <!-- 待补充物品/地点 -->
     <a-alert
       v-if="pendingEntities && pendingEntities.total > 0"
-      type="warning" show-icon closable style="margin-bottom:12px;"
+      type="warning" show-icon closable style="margin-bottom:12px;cursor:pointer;"
       @close="pendingEntities = null"
+      @click="showPendingModal = true"
     >
       <template #message>
-        大纲中引用了 <b>{{ pendingEntities.pending_items?.length || 0 }}</b> 个新物品和 <b>{{ pendingEntities.pending_locations?.length || 0 }}</b> 个新地点尚未录入
+        大纲中引用了 <b>{{ pendingEntities.pending_items?.length || 0 }}</b> 个新物品和 <b>{{ pendingEntities.pending_locations?.length || 0 }}</b> 个新地点尚未录入 — 点击查看详情
       </template>
       <template #action>
-        <a-button size="small" type="primary" :loading="fillingEntities" @click="fillPendingEntities">自动生成</a-button>
+        <a-button size="small" type="primary" :loading="fillingEntities" @click.stop="fillPendingEntities">一键生成</a-button>
       </template>
     </a-alert>
+
+    <!-- 待补充详情弹窗 -->
+    <a-modal v-model:open="showPendingModal" title="待补充物品/地点" width="600px">
+      <div v-if="pendingEntities">
+        <h4 style="margin-bottom:8px;color:#D49A4E;">📦 新物品（{{ pendingEntities.pending_items?.length || 0 }}）</h4>
+        <div v-if="pendingEntities.pending_items?.length" style="margin-bottom:16px;">
+          <div v-for="(it, i) in pendingEntities.pending_items" :key="i" style="padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
+            <b>{{ it.name }}</b>
+            <a-tag size="small" style="margin-left:6px;">{{ it.category }}</a-tag>
+            <span v-if="it.from_chapter" style="color:#999;font-size:11px;margin-left:6px;">来自第{{ it.from_chapter }}章</span>
+            <div v-if="it.description" style="color:#666;font-size:12px;margin-top:2px;">{{ it.description }}</div>
+          </div>
+        </div>
+        <a-empty v-else description="暂无" :image-style="{height:'30px'}" />
+
+        <h4 style="margin-bottom:8px;color:#D49A4E;">📍 新地点（{{ pendingEntities.pending_locations?.length || 0 }}）</h4>
+        <div v-if="pendingEntities.pending_locations?.length">
+          <div v-for="(loc, i) in pendingEntities.pending_locations" :key="i" style="padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;">
+            <b>{{ loc.name }}</b>
+            <a-tag size="small" style="margin-left:6px;">{{ loc.location_type }}</a-tag>
+            <span v-if="loc.from_chapter" style="color:#999;font-size:11px;margin-left:6px;">来自第{{ loc.from_chapter }}章</span>
+            <div v-if="loc.description" style="color:#666;font-size:12px;margin-top:2px;">{{ loc.description }}</div>
+          </div>
+        </div>
+        <a-empty v-else description="暂无" :image-style="{height:'30px'}" />
+      </div>
+      <template #footer>
+        <a-button @click="showPendingModal = false">关闭</a-button>
+        <a-button type="primary" :loading="fillingEntities" @click="fillPendingEntities">AI 生成全部</a-button>
+      </template>
+    </a-modal>
 
     <div v-if="outlines && outlines.length" class="outline-list">
       <OutlineCard
