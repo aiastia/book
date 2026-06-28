@@ -7,7 +7,7 @@ useHead({ title: '伏笔管理 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: foreshadows, refresh: refresh } = await useFetch<Foreshadow[]>(() => `/projects/${currentProjectId.value}/foreshadows`)
+const { data: foreshadows, refresh: refresh } = await useFetch<Foreshadow[]>(() => `/api/projects/${currentProjectId.value}/foreshadows`)
 
 const generating = ref(false)
 const showAdd = ref(false)
@@ -35,7 +35,7 @@ const characterOptions = ref<Array<{ name: string; role: string; label: string }
 // 加载角色候选
 async function loadCharacterOptions() {
   try {
-    const res = await useFetch<Character[]>(() => `/projects/${currentProjectId.value}/characters`)
+    const res = await useFetch<Character[]>(() => `/api/projects/${currentProjectId.value}/characters`)
     const list = (res as any).data || (res as any) || []
     characterOptions.value = list.map(c => ({ name: c.name, role: c.role || '', label: c.role ? `${c.name}（${c.role}）` : c.name }))
   } catch (e) { console.warn('加载角色失败', e) }
