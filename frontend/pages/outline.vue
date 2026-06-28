@@ -10,7 +10,7 @@ const msg = useMessage()
 const { data: project, refresh: refreshProject } = await useFetch<Project>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}`)
 
 // 大纲分页
-const pageSize = ref(20)
+const pageSize = ref(10)
 const currentPage = ref(1)
 const outlineTotal = ref(0)
 const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineListResponse>(() => {
