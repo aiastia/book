@@ -523,6 +523,7 @@ async def book_import_deconstruct(
     async def _run_deconstruct(task_id: int, payload: dict):
         import logging
 
+        from app.core.database import async_session
         from app.services import background_task_service as bgs
 
         logger = logging.getLogger(__name__)
