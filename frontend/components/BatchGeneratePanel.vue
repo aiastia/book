@@ -42,7 +42,7 @@ const projectDefaultStyleName = ref('')
 
 // 可选起始章（空章节 + 下一章号）
 const emptyChapters = computed(() => {
-  return (props.chapters || []).filter((c: any) => !c.content || c.content.trim().length < 100)
+  return (props.chapters || []).filter((c: any) => !c.word_count || c.status === 'draft')
 })
 // 默认起始章 = 第一个空章节，无空章节时 = 最后一章+1（接续生成）
 const defaultStartChapter = computed(() => {
