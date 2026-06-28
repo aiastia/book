@@ -68,7 +68,7 @@ async def generate_cover_prompt(
         "skills", "prompts", "novel_cover_prompt_template.md",
     )
     try:
-        with open(template_path, "r", encoding="utf-8") as f:
+        with open(template_path, encoding="utf-8") as f:
             template = f.read()
     except FileNotFoundError:
         template = (
@@ -117,8 +117,9 @@ async def generate_cover_image(
         raise HTTPException(400, "请提供封面提示词")
 
     # 读取独立的图像生成 API 配置（用户必须在 AI 设置中配置）
-    from app.models.ai_model import AIModelConfig
     from sqlalchemy import select as sa_select
+
+    from app.models.ai_model import AIModelConfig
 
     models = (
         await db.execute(sa_select(AIModelConfig).where(AIModelConfig.user_id == user.id))

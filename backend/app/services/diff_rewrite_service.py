@@ -259,7 +259,7 @@ async def _call_rewrite_api(
     api_key: str,
     model: str,
     sentences: list[dict],
-) -> Optional[list[dict]]:
+) -> list[dict] | None:
     """调用润色 API，返回改写结果 [{i, t}]。失败返回 None。"""
     import httpx
 
@@ -377,7 +377,7 @@ async def diff_rewrite(
         hits.extend(repeated_subject_hits)
         hits.sort(key=lambda h: h["start"])
     if not hits:
-        logger.warning(f"[rewrite] 未命中任何 AI 指纹句，跳过 API 调用（无请求发出）")
+        logger.warning("[rewrite] 未命中任何 AI 指纹句，跳过 API 调用（无请求发出）")
         return text, {"命中": 0}
 
     # 2. 加上下文

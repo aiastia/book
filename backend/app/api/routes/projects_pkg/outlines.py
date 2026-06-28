@@ -650,10 +650,10 @@ async def generate_pending_entities(
     """用户确认后，生成 pending-entities 中缺失的物品和地点。"""
     await get_user_project(db, project_id, user)
 
+    from app.models.chapter import Chapter
     from app.models.item import Item
     from app.models.location import Location
     from app.models.outline import Outline
-    from app.models.chapter import Chapter
 
     # 复用 pending-entities 的收集逻辑（大纲 + 展开章节）
     outlines = (

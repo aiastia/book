@@ -1546,7 +1546,7 @@ class ChapterService:
                 return {"error": "AI 生成内容为空"}
 
             # 文本后处理：机械规则清理 AI 口癖
-            from app.services.text_cleaner import clean_generated_text, _strip_xml_like_tags
+            from app.services.text_cleaner import _strip_xml_like_tags, clean_generated_text
 
             # 获取 AI 响应元信息（在 result 被遮蔽前取出）
             skill_result = result  # 保存 execute_skill 返回的原始 dict
