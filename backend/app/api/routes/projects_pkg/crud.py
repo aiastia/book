@@ -434,6 +434,8 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
             "word_count": c.get("word_count", 0),
             "summary": c.get("summary", ""),
             "expansion_plan": c.get("expansion_plan"),
+            "outline_title": c.get("outline_title"),  # 1-N: 用于重建大纲关联
+            "sub_index": c.get("sub_index"),
         })
 
     # careers
@@ -577,6 +579,7 @@ async def import_project(
         world_atmosphere=proj_data.get("world_atmosphere", ""),
         world_rules=proj_data.get("world_rules", ""),
         cover_url=proj_data.get("cover_url", ""),
+        outline_mode=proj_data.get("outline_mode", "one_to_one"),
     )
     db.add(new_proj)
     await db.commit()
@@ -640,7 +643,38 @@ async def import_project(
     add_all(WorldSetting, req.get("worlds", []))
     add_all(Organization, req.get("organizations", []))
     add_all(Outline, req.get("outlines", []))
-    add_all(Chapter, req.get("chapters", []))
+    await db.flush()
+
+    # 重建 1-N 章节关联：优先用 outline_title 匹配，回退到 outline_id 原序号
+    outline_title_map = {}
+    outline_oldid_map = {}  # 旧 outline_id → 新 outline_id
+    outlines_db = (
+        (await db.execute(select(Outline).where(Outline.project_id == new_proj.id)))
+        .scalars().all()
+    )
+    for idx, o in enumerate(outlines_db):
+        if o.title:
+            outline_title_map[o.title] = o.id
+        # 按顺序对应（导出时已去掉 id，按顺序导入，idx 对应原序号）
+        outline_oldid_map[idx + 1] = o.id
+
+    for it in req.get("chapters", []):
+        if isinstance(it, dict):
+            data = {k: v for k, v in it.items() if k != "id"}
+            ot = data.pop("outline_title", None)
+            old_oid = data.pop("outline_id", None)
+            new_oid = None
+            # 优先用 title 匹配（mumu 格式）
+            if ot and ot in outline_title_map:
+                new_oid = outline_title_map[ot]
+            # 回退用 old_id 顺序匹配（原生格式）
+            elif old_oid and old_oid in outline_oldid_map:
+                new_oid = outline_oldid_map[old_oid]
+            if new_oid:
+                data["outline_id"] = new_oid
+            db.add(Chapter(project_id=new_proj.id, **data))
+    await db.flush()
+
     add_all(Foreshadow, req.get("foreshadows", []))
     add_all(Career, req.get("careers", []))
     add_all(Item, req.get("items", []))
