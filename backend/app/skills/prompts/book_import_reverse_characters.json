@@ -1,0 +1,12 @@
+{
+  "name": "book_import_reverse_characters",
+  "display_name": "拆书导入-反向角色提取",
+  "description": "从小说正文反向提取角色档案（姓名/身份/性格/外貌/能力等）",
+  "category": "import_book",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "book_import_reverse_characters.md"
+}

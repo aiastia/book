@@ -655,13 +655,92 @@ async def book_import_deconstruct(
                     logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
                     continue
 
-            # 5. 回填
+            # 5. 提取角色档案
+            await tracker.update(stage="generating", message="提取角色档案...", progress=80)
+            try:
+                char_sample = _sample_chapters_text(chapters, "head", min(len(chapters), 10))
+                from app.models.character import Character
+
+                char_result = await engine.execute_skill(
+                    "book_import_reverse_characters",
+                    ai_client,
+                    {
+                        "title": new_proj.title,
+                        "genre": genre or "网文",
+                        "synopsis": synopsis or "",
+                        "chapters_text": char_sample,
+                        "user_prompt": "请从以下正文中提取角色档案。",
+                    },
+                )
+                if char_result.get("error"):
+                    logger.warning("拆书角色提取失败：%s", char_result["error"])
+                else:
+                    char_data = char_result.get("json") or []
+                    if isinstance(char_data, dict):
+                        char_data = char_data.get("characters") or char_data.get("data") or []
+                    for cd in char_data:
+                        if not isinstance(cd, dict) or not cd.get("name"):
+                            continue
+                        task_db.add(Character(
+                            project_id=new_proj.id,
+                            name=cd["name"].strip(),
+                            role=cd.get("role", "配角"),
+                            gender=cd.get("gender", ""),
+                            age=cd.get("age", ""),
+                            identity=cd.get("identity", ""),
+                            appearance=cd.get("appearance", ""),
+                            personality=cd.get("personality", ""),
+                            background=cd.get("background", ""),
+                            ability=cd.get("ability", ""),
+                            motivation=cd.get("motivation", ""),
+                            speech_style=cd.get("speech_style", ""),
+                            status="alive",
+                        ))
+                    await task_db.commit()
+                    logger.info("拆书角色提取完成：%d 个角色", len(char_data) if isinstance(char_data, list) else 0)
+            except Exception as e:
+                logger.warning("拆书角色提取异常：%s", e)
+
+            # 6. 提取世界观设定
+            await tracker.update(stage="generating", message="提取世界观设定...", progress=90)
+            try:
+                world_sample = _sample_chapters_text(chapters, "head", min(len(chapters), 10))
+                world_result = await engine.execute_skill(
+                    "book_import_reverse_world",
+                    ai_client,
+                    {
+                        "title": new_proj.title,
+                        "genre": genre or "网文",
+                        "synopsis": synopsis or "",
+                        "chapters_text": world_sample,
+                        "user_prompt": "请从以下正文中提取世界观设定。",
+                    },
+                )
+                if world_result.get("error"):
+                    logger.warning("拆书世界观提取失败：%s", world_result["error"])
+                else:
+                    wd = world_result.get("json") or {}
+                    if isinstance(wd, dict):
+                        if wd.get("world_time_period"):
+                            new_proj.world_time_period = wd["world_time_period"][:500]
+                        if wd.get("world_location"):
+                            new_proj.world_location = wd["world_location"][:500]
+                        if wd.get("world_atmosphere"):
+                            new_proj.world_atmosphere = wd["world_atmosphere"][:500]
+                        if wd.get("world_rules"):
+                            new_proj.world_rules = wd["world_rules"][:1000]
+                        await task_db.commit()
+                        logger.info("拆书世界观提取完成")
+            except Exception as e:
+                logger.warning("拆书世界观提取异常：%s", e)
+
+            # 7. 回填
             bk.status = "project_created"
             bk.created_project_id = new_proj.id
             await task_db.commit()
 
             await tracker.complete(
-                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲"
+                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观"
             )
 
     task_id = await submit_async_task(

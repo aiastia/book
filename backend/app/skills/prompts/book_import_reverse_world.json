@@ -1,0 +1,12 @@
+{
+  "name": "book_import_reverse_world",
+  "display_name": "拆书导入-反向世界观提取",
+  "description": "从小说正文反向提取世界观设定（时代/地理/氛围/规则）",
+  "category": "import_book",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "book_import_reverse_world.md"
+}
