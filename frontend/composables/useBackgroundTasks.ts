@@ -123,6 +123,7 @@ export function useBackgroundTasks() {
       if (wasActive && (taskData.status === 'completed' || taskData.status === 'failed')) {
         existing._doneAt = Date.now()
         _fireCallbacks(taskData)
+        _scheduleAutoDismiss(taskData.id)
       } else if (wasActive && currDone > prevDone) {
         // 每完成一章就触发刷新
         _fireCallbacks(taskData)
@@ -238,6 +239,7 @@ export function useBackgroundTasks() {
           if (wasActive && (fresh.status === 'completed' || fresh.status === 'failed')) {
             t._doneAt = Date.now()
             _fireCallbacks(fresh)
+            _scheduleAutoDismiss(t.id)
           }
         } catch { /* 单个查询失败不影响整体 */ }
       }
@@ -343,6 +345,17 @@ export function useBackgroundTasks() {
     } catch (e) {
       console.warn('取消失败', e)
     }
+  }
+
+  // 已完成任务 24 小时后自动移除（失败任务保留，需用户手动处理）
+  function _scheduleAutoDismiss(id: number | string) {
+    setTimeout(() => {
+      const t = tasks.value.find(t => t.id === id)
+      if (t && t.status === 'completed') {
+        t._dismissed = true
+        tasks.value = tasks.value.filter(x => !x._dismissed)
+      }
+    }, 24 * 60 * 60 * 1000)
   }
 
   async function dismissTask(id: number | string) {
