@@ -211,3 +211,53 @@ async def cancel_batch(
     if not ok:
         raise HTTPException(404, "任务不存在或无权操作")
     return {"ok": True}
+
+
+@router.post("/{project_id}/batch-generate/{task_id}/retry")
+async def retry_batch(
+    project_id: int,
+    task_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """重试失败的批量生成任务：清空失败章节 → 重新提交。"""
+    await get_user_project(db, project_id, user)
+    task_result = await bgs.get_batch_task(task_id)
+    if not task_result:
+        raise HTTPException(404, "任务不存在")
+    if task_result["status"] != "failed":
+        raise HTTPException(400, "只能重试失败的任务")
+
+    from app.models.chapter import Chapter as ChModel
+
+    # 清空失败章节内容（保留章节本身）
+    chapter_ids = task_result.get("chapter_ids", [])
+    cleared = 0
+    if chapter_ids:
+        for cid in chapter_ids:
+            ch = (
+                await db.execute(
+                    select(ChModel).where(ChModel.id == cid, ChModel.project_id == project_id)
+                )
+            ).scalar_one_or_none()
+            if ch and ch.content:
+                ch.content = ""
+                ch.status = "draft"
+                cleared += 1
+        await db.commit()
+
+    # 重新提交任务
+    task = await bgs.create_batch_task(
+        user_id=user.id,
+        project_id=project_id,
+        chapter_ids=chapter_ids,
+        enable_analysis=task_result.get("enable_analysis", True),
+        max_retries=task_result.get("max_retries", 2),
+        target_word_count=task_result.get("target_word_count", 4000),
+        model_override=task_result.get("model_override", ""),
+        style_id=task_result.get("style_id"),
+        narrative_perspective=task_result.get("narrative_perspective", ""),
+        db=db,
+    )
+    asyncio.create_task(bgs.run_batch_generation(task.id))
+    return {"task_id": task.id, "total": task.total_chapters, "cleared_chapters": cleared, "status": "pending"}

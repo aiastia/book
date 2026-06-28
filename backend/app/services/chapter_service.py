@@ -361,8 +361,11 @@ class ChapterService:
 
     async def _validate_generation(self, chapter: Chapter):
         """预验证"""
+        # 自动清空已有内容（用户点生成=覆盖旧内容）
         if chapter.content and len(chapter.content.strip()) > 0:
-            raise ValueError("章节已有内容，请清空后重新生成")
+            chapter.content = ""
+            chapter.status = "draft"
+            await self.db.commit()
 
         # 检查前置章节
         if chapter.chapter_number > 1:

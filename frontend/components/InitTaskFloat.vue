@@ -6,7 +6,7 @@ import { apiGet, apiPost } from '~/composables/useApi'
 
 const emit = defineEmits<{ (e: 'retry', task: any): void }>()
 
-const { tasks, isActive, hasAnyTasks, refreshTasks, cancelTask, dismissTask, clearDoneTasks, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
+const { tasks, isActive, hasAnyTasks, refreshTasks, cancelTask, dismissTask, clearDoneTasks, trackTask, taskStatus: legacyTaskStatus, startLegacy } = useBackgroundTasks()
 const msg = useMessage()
 const collapsed = ref(true)
 const resuming = ref(false)
@@ -14,9 +14,18 @@ const resuming = ref(false)
 function retryTask(t: any) {
   if (t.task_type === 'chapter_batch') {
     dismissTask(t.id)
-    emit('retry', t)
+    // 异步调重试 API（清空失败章节 + 重新提交）
+    apiPost(`/api/projects/${t.project_id}/batch-generate/${t.id}/retry`, {})
+      .then((r: any) => {
+        if (r?.task_id) {
+          trackTask({ id: r.task_id, task_type: 'chapter_batch', title: `重试批量生成（${r.total || '?'}章）` })
+          msg.success(`已重新提交（清空 ${r.cleared_chapters || 0} 个失败章节）`)
+        } else {
+          msg.error('重试失败：未返回任务ID')
+        }
+      })
+      .catch((e: any) => msg.error('重试失败：' + formatError(e)))
   } else {
-    // 其他类型任务简单关闭，用户手动重试
     dismissTask(t.id)
     msg.info('请在对应页面重新操作')
   }

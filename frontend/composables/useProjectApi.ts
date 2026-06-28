@@ -644,6 +644,9 @@ export function useProjectApi() {
   function cancelBatchTask(taskId: number) {
     return apiPost(`/api/projects/${pid()}/batch-generate/${taskId}/cancel`, {})
   }
+  function retryBatchTask(taskId: number, projectId?: number) {
+    return apiPost(`/api/projects/${projectId || pid()}/batch-generate/${taskId}/retry`, {})
+  }
 
   // ============ 章节重写（#11 重写历史 + #13 扩写缩写）============
   function regenerateChapter(chapterId: number, body: {
@@ -883,6 +886,7 @@ export function useProjectApi() {
     getActiveBatchTask,
     getBatchStatus,
     cancelBatchTask,
+    retryBatchTask,
     // 章节重写
     regenerateChapter,
     getRegenTasks,
