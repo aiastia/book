@@ -327,8 +327,10 @@ function autoLayout() {
 
 function rebuildLabels() {
   if (!graph.value) return
-  // 从 VueFLow 实例获取当前实时位置
-  const liveNodes: any[] = vueFlowRef.value?.getNodes?.() || vfNodes.value
+  const instance = vueFlowRef.value
+  if (!instance) return
+  // VueFlow 内部 nodes 是响应式的，拖拽后会更新
+  const liveNodes = instance.nodes || []
   if (!liveNodes.length) return
 
   const es = graph.value.edges || []
@@ -352,7 +354,14 @@ function rebuildLabels() {
   })
   vfEdges.value = [...newEdges]
 }
-function onNodeDragStop() { rebuildLabels() }
+function onDragStop(_event: any, node: any) {
+  // 将被拖拽节点的位置同步到 vfNodes
+  if (node?.id && node?.position) {
+    const idx = vfNodes.value.findIndex((n: any) => n.id === node.id)
+    if (idx >= 0) vfNodes.value[idx].position = { ...node.position }
+  }
+  rebuildLabels()
+}
 
 // 表格视图数据（使用 relationsData 列表，含 id 支持编辑/删除）
 const tableData = computed(() => {
@@ -429,7 +438,7 @@ async function rebuild() {
       <div v-if="viewMode === 'chart'" class="chart-wrap">
         <div class="flow-card">
           <ClientOnly>
-            <VueFlow ref="vueFlowRef" :nodes="vfNodes" :edges="vfEdges" :node-types="nodeTypes" :default-viewport="{ zoom: 0.8 }" fit-view-on-init @node-drag-stop="onNodeDragStop">
+            <VueFlow ref="vueFlowRef" :nodes="vfNodes" :edges="vfEdges" :node-types="nodeTypes" :default-viewport="{ zoom: 0.8 }" fit-view-on-init @node-drag-stop="onDragStop">
               <Background />
               <Controls />
               <MiniMap />
