@@ -35,11 +35,11 @@ export function useProject() {
   const projectReady = useState<boolean>(STATE_READY_KEY, () => false)
 
   // useCookie 每次调用返回 request-scoped 的 ref（Nuxt 内部管理生命周期）
-  let projectIdCookie: ReturnType<typeof useCookie<number | null>> | false
+  let projectIdCookie: any = false
   try {
     projectIdCookie = useCookie<number | null>(COOKIE_KEY, {
       default: () => null,
-      maxAge: 60 * 60 * 24 * 365, // 1 年
+      maxAge: 60 * 60 * 24 * 365,
       sameSite: 'lax',
     })
   } catch {

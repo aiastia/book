@@ -5,6 +5,7 @@ import { VueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
+import RelationNode from '~/components/RelationNode.vue'
 import { API } from '~/composables/api'
 import { useProject } from '~/composables/useProject'
 import type { Character, RelationType } from '~/composables/api/types'
@@ -268,25 +269,25 @@ const usedRelationTypes = computed(() => {
 // ===== Vue Flow 节点/边 =====
 const vfNodes = ref<any[]>([])
 const vfEdges = ref<any[]>([])
+const vueFlowRef = ref()
+const nodeTypes = { relation: RelationNode }
 
 function buildGraph() {
   if (!graph.value) return
   const ns = graph.value.nodes || []
   const es = graph.value.edges || []
-  // 环形布局：所有节点均匀分布
   const cx = 450, cy = 320, r = 200
 
   vfNodes.value = ns.map((n: any, i: number) => {
     const angle = (2 * Math.PI * i) / Math.max(ns.length, 1) - Math.PI / 2
     return {
-      id: String(n.id),
+      id: String(n.id), type: 'relation',
       position: { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) },
       data: { label: n.name, role: n.role, isMain: n.role === '主角' },
-      style: nodeStyleFor(n),
     }
   })
 
-  // 合并同一角色对的多条关系为一条线，负面关系走向下方端口
+  // 合并同一角色对为一条线
   const pairMap = new Map<string, any[]>()
   for (const e of es) {
     const pair = [String(e.source), String(e.target)].sort().join('|')
@@ -294,34 +295,64 @@ function buildGraph() {
     pairMap.get(pair)!.push(e)
   }
 
-  vfEdges.value = Array.from(pairMap.entries()).map(([pair, entry], i) => {
-    const items = entry
+  vfEdges.value = Array.from(pairMap.entries()).map(([_, items], i) => {
     const first = items[0]
-    const uniqueTypes = Array.from(new Set(items.map((it: any) => it.relation_type).filter(Boolean)))
-    const label = uniqueTypes.join(' ↔ ')
+    const types = Array.from(new Set(items.map((it: any) => it.relation_type).filter(Boolean)))
+    const label = types.join(' ↔ ')
     const color = categoryColor[first.category] || '#999'
     const avgIntimacy = items.reduce((sum: number, it: any) => sum + Math.abs(it.intimacy || 0), 0) / items.length
+    const hasNeg = items.some((it: any) => (it.intimacy || 0) < 0)
+    const allNeg = items.every((it: any) => (it.intimacy || 0) < 0)
     return {
       id: `e${i}`,
-      source: String(first.source),
-      target: String(first.target),
-      label,
-      labelBgPadding: [8, 4],
+      source: String(first.source), target: String(first.target),
+      sourceHandle: allNeg ? 's-bottom' : 's-top',
+      targetHandle: (allNeg || hasNeg) ? 't-bottom' : 't-top',
+      label, labelBgPadding: [8, 4],
       animated: avgIntimacy > 50,
       style: { stroke: color, strokeWidth: avgIntimacy > 50 ? 2.5 : 1.5 },
       labelStyle: { fill: color, fontSize: 11, fontWeight: 600 },
       labelBgStyle: { fill: '#fff' },
-      type: negCount > 0 ? 'smoothstep' : 'default',
+      type: hasNeg ? 'smoothstep' : 'default',
     }
   })
 }
 watch(graph, buildGraph, { immediate: true })
 
-// 自动布局（简单的力导向 - 居中分布）
 function autoLayout() {
   buildGraph()
-  msg.info('已重置布局，可拖拽节点调整位置')
+  nextTick(() => vueFlowRef.value?.fitView({ padding: 0.2, duration: 300 }))
+  msg.info('已重置布局')
 }
+
+function rebuildLabels() {
+  if (!graph.value) return
+  // 从 VueFLow 实例获取当前实时位置
+  const liveNodes: any[] = vueFlowRef.value?.getNodes?.() || vfNodes.value
+  if (!liveNodes.length) return
+
+  const es = graph.value.edges || []
+  const pairMap = new Map<string, any[]>()
+  for (const e of es) {
+    const pair = [String(e.source), String(e.target)].sort().join('|')
+    if (!pairMap.has(pair)) pairMap.set(pair, [])
+    pairMap.get(pair)!.push(e)
+  }
+  const newEdges = vfEdges.value.map((edge: any) => {
+    const pairKey = [edge.source, edge.target].sort().join('|')
+    const items = pairMap.get(pairKey) || []
+    if (items.length < 2) return edge
+    const aNode = liveNodes.find((n: any) => n.id === edge.source)
+    const bNode = liveNodes.find((n: any) => n.id === edge.target)
+    if (!aNode || !bNode) return edge
+    const reversed = aNode.position.x > bNode.position.x
+    const ordered = reversed ? items.slice().reverse() : items
+    const types = ordered.map((it: any) => it.relation_type).filter(Boolean)
+    return { ...edge, label: types.join(' ↔ ') }
+  })
+  vfEdges.value = [...newEdges]
+}
+function onNodeDragStop() { rebuildLabels() }
 
 // 表格视图数据（使用 relationsData 列表，含 id 支持编辑/删除）
 const tableData = computed(() => {
@@ -398,7 +429,7 @@ async function rebuild() {
       <div v-if="viewMode === 'chart'" class="chart-wrap">
         <div class="flow-card">
           <ClientOnly>
-            <VueFlow :nodes="vfNodes" :edges="vfEdges" :default-viewport="{ zoom: 0.8 }" fit-view-on-init>
+            <VueFlow ref="vueFlowRef" :nodes="vfNodes" :edges="vfEdges" :node-types="nodeTypes" :default-viewport="{ zoom: 0.8 }" fit-view-on-init @node-drag-stop="onNodeDragStop">
               <Background />
               <Controls />
               <MiniMap />
