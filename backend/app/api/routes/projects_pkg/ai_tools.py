@@ -504,6 +504,8 @@ async def book_import_deconstruct(
     req: { sample_side: head|tail, sample_count=5, outline_chapters=20 }
     前端通过右下角浮窗查看进度。
     """
+    from app.models.imported_book import ImportedBook
+
     # 校验书籍存在
     result = await db.execute(
         select(ImportedBook).where(ImportedBook.id == book_id, ImportedBook.user_id == user.id)
