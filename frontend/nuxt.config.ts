@@ -62,9 +62,9 @@ export default defineNuxtConfig({
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
-            'antd': ['ant-design-vue', '@ant-design/icons-vue'],
-            'vue-flow': ['@vue-flow/core', '@vue-flow/background', '@vue-flow/controls', '@vue-flow/minimap'],
+          manualChunks(id: string) {
+            if (id.includes('ant-design-vue') || id.includes('@ant-design/icons-vue')) return 'antd'
+            if (id.includes('@vue-flow')) return 'vue-flow'
           },
         },
         onwarn(warning, warn) {

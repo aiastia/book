@@ -34,6 +34,7 @@ async function fillPendingEntities() {
 }
 // 页面加载和轮询完成后检查
 checkPendingEntities()
+const defaultModelName: any = ref('')
 // 预加载默认模型名（不阻塞，失败不影响使用）
 ;(async () => {
   try {
@@ -106,7 +107,6 @@ const continueForm = reactive({
 const chapterCountOptions = [5, 10, 20, 40]
 // 远程模型列表（动态拉取）
 const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
-const defaultModelName: any = ref("")
 const loadingModels = ref(false)
 
 // 项目默认叙事视角（用于「按小说设定」placeholder 显示）
@@ -336,7 +336,7 @@ async function onGenerateNewChars() {
   generatingChars.value = true
   try {
     for (const name of newCharNames.value) {
-      const { task_id } = await API.character.generateAsync({ requirements: `请生成一个名为「${name}」的角色` })
+      const { task_id } = await API.character.generateAsync({ count: 1, requirements: `请生成一个名为「${name}」的角色` })
       const { trackTask } = useBackgroundTasks()
       trackTask({ id: task_id, task_type: 'characters', title: `生成角色「${name}」` })
     }
@@ -495,7 +495,7 @@ function openBatchExpand() {
 async function doBatchExpand() {
   batchExpanding.value = true
   try {
-    const { task_id, pending_count } = await API.outline.batchExpand({ target_chapter_count: batchCount.value })
+    const { task_id, pending_count } = await API.outline.batchExpand(batchCount.value)
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_expand', title: `批量展开 ${pending_count} 卷大纲` })
     showBatchExpand.value = false

@@ -75,7 +75,10 @@ export function useAuth() {
             isLogged.value = true
           }
         })
-        .catch(() => {})
+        .catch((e: any) => {
+          // 网络不可达时静默处理（偶尔 Failed to fetch 可忽略）
+          if (e?.message !== 'Failed to fetch') console.warn('[useAuth] 验证登录态失败', e?.message)
+        })
     }
   }
 

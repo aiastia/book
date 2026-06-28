@@ -490,7 +490,7 @@ loadAllRelations()
         <div v-for="log in changeLogs" :key="log.id" class="change-log-item">
           <span class="log-chapter">第{{ log.chapter_number }}章</span>
           <span class="log-fields">
-            <a-tag v-for="(v, k) in log.changed_fields" :key="k" size="small" color="blue">{{ trackableFields.find(f=>f.key===k)?.label || k }}: {{ v }}</a-tag>
+            <a-tag v-for="(v, k) in log.changed_fields" :key="k" size="small" color="blue">{{ trackableFields.find(f=>f.key===String(k))?.label || k }}: {{ v }}</a-tag>
           </span>
           <span v-if="log.summary" class="log-summary">{{ log.summary }}</span>
           <a-button type="link" danger size="small" @click="onDeleteLog(log.id)" style="margin-left:auto">✕</a-button>

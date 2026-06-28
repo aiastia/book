@@ -31,7 +31,13 @@ async function _fetch(path: string, opts: RequestInit = {}): Promise<any> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
 
-  const res = await fetch(url, { ...opts, headers })
+  let res: Response
+  try {
+    res = await fetch(url, { ...opts, headers })
+  } catch (e: any) {
+    // 网络不可达（后端未启动等），抛出友好错误
+    throw new Error(`网络请求失败：${e.message || '无法连接到服务器'}`)
+  }
   if (res.status === 401) {
     if (import.meta.client) {
       localStorage.removeItem('moyu_token')

@@ -19,7 +19,7 @@ const basicForm = reactive({ title:'', synopsis:'', genre:'', narrative_pov:'', 
 const genres = ['玄幻','都市','科幻','言情','历史','武侠','游戏','悬疑','其他']
 
 function openEditBasic() {
-  const p = project.value || {}
+  const p = (project.value as any) || {}
   Object.assign(basicForm, { title:p.title||'', synopsis:p.synopsis||'', genre:p.genre||'', narrative_pov:p.narrative_pov||'第三人称', target_word_count:p.target_word_count ?? 100000 })
   editingBasic.value = true
 }

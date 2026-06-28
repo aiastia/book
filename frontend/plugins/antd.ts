@@ -16,7 +16,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     nuxtApp.hook('app:rendered', () => {
       const styleText = extractStyle(cache, true)
       if (styleText && nuxtApp.ssrContext?.head) {
-        ;(nuxtApp.ssrContext.head as any[]).push({
+        ;(nuxtApp.ssrContext.head as any).push({
           style: [{ key: 'antd-cssinjs', innerHTML: styleText }],
         })
       }

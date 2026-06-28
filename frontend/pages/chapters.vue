@@ -12,6 +12,9 @@ const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 
+// 默认模型名（用于 placeholder 显示）
+const defaultModelName: any = ref('')
+
 // 预加载默认模型名（不阻塞，失败不影响使用）
 ;(async () => {
   try {
@@ -59,7 +62,6 @@ const availableSkills = ref<any[]>([])
 const selectedSkillKey = ref<string | undefined>()
 const availableModels = ref<Array<{ value: string; label: string }>>([])
 const selectedModel = ref<string | undefined>()
-const defaultModelName: any = ref("")  // 默认模型名（用于 placeholder 显示）
 const skillThinkingMode = ref<string | undefined>()
 
 // ===== 章节分析 =====

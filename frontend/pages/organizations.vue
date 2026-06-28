@@ -90,7 +90,7 @@ function openEditMember(m: any) {
 async function onSaveMember() {
   if (!selectedOrgId.value || !editMemberId.value) return
   try {
-    await API.organization.updateMember(selectedOrgId.value, editMemberId.value, { ...newMember })
+    await API.organization.updateMember(editMemberId.value, { ...newMember }, selectedOrgId.value)
     showEditMember.value = false; editMemberId.value = null
     await loadMembers(selectedOrgId.value); await refreshTree()
     msg.success('已更新')
