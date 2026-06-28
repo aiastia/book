@@ -21,7 +21,7 @@ onTaskCompleted('init', () => { setTimeout(() => refreshTree(), 2000) })
 const generating = ref(false)
 const showGen = ref(false)
 const showAdd = ref(false)
-const newOrg = reactive({ name: '', org_type: '', description: '' })
+const newOrg = reactive({ name: '', org_type: '', description: '', motto: '', color: '', power_value: 50, location: '' })
 const editing = ref<any>(null)
 const editForm = reactive({ name: '', org_type: '', description: '', power_value: 50, location: '', motto: '', color: '' })
 const genCount = ref(3)
@@ -126,7 +126,7 @@ async function onGenerate() {
 }
 async function onAdd() {
   if (!newOrg.name.trim()) return
-  try { await API.organization.create({ ...newOrg }); showAdd.value = false; newOrg.name = ''; await refreshTree() }
+  try { await API.organization.create({ ...newOrg }); showAdd.value = false; Object.assign(newOrg, { name: '', org_type: '', description: '', motto: '', color: '', power_value: 50, location: '' }); await refreshTree() }
   catch (e: any) { msg.error('添加失败：' + formatError(e)) }
 }
 function openEdit(o: any) {
@@ -253,20 +253,64 @@ async function onInitAllMembers() {
     </div>
 
     <!-- 弹窗 -->
-    <a-modal v-model:open="showGen" title="AI 生成组织" width="460px">
-      <a-form layout="vertical">
-        <a-form-item label="数量"><a-input-number v-model:value="genCount" :min="1" :max="8" /></a-form-item>
-        <a-form-item label="需求"><a-textarea v-model:value="genReq" :rows="2" /></a-form-item>
-      </a-form>
-      <template #footer><a-button @click="showGen = false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">生成</a-button></template>
+    <!-- AI 生成组织 -->
+    <a-modal v-model:open="showGen" title="AI 生成组织" width="480px" :footer="null">
+      <div class="gen-org-modal">
+        <div class="gen-org-intro">
+          <span class="gen-org-icon">🏛️</span>
+          <div>
+            <div class="gen-org-title">AI 智能生成组织/势力</div>
+            <div class="gen-org-desc">根据小说世界观、已有角色和剧情，自动创建符合设定的组织势力</div>
+          </div>
+        </div>
+        <a-divider style="margin:16px 0" />
+        <a-form layout="vertical">
+          <a-form-item label="生成数量">
+            <a-input-number v-model:value="genCount" :min="1" :max="8" style="width:100%" />
+            <div class="field-hint">建议 3-5 个，AI 会参考已有组织避免重复</div>
+          </a-form-item>
+          <a-form-item label="额外需求（可选）">
+            <a-textarea v-model:value="genReq" :rows="2" placeholder="如：需要一个反派组织、需要一个隐藏的修仙门派..." />
+          </a-form-item>
+        </a-form>
+        <div class="gen-org-actions">
+          <a-button @click="showGen = false">取消</a-button>
+          <a-button type="primary" :loading="generating" @click="onGenerate">
+            {{ generating ? '生成中…' : `🚀 生成 ${genCount} 个组织` }}
+          </a-button>
+        </div>
+      </div>
     </a-modal>
-    <a-modal v-model:open="showAdd" title="添加组织" width="440px">
-      <a-form layout="vertical">
-        <a-form-item label="名称"><a-input v-model:value="newOrg.name" /></a-form-item>
-        <a-form-item label="类型"><a-input v-model:value="newOrg.org_type" /></a-form-item>
-        <a-form-item label="描述"><a-textarea v-model:value="newOrg.description" :rows="3" /></a-form-item>
-      </a-form>
-      <template #footer><a-button @click="showAdd = false">取消</a-button><a-button type="primary" @click="onAdd">添加</a-button></template>
+    <a-modal v-model:open="showAdd" title="添加组织" width="480px" :footer="null">
+      <div class="gen-org-modal">
+        <div class="gen-org-intro">
+          <span class="gen-org-icon">🏛️</span>
+          <div>
+            <div class="gen-org-title">手动添加组织/势力</div>
+            <div class="gen-org-desc">填写组织基本信息，创建后会出现在组织列表中</div>
+          </div>
+        </div>
+        <a-divider style="margin:16px 0" />
+        <a-form layout="vertical">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <a-form-item label="名称"><a-input v-model:value="newOrg.name" placeholder="如：天剑宗、暗影议会" /></a-form-item>
+            <a-form-item label="类型"><a-input v-model:value="newOrg.org_type" placeholder="如：门派、公司、政府" /></a-form-item>
+          </div>
+          <a-form-item label="描述"><a-textarea v-model:value="newOrg.description" :rows="4" placeholder="组织的背景、目的、运作方式..." /></a-form-item>
+          <a-form-item label="格言/口号（可选）"><a-input v-model:value="newOrg.motto" placeholder="如：以血铸剑，以剑问道" /></a-form-item>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <a-form-item label="势力值 (0-100)">
+              <a-input-number v-model:value="newOrg.power_value" :min="0" :max="100" style="width:100%" />
+            </a-form-item>
+            <a-form-item label="所在地"><a-input v-model:value="newOrg.location" placeholder="如：昆仑山巅、京城东区" /></a-form-item>
+          </div>
+          <a-form-item label="代表颜色（可选）"><a-input v-model:value="newOrg.color" placeholder="如：靛青色" /></a-form-item>
+        </a-form>
+        <div class="gen-org-actions">
+          <a-button @click="showAdd = false">取消</a-button>
+          <a-button type="primary" @click="onAdd">添加组织</a-button>
+        </div>
+      </div>
     </a-modal>
     <a-modal :open="!!editing" @update:open="(v:any) => { if(!v) editing = null }" title="编辑组织" width="520px" v-if="editing">
       <a-form layout="vertical">
@@ -351,4 +395,17 @@ async function onInitAllMembers() {
 .power-fill { height: 100%; background: #4D8088; border-radius: 999; }
 .power-num { color: #4D8088; font-weight: 600; }
 .detail-actions { display: flex; gap: 4px; }
+
+/* AI 生成组织弹窗 */
+.gen-org-modal { }
+.gen-org-intro {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: linear-gradient(135deg, #F0F5F2 0%, #EAF0F1 100%);
+  border-radius: 12px; padding: 16px 18px;
+}
+.gen-org-icon { font-size: 36px; line-height: 1; }
+.gen-org-title { font-size: 15px; font-weight: 600; color: #2B4B4F; margin-bottom: 4px; }
+.gen-org-desc { font-size: 13px; color: #6B8A8E; line-height: 1.6; }
+.gen-org-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.field-hint { font-size: 12px; color: #999; margin-top: 4px; }
 </style>

@@ -154,40 +154,50 @@ async function onDelete(id: number) {
       </div>
     </div>
 
-    <a-modal v-model:open="showAdd" :title="editing ? '编辑地点' : '添加地点'" width="560px">
-      <a-form layout="vertical">
-        <a-form-item label="名称"><a-input v-model:value="form.name" /></a-form-item>
-        <div class="form-row2">
-          <a-form-item label="类型">
-            <a-select v-model:value="form.location_type">
-              <a-select-option v-for="t in typeList" :key="t" :value="t">{{ t }}</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item label="重要性">
-            <a-select v-model:value="form.importance">
-              <a-select-option v-for="(m, k) in importanceMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
-            </a-select>
-          </a-form-item>
+    <a-modal v-model:open="showAdd" :title="null" width="520px" :footer="null">
+      <div class="loc-modal">
+        <div class="loc-modal-intro">
+          <span class="loc-modal-icon">📍</span>
+          <div>
+            <div class="loc-modal-title">{{ editing ? '编辑地点' : '手动添加地点' }}</div>
+            <div class="loc-modal-desc">{{ editing ? '修改地点属性和描述' : '填写地点基本信息，后续可由 AI 补充细节' }}</div>
+          </div>
         </div>
-        <a-form-item label="描述"><a-textarea v-model:value="form.description" :rows="3" /></a-form-item>
-        <div class="form-row2">
-          <a-form-item label="氛围特色"><a-input v-model:value="form.atmosphere" placeholder="繁华喧嚣/阴森诡异..." /></a-form-item>
-          <a-form-item label="控制势力"><a-input v-model:value="form.faction_control" /></a-form-item>
+        <a-divider style="margin:16px 0" />
+        <a-form layout="vertical">
+          <a-form-item label="名称"><a-input v-model:value="form.name" placeholder="地点名称" /></a-form-item>
+          <div class="form-row2">
+            <a-form-item label="类型">
+              <a-select v-model:value="form.location_type">
+                <a-select-option v-for="t in typeList" :key="t" :value="t">{{ t }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="重要性">
+              <a-select v-model:value="form.importance">
+                <a-select-option v-for="(m, k) in importanceMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
+              </a-select>
+            </a-form-item>
+          </div>
+          <a-form-item label="描述"><a-textarea v-model:value="form.description" :rows="3" placeholder="地点的环境、历史、特色..." /></a-form-item>
+          <div class="form-row2">
+            <a-form-item label="氛围特色"><a-input v-model:value="form.atmosphere" placeholder="繁华喧嚣 / 阴森诡异 / 仙气缭绕..." /></a-form-item>
+            <a-form-item label="控制势力"><a-input v-model:value="form.faction_control" placeholder="如：天剑宗、帝国军" /></a-form-item>
+          </div>
+          <div class="form-row2">
+            <a-form-item label="地理特征"><a-input v-model:value="form.geography" placeholder="如：高山之巅、地底深渊" /></a-form-item>
+            <a-form-item label="危险等级">
+              <a-select v-model:value="form.danger_level">
+                <a-select-option v-for="(m, k) in dangerMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
+              </a-select>
+            </a-form-item>
+          </div>
+          <a-form-item label="首次出现章节"><a-input-number v-model:value="form.first_appear_chapter" :min="1" style="width:100%" placeholder="0 表示未定" /></a-form-item>
+        </a-form>
+        <div class="loc-modal-actions">
+          <a-button @click="showAdd = false">取消</a-button>
+          <a-button type="primary" @click="onSave">保存</a-button>
         </div>
-        <div class="form-row2">
-          <a-form-item label="地理特征"><a-input v-model:value="form.geography" /></a-form-item>
-          <a-form-item label="危险等级">
-            <a-select v-model:value="form.danger_level">
-              <a-select-option v-for="(m, k) in dangerMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
-            </a-select>
-          </a-form-item>
-        </div>
-        <a-form-item label="首次出现章节"><a-input-number v-model:value="form.first_appear_chapter" :min="1" style="width:100%" /></a-form-item>
-      </a-form>
-      <template #footer>
-        <a-button @click="showAdd = false">取消</a-button>
-        <a-button type="primary" @click="onSave">保存</a-button>
-      </template>
+      </div>
     </a-modal>
 
     <!-- AI 生成地点弹窗 -->
@@ -240,4 +250,14 @@ async function onDelete(id: number) {
 .loc-desc { font-size: 13px; color: #595959; line-height: 1.6; margin: 8px 0; }
 .loc-foot { display: flex; gap: 12px; font-size: 12px; color: #8C8C8C; flex-wrap: wrap; }
 .form-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.loc-modal-intro {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: linear-gradient(135deg, #F5FFF0 0%, #E8F5E0 100%);
+  border-radius: 12px; padding: 16px 18px;
+}
+.loc-modal-icon { font-size: 36px; line-height: 1; }
+.loc-modal-title { font-size: 15px; font-weight: 600; color: #2B5C2B; margin-bottom: 4px; }
+.loc-modal-desc { font-size: 13px; color: #5C8C5C; line-height: 1.6; }
+.loc-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

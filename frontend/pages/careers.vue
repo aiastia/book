@@ -278,23 +278,35 @@ async function onAutoAssign() {
       </template>
     </a-empty>
 
-    <!-- 添加 -->
-    <a-modal v-model:open="showAdd" title="添加职业" width="480px">
-      <a-form layout="vertical">
-        <a-form-item label="名称"><a-input v-model:value="newCareer.name" /></a-form-item>
-        <a-form-item label="类型">
-          <a-select v-model:value="newCareer.career_type">
-            <a-select-option label="主职业" value="main" />
-            <a-select-option label="副职业" value="sub" />
-          </a-select>
-        </a-form-item>
-        <a-form-item label="分类"><a-input v-model:value="newCareer.category" placeholder="战斗 / 辅助 / 生产 / 特殊" /></a-form-item>
-        <a-form-item label="描述"><a-textarea v-model:value="newCareer.description" :rows="3" /></a-form-item>
-      </a-form>
-      <template #footer>
-        <a-button @click="showAdd = false">取消</a-button>
-        <a-button type="primary" @click="onAdd">添加</a-button>
-      </template>
+    <!-- 添加职业 -->
+    <a-modal v-model:open="showAdd" title="添加职业" width="480px" :footer="null">
+      <div class="add-career-modal">
+        <div class="add-career-intro">
+          <span class="add-career-icon">⚔️</span>
+          <div>
+            <div class="add-career-title">手动添加职业</div>
+            <div class="add-career-desc">填写职业基本信息，后续可补充进阶阶段和能力</div>
+          </div>
+        </div>
+        <a-divider style="margin:16px 0" />
+        <a-form layout="vertical">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <a-form-item label="名称"><a-input v-model:value="newCareer.name" placeholder="如：剑修、魔法师" /></a-form-item>
+            <a-form-item label="类型">
+              <a-select v-model:value="newCareer.career_type">
+                <a-select-option label="主职业" value="main" />
+                <a-select-option label="副职业" value="sub" />
+              </a-select>
+            </a-form-item>
+          </div>
+          <a-form-item label="分类"><a-input v-model:value="newCareer.category" placeholder="战斗 / 辅助 / 生产 / 特殊" /></a-form-item>
+          <a-form-item label="描述"><a-textarea v-model:value="newCareer.description" :rows="4" placeholder="职业的背景、定位、核心能力概述..." /></a-form-item>
+        </a-form>
+        <div class="add-career-actions">
+          <a-button @click="showAdd = false">取消</a-button>
+          <a-button type="primary" @click="onAdd">添加职业</a-button>
+        </div>
+      </div>
     </a-modal>
 
     <!-- 追加/生成职业体系 -->
@@ -408,4 +420,15 @@ async function onAutoAssign() {
 .stage-edit-ops { display: flex; gap: 4px; }
 .ability-edit-list { display: flex; flex-direction: column; gap: 6px; }
 .ability-edit-row { display: flex; gap: 6px; align-items: center; }
+
+/* 添加职业弹窗 */
+.add-career-intro {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: linear-gradient(135deg, #FFF7E6 0%, #FFF0D4 100%);
+  border-radius: 12px; padding: 16px 18px;
+}
+.add-career-icon { font-size: 36px; line-height: 1; }
+.add-career-title { font-size: 15px; font-weight: 600; color: #5C3D1A; margin-bottom: 4px; }
+.add-career-desc { font-size: 13px; color: #8B6914; line-height: 1.6; }
+.add-career-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

@@ -133,48 +133,58 @@ async function onDelete(id: number) {
     </div>
     <a-empty v-else description="暂无物品，点击「AI 生成物品」" />
 
-    <a-modal v-model:open="showAdd" :title="editing ? '编辑物品' : '添加物品'" width="560px">
-      <a-form layout="vertical">
-        <div class="form-row2">
-          <a-form-item label="名称"><a-input v-model:value="form.name" /></a-form-item>
-          <a-form-item label="数量"><a-input-number v-model:value="form.quantity" :min="1" style="width:100%" /></a-form-item>
+    <a-modal v-model:open="showAdd" :title="null" width="520px" :footer="null">
+      <div class="item-modal">
+        <div class="item-modal-intro">
+          <span class="item-modal-icon">🗡️</span>
+          <div>
+            <div class="item-modal-title">{{ editing ? '编辑物品' : '手动添加物品' }}</div>
+            <div class="item-modal-desc">{{ editing ? '修改物品属性和状态' : '填写物品基本信息，后续可由 AI 补充细节' }}</div>
+          </div>
         </div>
-        <div class="form-row3">
-          <a-form-item label="分类">
-            <a-select v-model:value="form.category">
-              <a-select-option v-for="c in categoryList" :key="c" :value="c">{{ c }}</a-select-option>
-            </a-select>
+        <a-divider style="margin:16px 0" />
+        <a-form layout="vertical">
+          <div class="form-row2">
+            <a-form-item label="名称"><a-input v-model:value="form.name" placeholder="物品名称" /></a-form-item>
+            <a-form-item label="数量"><a-input-number v-model:value="form.quantity" :min="1" style="width:100%" /></a-form-item>
+          </div>
+          <div class="form-row3">
+            <a-form-item label="分类">
+              <a-select v-model:value="form.category">
+                <a-select-option v-for="c in categoryList" :key="c" :value="c">{{ c }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="稀有度">
+              <a-select v-model:value="form.rarity">
+                <a-select-option v-for="(m, k) in rarityMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="状态">
+              <a-select v-model:value="form.status">
+                <a-select-option v-for="(m, k) in statusMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
+              </a-select>
+            </a-form-item>
+          </div>
+          <a-form-item label="细分类型"><a-input v-model:value="form.item_type" placeholder="武器/防具/丹药/功法..." /></a-form-item>
+          <a-form-item label="描述"><a-textarea v-model:value="form.description" :rows="3" placeholder="物品的来历、外观、用途..." /></a-form-item>
+          <div class="form-row2">
+            <a-form-item label="持有者">
+              <a-select v-model:value="form.owner_name" show-search allow-clear placeholder="选择角色">
+                <a-select-option value="">无主</a-select-option>
+                <a-select-option v-for="c in (characters || [])" :key="c.name" :value="c.name">{{ c.name }}({{ c.role }})</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item label="获得章节"><a-input-number v-model:value="form.obtained_chapter" :min="1" style="width:100%" /></a-form-item>
+          </div>
+          <a-form-item>
+            <a-checkbox v-model:checked="form.is_key_item" :true-value="1" :false-value="0">关键剧情道具（影响主线）</a-checkbox>
           </a-form-item>
-          <a-form-item label="稀有度">
-            <a-select v-model:value="form.rarity">
-              <a-select-option v-for="(m, k) in rarityMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item label="状态">
-            <a-select v-model:value="form.status">
-              <a-select-option v-for="(m, k) in statusMeta" :key="k" :value="k">{{ m.label }}</a-select-option>
-            </a-select>
-          </a-form-item>
+        </a-form>
+        <div class="item-modal-actions">
+          <a-button @click="showAdd = false">取消</a-button>
+          <a-button type="primary" @click="onSave">保存</a-button>
         </div>
-        <a-form-item label="细分类型"><a-input v-model:value="form.item_type" placeholder="武器/防具/丹药/功法..." /></a-form-item>
-        <a-form-item label="描述"><a-textarea v-model:value="form.description" :rows="3" /></a-form-item>
-        <div class="form-row2">
-          <a-form-item label="持有者">
-            <a-select v-model:value="form.owner_name" show-search allow-clear placeholder="选择角色">
-              <a-select-option value="">无主</a-select-option>
-              <a-select-option v-for="c in (characters || [])" :key="c.name" :value="c.name">{{ c.name }}({{ c.role }})</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item label="获得章节"><a-input-number v-model:value="form.obtained_chapter" :min="1" style="width:100%" /></a-form-item>
-        </div>
-        <a-form-item>
-          <a-checkbox v-model:checked="form.is_key_item" :true-value="1" :false-value="0">关键剧情道具（影响主线）</a-checkbox>
-        </a-form-item>
-      </a-form>
-      <template #footer>
-        <a-button @click="showAdd = false">取消</a-button>
-        <a-button type="primary" @click="onSave">保存</a-button>
-      </template>
+      </div>
     </a-modal>
 
     <!-- AI 生成物品弹窗 -->
@@ -223,4 +233,14 @@ async function onDelete(id: number) {
 .card-foot { display: flex; gap: 12px; font-size: 12px; color: #8C8C8C; }
 .form-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .form-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+.item-modal-intro {
+  display: flex; align-items: flex-start; gap: 14px;
+  background: linear-gradient(135deg, #F0F4FF 0%, #E8EDFA 100%);
+  border-radius: 12px; padding: 16px 18px;
+}
+.item-modal-icon { font-size: 36px; line-height: 1; }
+.item-modal-title { font-size: 15px; font-weight: 600; color: #2B3B5C; margin-bottom: 4px; }
+.item-modal-desc { font-size: 13px; color: #5C6B8C; line-height: 1.6; }
+.item-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 </style>

@@ -38,6 +38,34 @@ const categoryLabel: Record<string, string> = {
   professional: '职业', social: '社交',
 }
 
+// 角色 → 节点颜色（按角色类型区分）
+const roleNodeColor: Record<string, { bg: string; border: string; size: number }> = {
+  '主角': { bg: '#FF6B35', border: '#E55A2B', size: 80 },
+  '反派': { bg: '#C41E3A', border: '#A01830', size: 72 },
+  '配角': { bg: '#4D8CBF', border: '#3B72A0', size: 64 },
+  '路人': { bg: '#8C8C8C', border: '#6E6E6E', size: 56 },
+}
+
+function nodeStyleFor(n: any) {
+  const role = n.role || '配角'
+  const c = roleNodeColor[role] || roleNodeColor['配角']
+  return {
+    background: c.bg,
+    color: '#fff',
+    border: `3px solid ${c.border}`,
+    borderRadius: '50%',
+    width: `${c.size}px`,
+    height: `${c.size}px`,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: n.role === '主角' ? '14px' : '12px',
+    fontWeight: n.role === '主角' ? '800' : '600',
+    textAlign: 'center' as const,
+    boxShadow: n.role === '主角' ? '0 4px 16px rgba(255,107,53,0.4)' : '0 2px 8px rgba(0,0,0,0.15)',
+  }
+}
+
 // ===== 表单：添加/编辑关系 =====
 const showForm = ref(false)
 const editing = ref<any>(null)
@@ -247,30 +275,39 @@ function buildGraph() {
   if (!graph.value) return
   const ns = graph.value.nodes || []
   const es = graph.value.edges || []
-  // 圆形布局作为初始位置（用户可拖拽调整）
-  const cx = 400, cy = 300, r = 200
-  vfNodes.value = ns.map((n: any, i: number) => {
-    const isMain = n.role === '主角'
-    const angle = (2 * Math.PI * i) / Math.max(ns.length, 1) - Math.PI / 2
-    return {
+  // 圆形布局作为初始位置（根据角色区分半径，主角居中）
+  const cx = 450, cy = 320
+  const mainNodes = ns.filter((n: any) => n.role === '主角')
+  const otherNodes = ns.filter((n: any) => n.role !== '主角')
+
+  // 主角放在中心附近，其他角色环绕
+  const mainR = 60
+  const outerR = 220
+
+  vfNodes.value = []
+  let idx = 0
+
+  // 主角节点
+  mainNodes.forEach((n: any) => {
+    const angle = (2 * Math.PI * idx) / Math.max(mainNodes.length, 1) - Math.PI / 2
+    vfNodes.value.push({
       id: String(n.id),
-      position: { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) },
-      data: { label: n.name, role: n.role, isMain },
-      style: {
-        background: isMain ? '#4D8088' : '#5A9098',
-        color: '#fff',
-        border: 'none',
-        borderRadius: '50%',
-        width: '70px',
-        height: '70px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '13px',
-        fontWeight: isMain ? '700' : '500',
-        textAlign: 'center' as const,
-      },
-    }
+      position: { x: cx + mainR * Math.cos(angle), y: cy + mainR * Math.sin(angle) },
+      data: { label: n.name, role: n.role, isMain: true },
+      style: nodeStyleFor(n),
+    })
+    idx++
+  })
+
+  // 其他角色环绕
+  otherNodes.forEach((n: any, i: number) => {
+    const angle = (2 * Math.PI * i) / Math.max(otherNodes.length, 1) - Math.PI / 2
+    vfNodes.value.push({
+      id: String(n.id),
+      position: { x: cx + outerR * Math.cos(angle), y: cy + outerR * Math.sin(angle) },
+      data: { label: n.name, role: n.role, isMain: false },
+      style: nodeStyleFor(n),
+    })
   })
   vfEdges.value = es.map((e: any, i: number) => {
     const color = categoryColor[e.category] || '#999'
@@ -348,7 +385,7 @@ async function rebuild() {
 <template>
   <PageHeader title="🗺️ 角色关系图谱">
     <template #actions>
-      <a-button v-if="viewMode === 'chart'" size="small" @click="autoLayout">🔄 重置布局</a-button>
+      <a-button v-if="viewMode === 'chart'" @click="autoLayout">🔄 重置布局</a-button>
       <a-button type="default" @click="openAdd">＋ 添加关系</a-button>
       <a-button type="primary" :loading="showRebuild" @click="rebuild">{{ showRebuild ? '分析中…' : '🤖 AI 重新分析' }}</a-button>
     </template>

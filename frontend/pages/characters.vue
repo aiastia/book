@@ -59,6 +59,8 @@ const orgNameById = (id: number | null) => {
 }
 
 const showGen = ref(false)
+const showAdd = ref(false)
+const addForm = reactive({ name: '', role: '配角', gender: '', age: '', appearance: '', personality: '', background: '' })
 const genRole = ref('主角')
 const genExtra = ref('')
 const genCount = ref(1)
@@ -220,6 +222,16 @@ async function onBatch() {
   catch (e:any) { msg.error('批量生成失败：'+formatError(e)) }
   finally { batchLoading.value = false }
 }
+async function onAdd() {
+  if (!addForm.name.trim()) { msg.warning('请输入角色姓名'); return }
+  try {
+    await API.character.create(addForm, currentProjectId.value)
+    showAdd.value = false
+    Object.assign(addForm, { name: '', role: '配角', gender: '', age: '', appearance: '', personality: '', background: '' })
+    await refreshChars()
+    msg.success('角色已添加')
+  } catch (e: any) { msg.error('添加失败：' + formatError(e)) }
+}
 function openEdit(c:any) {
   editing.value = c
   Object.keys(editForm).forEach(k => {
@@ -300,9 +312,40 @@ loadAllRelations()
 <template>
   <div class="char-page">
     <div class="page-actions">
+      <a-button @click="showAdd = true">＋ 添加角色</a-button>
       <a-button @click="showBatch=true">批量生成</a-button>
       <a-button type="primary" @click="showGen=true">AI 生成角色</a-button>
     </div>
+
+    <!-- 手动添加角色 -->
+    <a-modal v-model:open="showAdd" title="添加角色" width="500px" :footer="null">
+      <div class="add-char-modal">
+        <a-form layout="vertical">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <a-form-item label="姓名"><a-input v-model:value="addForm.name" placeholder="角色姓名" /></a-form-item>
+            <a-form-item label="角色">
+              <a-select v-model:value="addForm.role">
+                <a-select-option value="主角">主角</a-select-option>
+                <a-select-option value="反派">反派</a-select-option>
+                <a-select-option value="配角">配角</a-select-option>
+                <a-select-option value="路人">路人</a-select-option>
+              </a-select>
+            </a-form-item>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <a-form-item label="性别"><a-input v-model:value="addForm.gender" placeholder="男/女/其他" /></a-form-item>
+            <a-form-item label="年龄"><a-input v-model:value="addForm.age" placeholder="如：24" /></a-form-item>
+          </div>
+          <a-form-item label="外貌特征"><a-input v-model:value="addForm.appearance" placeholder="简短的容貌/穿着描述" /></a-form-item>
+          <a-form-item label="性格特点"><a-textarea v-model:value="addForm.personality" :rows="2" placeholder="性格特征描述" /></a-form-item>
+          <a-form-item label="背景故事"><a-textarea v-model:value="addForm.background" :rows="2" placeholder="角色背景与经历" /></a-form-item>
+        </a-form>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+          <a-button @click="showAdd = false">取消</a-button>
+          <a-button type="primary" @click="onAdd">添加角色</a-button>
+        </div>
+      </div>
+    </a-modal>
 
     <div v-if="characters && characters.length" class="char-grid">
       <a-card v-for="c in characters" :key="c.id" size="small" hoverable>
