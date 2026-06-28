@@ -364,7 +364,6 @@ async def run_batch_generation(task_id: int):
                                     await adb.execute(select(Chapter).where(Chapter.id == chapter_id))
                                 ).scalar_one_or_none()
                                 if ch2 and ch2.content:
-                                    from app.services.chapter_service import ChapterService
                                     svc2 = ChapterService(adb, project_id, user_id)
                                     await svc2._auto_analyze(ch2)
                         except Exception as e:
