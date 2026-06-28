@@ -22,10 +22,4 @@ export const characterApi = {
   deleteChangeLog: (characterId: number, logId: number, id?: number) => del(`/projects/${P(id)}/characters/${characterId}/change-logs/${logId}`),
 }
 
-// List all character-career assignments
-import { get, post, pid } from "./client"
-const CP = (id?: number) => id || pid()
-export const charCareerApi = {
-  list: (id?: number) => get(`/projects/${CP(id)}/character-careers`),
-  create: (body: any, id?: number) => post(`/projects/${CP(id)}/character-careers`, body),
-}
+// (charCareerApi moved to separate file)
