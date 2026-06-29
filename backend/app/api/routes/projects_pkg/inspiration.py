@@ -88,6 +88,7 @@ async def _run_step(engine, ai_client, step_name: str, ctx: dict) -> dict:
     result = await ai_client.chat_json_retry(
         messages=messages,
         max_retries=1,  # 灵感步骤是轻量请求，重试1次足够，避免多次重试超过 Cloudflare 100秒限制
+        max_tokens=40000,  # 放大输出上限，避免截断
         **insp_kwargs,
     )
     # AI 调用本身报错（401/网络等）→ 直接抛出

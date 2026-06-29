@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     AI_TEMPERATURE: float = 0.85
     AI_TOP_P: float = 0.9
     AI_MAX_TOKENS: int = 200000  # 单次请求最大输出 token 数（全局上限，覆盖 skill 配置）
-    AI_DEFAULT_MAX_TOKENS: int = 26384  # 默认输出 token 数（skill 未配置时使用）
+    AI_DEFAULT_MAX_TOKENS: int = 40000  # 默认输出 token 数（skill 未配置时使用）
     # frequency_penalty / presence_penalty 不在全局强制默认值。
     # 由用户 AI 设置页逐个模型配置，None 时不发送参数以兼容不支持这些参数的模型。
 
