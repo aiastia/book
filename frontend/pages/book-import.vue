@@ -312,6 +312,8 @@ function onDirectUpload(file: any) {
           <a-radio-button :value="5">采样 5 章</a-radio-button>
           <a-radio-button :value="10">采样 10 章</a-radio-button>
           <a-radio-button :value="20">采样 20 章</a-radio-button>
+          <a-radio-button :value="40">采样 40 章</a-radio-button>
+          <a-radio-button :value="80">采样 80 章</a-radio-button>
         </a-radio-group>
         <div style="font-size:12px;color:#909399;margin-top:6px;">从全书前/中/后均匀取样，比只看开头更能把握整体气质。</div>
       </div>
