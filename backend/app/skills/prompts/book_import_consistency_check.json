@@ -1,0 +1,12 @@
+{
+  "name": "book_import_consistency_check",
+  "display_name": "拆书导入-设定一致性自查",
+  "description": "用工具自查项目设定一致性，发现角色职业/组织/关系/大纲引用的矛盾并给出修复指令",
+  "category": "import_book",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "book_import_consistency_check.md"
+}

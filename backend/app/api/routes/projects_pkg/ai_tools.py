@@ -388,6 +388,79 @@ def _sample_chapters_text(chapters: list[dict], side: str, count: int) -> str:
     return "\n\n".join(parts)
 
 
+def _build_world_info_for_proj(proj) -> str:
+    """构建项目世界观上下文（四维度），供自查 agent 使用。"""
+    parts = []
+    if proj.world_time_period:
+        parts.append(f"时间背景：{proj.world_time_period}")
+    if proj.world_location:
+        parts.append(f"地理位置：{proj.world_location}")
+    if proj.world_atmosphere:
+        parts.append(f"氛围基调：{proj.world_atmosphere}")
+    if proj.world_rules:
+        parts.append(f"世界规则：{proj.world_rules}")
+    return "\n".join(parts) if parts else "暂无世界观信息"
+
+
+async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -> int:
+    """应用一致性自查给出的修复指令，返回已修复数量。
+
+    目前支持：
+    - clear_career / set_career：修正角色 main_career_stage_desc
+    - remove_relation：删除两端无效的角色关系
+    其余（note_only / setting_contradiction）仅记录，不自动改。
+    """
+    if not isinstance(check_json, dict):
+        return 0
+    issues = check_json.get("issues") or []
+    if not isinstance(issues, list) or not issues:
+        return 0
+
+    from app.models.character import Character, CharacterRelation
+
+    fixed = 0
+    for issue in issues:
+        if not isinstance(issue, dict):
+            continue
+        fix = issue.get("fix") or {}
+        if not isinstance(fix, dict):
+            continue
+        action = fix.get("action")
+        target_name = str(fix.get("target_name", "")).strip()
+        new_value = str(fix.get("new_value", ""))
+
+        if action in ("clear_career", "set_career") and target_name:
+            # 修正角色职业阶段描述
+            char = (
+                await task_db.execute(
+                    select(Character).where(
+                        Character.project_id == project_id, Character.name == target_name
+                    )
+                )
+            ).scalar_one_or_none()
+            if char:
+                char.main_career_stage_desc = new_value[:200]
+                fixed += 1
+
+        elif action == "remove_relation" and target_name:
+            # 按描述模糊匹配删除关系（target_name 存关系描述）
+            rels = (
+                await task_db.execute(
+                    select(CharacterRelation).where(
+                        CharacterRelation.project_id == project_id
+                    )
+                )
+            ).scalars().all()
+            for r in rels:
+                if target_name and target_name in (r.description or ""):
+                    await task_db.delete(r)
+                    fixed += 1
+
+    if fixed:
+        await task_db.commit()
+    return fixed
+
+
 @router.post("/book-import/upload")
 async def book_import_upload(
     req: BookImportUploadRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
@@ -825,13 +898,45 @@ async def book_import_deconstruct(
                 ),
             )
 
-            # 8. 回填
+            # 8. 一致性自查（轻量 agent）：用工具查实体，发现矛盾并自动修复
+            await tracker.update(stage="generating", message="设定一致性自查...", progress=95)
+            try:
+                from app.services.chapter_tools import get_chapter_tools, make_tool_executor
+
+                check_result = await engine.execute_skill(
+                    "book_import_consistency_check",
+                    ai_client,
+                    {
+                        "title": new_proj.title,
+                        "genre": genre or "网文",
+                        "synopsis": synopsis or "",
+                        "world_info": _build_world_info_for_proj(new_proj),
+                        "user_prompt": "请用工具自查项目设定一致性，找出矛盾并给出修复指令。",
+                    },
+                    tools=get_chapter_tools(),
+                    tool_executor=make_tool_executor(task_db, new_proj.id),
+                )
+                if check_result.get("error"):
+                    logger.warning("拆书一致性自查失败：%s", check_result["error"])
+                else:
+                    fixed = await _apply_consistency_fixes(
+                        task_db, new_proj.id, check_result.get("json") or {}
+                    )
+                    if fixed:
+                        logger.info("拆书一致性自查修复 %d 处", fixed)
+                        await tracker.update(
+                            stage="generating", message=f"一致性自查完成（自动修复 {fixed} 处）"
+                        )
+            except Exception as e:
+                logger.warning("拆书一致性自查异常：%s", e)
+
+            # 9. 回填
             bk.status = "project_created"
             bk.created_project_id = new_proj.id
             await task_db.commit()
 
             await tracker.complete(
-                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观 + 详细设定/职业/地点/物品/组织/关系"
+                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观 + 详细设定/职业/地点/物品/组织/关系 + 一致性自查"
             )
 
     task_id = await submit_async_task(
