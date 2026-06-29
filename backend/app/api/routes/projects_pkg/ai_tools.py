@@ -388,6 +388,29 @@ def _sample_chapters_text(chapters: list[dict], side: str, count: int) -> str:
     return "\n\n".join(parts)
 
 
+def _sample_chapters_evenly(chapters: list[dict], total_count: int = 12) -> str:
+    """均匀采样：从前/中/后三段各取若干章，拼接成正文，用于设定提取。
+
+    长篇只看开头会漏掉后文才出现的角色/势力/设定。本函数把 total_count 章
+    均匀分布到全书（前段、中段、后段），保证覆盖全书关键节点。
+    章数不足 total_count 时取全部。每章正文截断到 1500 字防 token 爆炸。
+    """
+    if not chapters:
+        return ""
+    n = len(chapters)
+    if n <= total_count:
+        picked = chapters[:]
+    else:
+        # 在 [0, n) 范围内均匀取 total_count 个点
+        picked = [chapters[int(i * (n - 1) / (total_count - 1))] for i in range(total_count)]
+    parts = []
+    for c in picked:
+        title = c.get("title") or f"第{c.get('chapter_number', 0)}章"
+        content = (c.get("content", "") or "")[:1500]
+        parts.append(f"{title}\n{content}")
+    return "\n\n".join(parts)
+
+
 def _build_world_info_for_proj(proj) -> str:
     """构建项目世界观上下文（四维度），供自查 agent 使用。"""
     parts = []
@@ -970,10 +993,10 @@ async def book_import_deconstruct(
                     logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
                     continue
 
-            # 5. 提取角色档案
+            # 5. 提取角色档案（均匀采样全书，避免只看开头漏掉后文出场的角色）
             await tracker.update(stage="generating", message="提取角色档案...", progress=80)
             try:
-                char_sample = _sample_chapters_text(chapters, "head", min(len(chapters), 10))
+                char_sample = _sample_chapters_evenly(chapters, 12)
                 from app.models.character import Character
 
                 char_result = await engine.execute_skill(
@@ -1016,10 +1039,10 @@ async def book_import_deconstruct(
             except Exception as e:
                 logger.warning("拆书角色提取异常：%s", e)
 
-            # 6. 提取世界观设定
+            # 6. 提取世界观设定（均匀采样全书，覆盖中后期才展开的世界观）
             await tracker.update(stage="generating", message="提取世界观设定...", progress=90)
             try:
-                world_sample = _sample_chapters_text(chapters, "head", min(len(chapters), 10))
+                world_sample = _sample_chapters_evenly(chapters, 12)
                 world_result = await engine.execute_skill(
                     "book_import_reverse_world",
                     ai_client,
@@ -1084,10 +1107,10 @@ async def book_import_deconstruct(
                 validate_done=0,
             )
 
-            # 采样一份原书正文，只喂给「最依赖原书细节」的步骤（组织、角色关系），
+            # 均匀采样全书正文，只喂给「最依赖原书细节」的步骤（组织、角色关系），
             # 减少与原书的气质断层。其余步骤（详细设定/职业/地点/物品）的题材已被
             # 核心世界观四字段 + 已拆角色锁死，喂正文边际收益低却浪费 token，故不喂。
-            _source_text = _sample_chapters_text(chapters, "head", min(len(chapters), 8))
+            _source_text = _sample_chapters_evenly(chapters, 8)
 
             # 各补齐步骤的 (label, 可调用)。单步失败仅告警并继续，不影响已生成内容。
             async def _run_fill_step(label, coro_factory):
