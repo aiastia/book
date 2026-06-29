@@ -256,9 +256,10 @@ async def validate_outline_entities(
                             char.organization_id = oid
                             db.add(
                                 OrganizationMember(
+                                    project_id=project_id,
                                     organization_id=oid,
                                     character_id=cid,
-                                    role=str(a.get("role", "成员"))[:50],
+                                    position=str(a.get("role", a.get("position", "成员")))[:100],
                                     status="active",
                                     source="ai",
                                 )

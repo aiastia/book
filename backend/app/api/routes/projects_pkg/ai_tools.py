@@ -411,6 +411,59 @@ def _sample_chapters_evenly(chapters: list[dict], total_count: int = 12) -> str:
     return "\n\n".join(parts)
 
 
+async def _cascade_delete_project(task_db, project_id: int):
+    """级联删除项目的所有关联数据（重新拆解时清理旧项目用）。
+
+    比 crud.delete_project 更全：含 Item/Location/OrganizationMember 等拆书生成的表。
+    """
+    from app.models.career import Career
+    from app.models.character import Character, CharacterRelation
+    from app.models.character_career import CharacterCareer
+    from app.models.foreshadow import Foreshadow
+    from app.models.item import Item
+    from app.models.location import Location
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
+    from app.models.outline import Outline
+    from app.models.plot_analysis import PlotAnalysis
+    from app.models.story_memory import StoryMemory
+    from app.models.world import WorldSetting
+
+    # 按 FK 依赖顺序删除（先删子表，最后删项目本身）
+    for Model in [
+        OrganizationMember,
+        CharacterCareer,
+        CharacterRelation,
+        Item,
+        Location,
+        Organization,
+        Career,
+        Foreshadow,
+        PlotAnalysis,
+        StoryMemory,
+        Outline,
+        Character,
+        WorldSetting,
+        Chapter,
+    ]:
+        if not hasattr(Model, "project_id"):
+            continue
+        items = (
+            (await task_db.execute(select(Model).where(Model.project_id == project_id)))
+            .scalars()
+            .all()
+        )
+        for it in items:
+            await task_db.delete(it)
+
+    # 最后删项目本身
+    p = (
+        await task_db.execute(select(Project).where(Project.id == project_id))
+    ).scalar_one_or_none()
+    if p:
+        await task_db.delete(p)
+
+
 def _build_world_info_for_proj(proj) -> str:
     """构建项目世界观上下文（四维度），供自查 agent 使用。"""
     parts = []
@@ -851,6 +904,18 @@ async def book_import_deconstruct(
             if not bk or not bk.raw_text:
                 await tracker.fail("书籍不存在或正文为空")
                 return
+
+            # 重新拆解：若该书已生成过项目，先级联清理旧项目所有数据，避免残留
+            if bk.created_project_id:
+                await tracker.update(stage="preparing", message="清理上次拆解的旧项目...")
+                try:
+                    await _cascade_delete_project(task_db, bk.created_project_id)
+                    await task_db.commit()
+                    bk.created_project_id = None
+                    bk.status = "uploaded"
+                    logger.info("已清理旧项目 %s，准备重新拆解", bk.created_project_id)
+                except Exception as e:
+                    logger.warning("清理旧项目异常（继续重新拆解）：%s", e)
 
             await tracker.update(stage="preparing", message="解析章节...")
             chapters = parse_txt_file(bk.raw_text.encode("utf-8")).get("chapters", [])

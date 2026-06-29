@@ -54,7 +54,23 @@ async function onDeleteImport(b: any) {
 }
 
 // 启动拆解：打开配置弹窗
-function startParse(b: any) {
+async function startParse(b: any) {
+  // 已拆解的书：确认是否重新拆解（会清理上次生成的项目）
+  if (b.tag === '已拆解') {
+    const { Modal } = await import('ant-design-vue')
+    const confirmed = await new Promise<boolean>(resolve => {
+      Modal.confirm({
+        title: '重新拆解？',
+        content: '将删除上次拆解生成的项目（角色/大纲/世界观等全部清除），然后重新拆解。此操作不可撤销。',
+        okText: '重新拆解',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false),
+      })
+    })
+    if (!confirmed) return
+  }
   parseTarget.value = b
   parseStep.value = 1
   deconstructResult.value = null
@@ -262,8 +278,8 @@ function onDirectUpload(file: any) {
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
             <a-tag :color="b.tag === '已拆解' ? 'success' : 'processing'" size="small">{{ b.tag || '待拆解' }}</a-tag>
-            <a-button type="primary" size="small" :disabled="b.tag === '已拆解'" @click="startParse(b)">
-              {{ b.tag === '已拆解' ? '已拆解' : 'AI 拆解' }}
+            <a-button type="primary" size="small" @click="startParse(b)">
+              {{ b.tag === '已拆解' ? '重新拆解' : 'AI 拆解' }}
             </a-button>
             <a-button size="small" danger @click="onDeleteImport(b)">删除</a-button>
           </div>

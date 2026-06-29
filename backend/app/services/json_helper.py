@@ -743,8 +743,25 @@ def clean_json_response(text: str) -> str:
                         logger.info("✅ 基于错误位置修复后JSON验证成功")
                     except Exception as e4:
                         logger.error(f"❌ 所有修复后JSON仍然无效: {e4}")
-                        logger.debug(f"   结果预览: {result[:500]}")
-                        logger.debug(f"   结果结尾: ...{result[-200:]}")
+                        logger.warning(f"   清洗后结果预览(前800字): {result[:800]}")
+                        logger.warning(f"   清洗后结果结尾(后300字): ...{result[-300:]}")
+                        # 输出错误位置附近的片段，便于排查
+                        try:
+                            import re as _re
+                            m = _re.search(r"line (\d+) column (\d+)", str(e4))
+                            if m:
+                                el, ec = int(m.group(1)), int(m.group(2))
+                                lines = result.split("\n")
+                                if 0 < el <= len(lines):
+                                    start = max(0, el - 3)
+                                    end = min(len(lines), el + 2)
+                                    snippet = "\n".join(
+                                        f"{'>>>' if (start+i+1)==el else '   '} {start+i+1}| {lines[start+i]}"
+                                        for i in range(end - start)
+                                    )
+                                    logger.warning(f"   错误位置(line {el})上下文:\n{snippet}")
+                        except Exception:
+                            pass
 
         return result
 
