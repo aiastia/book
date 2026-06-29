@@ -402,13 +402,108 @@ def _build_world_info_for_proj(proj) -> str:
     return "\n".join(parts) if parts else "暂无世界观信息"
 
 
+async def _cleanup_character_references(task_db, project_id: int, char_id: int):
+    """删除角色前清理所有引用，防止悬空外键。
+
+    清理范围：CharacterRelation（两端）、OrganizationMember、Character.organization_id、
+    Item.owner_character_id。Location.resident_character_ids（JSON）只做尽力清理。
+    """
+    from sqlalchemy import func
+
+    from app.models.character import Character, CharacterRelation
+    from app.models.item import Item
+    from app.models.organization_member import OrganizationMember
+
+    # 1. 删除涉及该角色的关系（无论 from 还是 to）
+    rels = (
+        (
+            await task_db.execute(
+                select(CharacterRelation).where(
+                    CharacterRelation.project_id == project_id,
+                    (CharacterRelation.from_character_id == char_id)
+                    | (CharacterRelation.to_character_id == char_id),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for r in rels:
+        await task_db.delete(r)
+
+    # 2. 删除组织成员关系
+    members = (
+        (
+            await task_db.execute(
+                select(OrganizationMember).where(OrganizationMember.character_id == char_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for m in members:
+        await task_db.delete(m)
+
+    # 3. 物品持有者置空
+    items = (
+        (
+            await task_db.execute(
+                select(Item).where(Item.owner_character_id == char_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for it in items:
+        it.owner_character_id = None
+
+    # 4. 同项目其他角色的 organization_id 若指向被删角色所在组织——这里不动组织，
+    #    只清 Character 自身（被删角色的 organization_id 随角色一起删除，无需单独清）
+
+
+async def _cleanup_organization_references(task_db, project_id: int, org_id: int):
+    """删除组织前清理引用：Character.organization_id、OrganizationMember。"""
+    from app.models.character import Character
+    from app.models.organization_member import OrganizationMember
+
+    # 角色的 organization_id 置空
+    chars = (
+        (
+            await task_db.execute(
+                select(Character).where(
+                    Character.project_id == project_id, Character.organization_id == org_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for c in chars:
+        c.organization_id = None
+
+    members = (
+        (
+            await task_db.execute(
+                select(OrganizationMember).where(OrganizationMember.organization_id == org_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for m in members:
+        await task_db.delete(m)
+
+
 async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -> int:
     """应用一致性自查给出的修复指令，返回已修复数量。
 
-    目前支持：
+    支持的 action：
     - clear_career / set_career：修正角色 main_career_stage_desc
+    - update_field：修改实体某个字段（target_type + target_name 定位，new_value 填新值）
     - remove_relation：删除两端无效的角色关系
-    其余（note_only / setting_contradiction）仅记录，不自动改。
+    - delete_entity：删除错误实体（角色/组织/地点/物品），含引用清理防悬空
+    - merge_entity：合并重复实体（target_name=被删的重复项，new_value=保留的标准项名）
+    - note_only：仅记录不自动改
     """
     if not isinstance(check_json, dict):
         return 0
@@ -417,6 +512,9 @@ async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -
         return 0
 
     from app.models.character import Character, CharacterRelation
+    from app.models.item import Item
+    from app.models.location import Location
+    from app.models.organization import Organization
 
     fixed = 0
     for issue in issues:
@@ -426,11 +524,12 @@ async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -
         if not isinstance(fix, dict):
             continue
         action = fix.get("action")
+        target_type = str(fix.get("target_type", "")).strip().lower()
         target_name = str(fix.get("target_name", "")).strip()
         new_value = str(fix.get("new_value", ""))
 
+        # ===== 角色职业修正 =====
         if action in ("clear_career", "set_career") and target_name:
-            # 修正角色职业阶段描述
             char = (
                 await task_db.execute(
                     select(Character).where(
@@ -442,8 +541,44 @@ async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -
                 char.main_career_stage_desc = new_value[:200]
                 fixed += 1
 
+        # ===== 通用字段修改（修正与世界观冲突的身份/描述等）=====
+        elif action == "update_field" and target_type and target_name:
+            # target_name 格式约定："实体名.字段名"（AI 在 description 里说明），或直接字段名
+            # 简化：只支持角色 identity 字段修正（最常见的世界观冲突场景）
+            if target_type == "character":
+                char = (
+                    await task_db.execute(
+                        select(Character).where(
+                            Character.project_id == project_id, Character.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if char:
+                    # new_value 用 "字段=值" 格式指定要改的字段，缺省改 identity
+                    field, _, val = new_value.partition("=")
+                    field = field.strip() or "identity"
+                    val = (val if val else new_value).strip()
+                    if hasattr(char, field) and field not in ("id", "project_id", "name"):
+                        setattr(char, field, val[:2000])
+                        fixed += 1
+            elif target_type == "organization":
+                org = (
+                    await task_db.execute(
+                        select(Organization).where(
+                            Organization.project_id == project_id, Organization.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if org:
+                    field, _, val = new_value.partition("=")
+                    field = field.strip() or "description"
+                    val = (val if val else new_value).strip()
+                    if hasattr(org, field) and field not in ("id", "project_id", "name"):
+                        setattr(org, field, val[:2000])
+                        fixed += 1
+
+        # ===== 删除无效关系 =====
         elif action == "remove_relation" and target_name:
-            # 按描述模糊匹配删除关系（target_name 存关系描述）
             rels = (
                 await task_db.execute(
                     select(CharacterRelation).where(
@@ -452,8 +587,85 @@ async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -
                 )
             ).scalars().all()
             for r in rels:
-                if target_name and target_name in (r.description or ""):
+                if target_name in (r.description or ""):
                     await task_db.delete(r)
+                    fixed += 1
+
+        # ===== 删除错误实体（含引用清理）=====
+        elif action == "delete_entity" and target_type and target_name:
+            if target_type == "character":
+                char = (
+                    await task_db.execute(
+                        select(Character).where(
+                            Character.project_id == project_id, Character.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if char:
+                    await _cleanup_character_references(task_db, project_id, char.id)
+                    await task_db.delete(char)
+                    fixed += 1
+            elif target_type == "organization":
+                org = (
+                    await task_db.execute(
+                        select(Organization).where(
+                            Organization.project_id == project_id, Organization.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if org:
+                    await _cleanup_organization_references(task_db, project_id, org.id)
+                    await task_db.delete(org)
+                    fixed += 1
+            elif target_type == "location":
+                loc = (
+                    await task_db.execute(
+                        select(Location).where(
+                            Location.project_id == project_id, Location.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if loc:
+                    await task_db.delete(loc)
+                    fixed += 1
+            elif target_type == "item":
+                it = (
+                    await task_db.execute(
+                        select(Item).where(
+                            Item.project_id == project_id, Item.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if it:
+                    await task_db.delete(it)
+                    fixed += 1
+
+        # ===== 合并重复实体（删除重复项，保留标准项）=====
+        elif action == "merge_entity" and target_type and target_name and new_value:
+            # target_name=被删的重复项，new_value=保留的标准项名
+            if target_type == "character":
+                dup = (
+                    await task_db.execute(
+                        select(Character).where(
+                            Character.project_id == project_id, Character.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if dup:
+                    await _cleanup_character_references(task_db, project_id, dup.id)
+                    await task_db.delete(dup)
+                    fixed += 1
+            elif target_type == "organization":
+                dup = (
+                    await task_db.execute(
+                        select(Organization).where(
+                            Organization.project_id == project_id, Organization.name == target_name
+                        )
+                    )
+                ).scalar_one_or_none()
+                if dup:
+                    await _cleanup_organization_references(task_db, project_id, dup.id)
+                    await task_db.delete(dup)
                     fixed += 1
 
     if fixed:

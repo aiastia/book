@@ -40,7 +40,7 @@
       "severity": "high | medium | low",
       "description": "具体矛盾描述（如'角色张三的main_career_stage_desc为金丹期，但职业体系里没有修仙境界'）",
       "fix": {
-        "action": "clear_career | set_career | remove_relation | note_only",
+        "action": "clear_career | set_career | update_field | remove_relation | delete_entity | merge_entity | note_only",
         "target_type": "character | relation | organization | outline",
         "target_name": "受影响的实体名（如角色名、组织名）",
         "new_value": "修复后的值（如清空职业则填空字符串；note_only 时填说明）"
@@ -52,8 +52,17 @@
 【fix.action 枚举说明】
 - clear_career：角色职业指向不存在的体系 → 清空（new_value 填 ""）
 - set_career：角色职业可匹配到正确体系 → 改正（new_value 填正确职业名）
-- remove_relation：关系两端有无效角色名 → 标记删除（new_value 填该关系描述）
-- note_only：矛盾无法自动修复（如设定冲突需人工判断）→ 仅记录，new_value 填说明
+- update_field：实体某字段与世界观冲突需修改 → target_type 填 character/organization，target_name 填实体名，new_value 填 "字段名=新值"（如 "identity=散修"，缺省字段名时改 identity）
+- remove_relation：关系两端有无效角色名 → 标记删除（target_name 填该关系描述片段用于匹配）
+- delete_entity：实体明显错误（空壳角色、乱码名、根本不属于本项目）需删除 → target_type 填 character/organization/location/item，target_name 填实体名。删除会自动清理引用关系，谨慎使用，只删确实错误的
+- merge_entity：实体重复（同名或极近似被生成了两份）→ target_type 填 character/organization，target_name 填「要删掉的重复项」名字，new_value 填「要保留的标准项」名字
+- note_only：矛盾无法自动修复（需人工判断）→ 仅记录，new_value 填说明
+
+【new_value 格式约定】
+- clear_career / set_career：直接填职业名（清空填 ""）
+- update_field：填 "字段名=新值"（如 "identity=江湖散修"），程序据此定位字段
+- delete_entity / merge_entity：delete_entity 时 new_value 填删除原因；merge_entity 时 new_value 填保留项的名字
+- remove_relation：target_name 填关系描述的关键片段（用于模糊匹配删除）
 
 【判断标准】
 - 只报告**真实矛盾**，不要为"可以更好"挑刺。没有矛盾就返回 issues 空数组。
