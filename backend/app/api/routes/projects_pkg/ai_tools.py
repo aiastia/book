@@ -881,6 +881,8 @@ async def book_import_deconstruct(
             total_batches = (available + batch_size - 1) // batch_size
             created_outlines = 0
             batches_done = 0
+            # 累积前序批次已生成的大纲摘要，让后续批次感知前情，保持剧情/角色连贯
+            prior_outlines_summary = ""
 
             for start_no in range(1, available + 1, batch_size):
                 # 检查取消
@@ -901,6 +903,13 @@ async def book_import_deconstruct(
                 batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
                 if not batch_text.strip():
                     continue
+                # 拼入前情提要（前序批次已生成的大纲），让本批保持连贯
+                prior_block = (
+                    f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
+                    f"{prior_outlines_summary}\n\n"
+                    if prior_outlines_summary
+                    else ""
+                )
                 try:
                     o_result = await engine.execute_skill(
                         "book_import_reverse_outlines",
@@ -914,7 +923,11 @@ async def book_import_deconstruct(
                             "end_chapter": str(end_no),
                             "expected_count": str(end_no - start_no + 1),
                             "chapters_text": batch_text,
-                            "user_prompt": f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。",
+                            "user_prompt": (
+                                f"{prior_block}"
+                                f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。"
+                                f"本批接续前情，保持叙事连贯。"
+                            ),
                         },
                     )
                     if o_result.get("error"):
@@ -923,6 +936,7 @@ async def book_import_deconstruct(
                     outlines_data = o_result.get("json") or []
                     if not isinstance(outlines_data, list):
                         continue
+                    batch_summary_parts = []
                     for item in outlines_data:
                         task_db.add(
                             Outline(
@@ -938,6 +952,18 @@ async def book_import_deconstruct(
                             )
                         )
                         created_outlines += 1
+                        # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
+                        ch_no = item.get("chapter_number", start_no)
+                        ch_title = str(item.get("title", ""))[:30]
+                        ch_summary = str(item.get("summary", ""))[:80]
+                        batch_summary_parts.append(f"第{ch_no}章《{ch_title}》：{ch_summary}")
+                    # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
+                    if batch_summary_parts:
+                        prior_outlines_summary = "\n".join(batch_summary_parts)
+                        # 若累积过长，只保留最近的若干章
+                        lines = prior_outlines_summary.split("\n")
+                        if len(lines) > 10:
+                            prior_outlines_summary = "（更早章节略）\n" + "\n".join(lines[-10:])
                     batches_done += 1
                     await task_db.commit()
                 except Exception as e:
