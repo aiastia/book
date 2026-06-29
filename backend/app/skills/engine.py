@@ -441,8 +441,10 @@ async def _chat_with_tools_json(
                 "duration_ms": raw.get("duration_ms", 0),
             }
     except Exception as e:
+        logger.warning(f"[tools] 工具调用后JSON解析异常: {e}，内容预览前200字: {(content or '')[:200]}")
         return {"json": None, "error": f"工具调用后JSON解析异常: {e}", "content": content}
     # parse_json 返回 None（非异常），也视为失败
+    logger.warning(f"[tools] 工具调用后无法解析JSON，内容预览前200字: {(content or '')[:200]}")
     return {
         "json": None,
         "error": "工具调用后无法解析JSON（AI未返回有效JSON结构）",

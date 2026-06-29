@@ -617,8 +617,7 @@ def clean_json_response(text: str) -> str:
                 break
 
         if start == -1:
-            logger.warning("⚠️ 未找到JSON起始符号 { 或 [")
-            logger.debug(f"   文本预览: {safe_preview(text, 200)}")
+            logger.warning(f"⚠️ 未找到JSON起始符号 {{ 或 [，文本预览前200字: {safe_preview(text, 200)}")
             return text
 
         if start > 0:
