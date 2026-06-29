@@ -178,6 +178,73 @@ async def global_inspiration_step(
     return await _run_step(engine, ai_client, step_name, ctx)
 
 
+@router.post("/global-inspiration/step/{step_name}/stream")
+async def global_inspiration_step_stream(
+    step_name: str,
+    req: InspirationStepRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """全局灵感步骤向导 —— SSE 流式版，防止 Cloudflare 524 超时。
+
+    通过持续推送 SSE 心跳保持 HTTP 连接活跃，AI 生成过程中客户端不会断开。
+    最终结果通过 event:data 推送完整 JSON。
+    """
+    import asyncio
+    import json as _json
+
+    from starlette.responses import StreamingResponse
+
+    if step_name not in ("title", "description", "theme", "genre"):
+        raise HTTPException(400, f"无效步骤: {step_name}")
+
+    async def event_stream():
+        # 1. 立即推送"开始"事件，建立 SSE 连接
+        yield f"data: {_json.dumps({'type': 'start', 'step': step_name}, ensure_ascii=False)}\n\n"
+
+        # 2. 在后台执行 AI 调用，同时持续发心跳保活
+        engine, ai_client = await make_engine_and_client(db, user.id)
+        ctx = {
+            "initial_idea": req.initial_idea,
+            "title": req.title,
+            "description": req.description,
+            "theme": req.theme,
+        }
+
+        ai_task = asyncio.create_task(_run_step(engine, ai_client, step_name, ctx))
+
+        # 3. 心跳循环：每 10 秒推一个 SSE 注释行（: 开头），保持连接活跃
+        while not ai_task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(ai_task), timeout=10)
+            except asyncio.TimeoutError:
+                # AI 还没完成，发心跳保活
+                yield ": keep-alive\n\n"
+            except Exception as e:
+                # AI 出错了
+                yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                return
+
+        # 4. AI 完成，推送结果
+        try:
+            result = ai_task.result()
+            yield f"data: {_json.dumps({'type': 'done', 'data': result}, ensure_ascii=False)}\n\n"
+        except HTTPException as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e.detail)}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Nginx: 禁用缓冲，确保实时推送
+        },
+    )
+
+
 @router.post("/global-inspiration/quick-complete")
 async def global_inspiration_quick_complete(
     req: InspirationStepRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)

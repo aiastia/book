@@ -269,6 +269,42 @@ export function useProjectApi() {
     return apiPost<{ prompt: string; options: string[] }>(`/api/projects/global-inspiration/step/${step}`, body, { timeout: 60000 })
   }
 
+  /** 灵感步骤 SSE 流式版：通过持续心跳保持连接，防止 Cloudflare 524 超时 */
+  async function globalInspirationStepStream(step: string, body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
+    const token = useCookie('token')
+    const config = useRuntimeConfig()
+    const baseURL = config.public.apiBase || '/api'
+    const res = await fetch(`${baseURL}/projects/global-inspiration/step/${step}/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token.value ? { Authorization: `Bearer ${token.value}` } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    // 读取 SSE 流，等待 done 事件
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // 解析 SSE data 行（跳过 : heartbeat 注释行）
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6))
+          if (payload.type === 'done') return payload.data as { prompt: string; options: string[] }
+          if (payload.type === 'error') throw new Error(payload.message)
+        }
+      }
+    }
+    throw new Error('SSE 连接意外断开')
+  }
+
   function inspirationQuickComplete(body: { initial_idea: string; title?: string; description?: string; theme?: string }) {
     return apiPost<any>(`/api/projects/${pid()}/inspiration/quick-complete`, body, { timeout: 60000 })
   }
@@ -915,6 +951,7 @@ export function useProjectApi() {
     getNavigation,
     // 灵感
     globalInspirationStep,
+    globalInspirationStepStream,
     globalInspirationQuickComplete,
     // 封面
     generateCoverPrompt,

@@ -76,8 +76,8 @@ async function onStepNext() {
     if (stepResults.theme) body.theme = stepResults.theme
 
     let res: any
-    // 灵感模式不依赖项目上下文，统一用全局接口（避免项目被删后 404）
-    res = await API.global.inspirationStep(stepName, body)
+    // 灵感模式不依赖项目上下文，统一用全局接口（SSE 流式版，防 524 超时）
+    res = await API.global.inspirationStepStream(stepName, body)
     currentOptions.value = res?.options || []
     currentPrompt.value = res?.prompt || ''
     step.value++
