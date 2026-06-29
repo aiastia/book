@@ -337,9 +337,10 @@ async def _step_career(db, task, pid, proj, engine, ai_client, source_text: str 
             "world_info": world_info,
             "user_prompt": _with_source(
                 (
-                    f'请为《{proj.title}》设计副职业（career_type="sub"）。'
-                    f"如果主职业已生成，副职业作为补充和变体，有 3-5 个精简阶段。"
-                    f"如果主职业返回了空数组（题材不需要职业体系），副职业也返回空数组。"
+                    f'请为《{proj.title}》设计副职业（每个务必带 career_type="sub"）。'
+                    f"副职业是主职业之外的辅助/生活/特殊职业，每个有 3-5 个精简阶段。"
+                    f"设计 5-8 个副职业，必须是和主职业不同的职业（如炼金术士/驯兽师/附魔师/商人/铁匠/学者/盗贼/吟游诗人等通用副职业）。"
+                    f"不要返回空数组——即使主职业体系完整，副职业作为补充依然有价值。"
                 ),
                 source_text,
                 proj.genre or "网文",
@@ -349,32 +350,46 @@ async def _step_career(db, task, pid, proj, engine, ai_client, source_text: str 
     )
     if cerr:
         return cerr
+    sub_careers = []
     sub_data = sub_result.get("json")
     if isinstance(sub_data, list):
-        all_careers.extend(sub_data)
+        sub_careers = sub_data
     elif isinstance(sub_data, dict):
         for key in ("sub_careers", "careers"):
             items = sub_data.get(key, [])
             if isinstance(items, list):
-                all_careers.extend(items)
-        if not all_careers and sub_data.get("name"):
-            all_careers.append(sub_data)
+                sub_careers.extend(items)
+        if not sub_careers and sub_data.get("name"):
+            sub_careers.append(sub_data)
 
-    for item in all_careers[:15]:
-        if isinstance(item, dict) and item.get("name"):
-            db.add(
-                Career(
-                    project_id=pid,
-                    name=str(item.get("name", ""))[:100],
-                    career_type=str(item.get("career_type", item.get("type", "main")))[:20],
-                    category=str(item.get("category", ""))[:50],
-                    description=str(item.get("description", ""))[:2000],
-                    stages=item.get("stages", item.get("requirements", [])),
-                    abilities=item.get(
-                        "abilities", item.get("special_abilities", item.get("abilities_list", []))
-                    ),
+    # 分别保存主职业（main）和副职业（sub），career_type 按调用上下文强制，
+    # 不信任 AI 返回的 career_type（常漏标或标错）。
+    def _save_careers(items, forced_type):
+        saved = 0
+        for item in items[:10]:
+            if isinstance(item, dict) and item.get("name"):
+                db.add(
+                    Career(
+                        project_id=pid,
+                        name=str(item.get("name", ""))[:100],
+                        career_type=forced_type,
+                        category=str(item.get("category", ""))[:50],
+                        description=str(item.get("description", ""))[:2000],
+                        stages=item.get("stages", item.get("requirements", [])),
+                        abilities=item.get(
+                            "abilities", item.get("special_abilities", item.get("abilities_list", []))
+                        ),
+                    )
                 )
-            )
+                saved += 1
+        return saved
+
+    saved_main = _save_careers(all_careers, "main")
+    saved_sub = _save_careers(sub_careers, "sub")
+    import logging
+    logging.getLogger(__name__).info(
+        "[init] 职业体系：主职业 %d 个，副职业 %d 个", saved_main, saved_sub
+    )
     await db.commit()
     task.career_done = 1
     return None
