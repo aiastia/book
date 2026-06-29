@@ -935,7 +935,11 @@ async def book_import_deconstruct(
                 {
                     "title": bk.title or "未知书名",
                     "sampled_text": sampled_text,
-                    "user_prompt": f"请从以下小说文本中提取项目信息（书名：{bk.title}）。",
+                    "user_prompt": (
+                        f"参考小说《{bk.title}》的正文，策划一本**全新的**小说立项。"
+                        f"新书名绝对不能是「{bk.title}」，也不能是它的变体（加后缀/改字）。"
+                        f"请取一个完全不同的新书名。"
+                    ),
                 },
             )
             if sug_result.get("error"):
@@ -946,9 +950,14 @@ async def book_import_deconstruct(
             # 3. 建项目
             genre = project_info.get("genre") or ""
             synopsis = project_info.get("description") or project_info.get("synopsis") or ""
+            # 新书名兜底：若 AI 返回了和原书名一样/为空/只有文件名后缀，自动加「（改编版）」区分
+            new_title = (project_info.get("title") or "").strip()
+            orig_title = (bk.title or "").strip()
+            if not new_title or new_title == orig_title or new_title in orig_title or orig_title in new_title:
+                new_title = f"《{orig_title}》改编版"
             new_proj = Project(
                 user_id=payload["user_id"],
-                title=project_info.get("title") or bk.title,
+                title=new_title,
                 genre=genre,
                 synopsis=synopsis,
                 chapter_count=payload["outline_chapters"],
