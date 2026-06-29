@@ -79,7 +79,8 @@
 </output>
 
 <constraints>
-@include:_shared_book_import_lock.md
+@include:_shared_book_import_genre_lock.md
+@include:_shared_book_import_naming.md
 
 【必须遵守】
  一章对应一个对象，数量与顺序与输入一致

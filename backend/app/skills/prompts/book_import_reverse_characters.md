@@ -63,7 +63,8 @@
 </output>
 
 <constraints>
-@include:_shared_book_import_lock.md
+@include:_shared_book_import_genre_lock.md
+@include:_shared_book_import_naming.md
 
 【其他禁止事项】
 - 输出JSON以外任何文字
