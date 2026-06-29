@@ -721,7 +721,7 @@ class AIClient:
                 if content and len(content) < min_output and not is_last_round:
                     logger.warning(
                         f"[tools] 正文过短（{len(content)} 字符），可能推理模型 token 分配异常，"
-                        f"强制无工具重试..."
+                        f"强制无工具重试... 预览前100字：{content[:100]}"
                     )
                     retry = await self.chat_stream_collect(
                         messages=current_messages
