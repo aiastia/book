@@ -57,6 +57,65 @@ export function post(path: string, body?: any) { return _fetch(path, { method: '
 export function put(path: string, body: any) { return _fetch(path, { method: 'PUT', body: JSON.stringify(body) }) }
 export function del(path: string) { return _fetch(path, { method: 'DELETE' }) }
 
+/**
+ * SSE 流式 POST：防 Edge/CDN 超时（524）。
+ * 后端用 sse_wrap 包装的端点，前端用这个调用。
+ * 用法和 post() 一样，只是底层走 SSE 流（心跳保活），等 done 事件拿结果。
+ */
+export async function postSSE(path: string, body?: any): Promise<any> {
+  const config = useRuntimeConfig()
+  const base = import.meta.server ? config.apiBase : config.public.apiBase
+  const url = `${base}/api${path}`
+
+  let token = ''
+  if (import.meta.client) {
+    token = localStorage.getItem('moyu_token') || ''
+  } else {
+    token = getTokenSSR() || ''
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+
+  if (res.status === 401) {
+    if (import.meta.client) {
+      localStorage.removeItem('moyu_token')
+      await navigateTo('/login')
+    }
+    throw new Error('认证已过期')
+  }
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}))
+    throw new Error(detail.detail || detail.message || `HTTP ${res.status}`)
+  }
+
+  // 读取 SSE 流，等 done 事件
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const payload = JSON.parse(line.slice(6))
+        if (payload.type === 'done') return payload.data
+        if (payload.type === 'error') throw new Error(payload.message)
+      }
+    }
+  }
+  throw new Error('连接意外断开')
+}
+
 /** 从 URL 自动提取 project_id（SSR 从请求 URL query 读，客户端从 window.location 读） */
 export function pid(): number {
   if (import.meta.client) {

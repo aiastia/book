@@ -184,72 +184,24 @@ async def global_inspiration_step_stream(
     req: InspirationStepRequest,
     user=Depends(get_current_user),
 ):
-    """全局灵感步骤向导 —— SSE 流式版，防止 Cloudflare 524 超时。
-
-    通过持续推送 SSE 心跳保持 HTTP 连接活跃，AI 生成过程中客户端不会断开。
-    最终结果通过 event:data 推送完整 JSON。
-    注意：不用 Depends(get_db) —— StreamingResponse 的生命周期和 Depends 不兼容，
-    会导致 db session 泄漏。在生成器内部用 async_session 自行管理。
-    """
-    import asyncio
-    import json as _json
-
-    from starlette.responses import StreamingResponse
-
+    """全局灵感步骤向导 —— SSE 流式版（通用 sse_wrap 包装，防 524 超时）。"""
     if step_name not in ("title", "description", "theme", "genre"):
         raise HTTPException(400, f"无效步骤: {step_name}")
 
-    user_id = user.id
+    from app.core.database import async_session as _async_session
 
-    async def event_stream():
-        # 在生成器内部创建独立的 db session，确保请求结束后正确关闭
-        from app.core.database import async_session as _async_session
-
+    async def _do():
         async with _async_session() as db:
-            # 1. 立即推送"开始"事件，建立 SSE 连接
-            yield f"data: {_json.dumps({'type': 'start', 'step': step_name}, ensure_ascii=False)}\n\n"
-
-            # 2. 在后台执行 AI 调用，同时持续发心跳保活
-            engine, ai_client = await make_engine_and_client(db, user_id)
+            engine, ai_client = await make_engine_and_client(db, user.id)
             ctx = {
                 "initial_idea": req.initial_idea,
                 "title": req.title,
                 "description": req.description,
                 "theme": req.theme,
             }
+            return await _run_step(engine, ai_client, step_name, ctx)
 
-            ai_task = asyncio.create_task(_run_step(engine, ai_client, step_name, ctx))
-
-            # 3. 心跳循环：每 10 秒推一个 SSE 注释行（: 开头），保持连接活跃
-            while not ai_task.done():
-                try:
-                    await asyncio.wait_for(asyncio.shield(ai_task), timeout=10)
-                except asyncio.TimeoutError:
-                    # AI 还没完成，发心跳保活
-                    yield ": keep-alive\n\n"
-                except Exception as e:
-                    # AI 出错了
-                    yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-                    return
-
-            # 4. AI 完成，推送结果
-            try:
-                result = ai_task.result()
-                yield f"data: {_json.dumps({'type': 'done', 'data': result}, ensure_ascii=False)}\n\n"
-            except HTTPException as e:
-                yield f"data: {_json.dumps({'type': 'error', 'message': str(e.detail)}, ensure_ascii=False)}\n\n"
-            except Exception as e:
-                yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Nginx: 禁用缓冲，确保实时推送
-        },
-    )
+    return await sse_wrap(_do())
 
 
 @router.post("/global-inspiration/quick-complete")

@@ -948,6 +948,23 @@ async def regenerate_chapter(
     return {"chapter_id": chapter.id, "content": new_content, "word_count": len(new_content)}
 
 
+@router.post("/{project_id}/chapters/{chapter_id}/regenerate/stream")
+async def regenerate_chapter_stream(
+    project_id: int,
+    chapter_id: int,
+    req: ChapterRegenerateRequest,
+    user=Depends(get_current_user),
+):
+    """章节重写 —— SSE 流式版（通用 sse_wrap 包装，防 524 超时）。"""
+    from app.core.database import async_session as _async_session
+
+    async def _do():
+        async with _async_session() as db:
+            return await regenerate_chapter(project_id, chapter_id, req, db, user)
+
+    return await sse_wrap(_do())
+
+
 @router.post("/{project_id}/chapters/{chapter_id}/partial-regenerate")
 async def partial_regenerate_chapter(
     project_id: int,
@@ -989,6 +1006,23 @@ async def partial_regenerate_chapter(
     check_skill_error(result)
     rewritten = (result.get("json") or {}).get("rewritten_text", "") or result.get("content", "")
     return {"rewritten_text": rewritten}
+
+
+@router.post("/{project_id}/chapters/{chapter_id}/partial-regenerate/stream")
+async def partial_regenerate_chapter_stream(
+    project_id: int,
+    chapter_id: int,
+    req: PartialRegenerateRequest,
+    user=Depends(get_current_user),
+):
+    """局部重写 —— SSE 流式版（通用 sse_wrap 包装，防 524 超时）。"""
+    from app.core.database import async_session as _async_session
+
+    async def _do():
+        async with _async_session() as db:
+            return await partial_regenerate_chapter(project_id, chapter_id, req, db, user)
+
+    return await sse_wrap(_do())
 
 
 @router.post("/{project_id}/chapters/cleanup-duplicate-analyses")

@@ -33,6 +33,65 @@ def make_router() -> APIRouter:
     return APIRouter(prefix="/api/projects", tags=["项目"])
 
 
+async def sse_wrap(coro, heartbeat_interval: int = 10):
+    """通用 SSE 包装器：把任意 async 函数包装成 SSE 流式响应，防 Edge/CDN 超时。
+
+    用法：
+        @router.post("/some-slow-endpoint/stream")
+        async def some_endpoint(...):
+            return await sse_wrap(some_async_function(arg1, arg2))
+
+    工作原理：
+    1. 立即推送 {type:'start'} 建立 SSE 连接
+    2. 每 heartbeat_interval 秒推送 : keep-alive 心跳（SSE 注释行）
+    3. 函数完成后推送 {type:'done', data: 结果} 或 {type:'error', message: ...}
+
+    前端用 fetch + ReadableStream 读取，等 done 事件拿到结果。
+    返回值和原函数完全一致，前端只需把 apiPost 换成 sseFetch。
+    """
+    import asyncio
+    import json as _json
+
+    from starlette.responses import StreamingResponse
+
+    async def event_stream():
+        yield f"data: {_json.dumps({'type': 'start'}, ensure_ascii=False)}\n\n"
+
+        task = asyncio.create_task(coro) if not asyncio.iscoroutine(coro) else asyncio.ensure_future(coro)
+
+        while not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_interval)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+            except Exception as e:
+                yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                return
+
+        try:
+            result = task.result()
+            # 如果是 HTTPException，提取 detail
+            from fastapi import HTTPException as _HE
+            if isinstance(result, _HE):
+                yield f"data: {_json.dumps({'type': 'error', 'message': str(result.detail)}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {_json.dumps({'type': 'done', 'data': result}, ensure_ascii=False, default=str)}\n\n"
+        except _HE as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e.detail)}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ============ Pydantic Schemas ============
 class ProjectCreate(BaseModel):
     title: str

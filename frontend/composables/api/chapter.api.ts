@@ -1,5 +1,5 @@
 /** 章节 API */
-import { get, post, put, del, pid } from './client'
+import { get, post, put, del, pid, postSSE } from './client'
 const P = (id?: number) => id || pid()
 
 export const chapterApi = {
@@ -46,9 +46,9 @@ export const chapterApi = {
     if (opts.narrativePerspective) body.narrative_perspective = opts.narrativePerspective
     return post(`/projects/${id}/chapters/batch-generate`, body)
   },
-  /** 重写/润色 */
+  /** 重写/润色（SSE 流式版，防 524 超时） */
   regenerate: (chapterId: number, body: string | Record<string, any>, id?: number, targetWords?: number) =>
-    post(`/projects/${P(id)}/chapters/${chapterId}/regenerate`,
+    postSSE(`/projects/${P(id)}/chapters/${chapterId}/regenerate/stream`,
       typeof body === 'string' ? { instructions: body, target_word_count: targetWords } : body),
   getNavigation: (chapterId: number, id?: number) =>
     get(`/projects/${P(id)}/chapters/${chapterId}/navigation`),
@@ -63,7 +63,7 @@ export const chapterApi = {
   applyRegenTask: (chapterId: number, taskId: number, id?: number) =>
     post(`/projects/${P(id)}/chapters/${chapterId}/regeneration/${taskId}/apply`),
   partialRegenerate: (chapterId: number, body: any, id?: number) =>
-    post(`/projects/${P(id)}/chapters/${chapterId}/partial-regenerate`, body),
+    postSSE(`/projects/${P(id)}/chapters/${chapterId}/partial-regenerate/stream`, body),
   applyPartialRegen: (chapterId: number, body: any, id?: number) =>
     post(`/projects/${P(id)}/chapters/${chapterId}/apply-partial-regenerate`, body),
 
