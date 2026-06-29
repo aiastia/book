@@ -203,7 +203,9 @@ async def global_inspiration_step_stream(
 
     async def event_stream():
         # 在生成器内部创建独立的 db session，确保请求结束后正确关闭
-        async with async_session() as db:
+        from app.core.database import async_session as _async_session
+
+        async with _async_session() as db:
             # 1. 立即推送"开始"事件，建立 SSE 连接
             yield f"data: {_json.dumps({'type': 'start', 'step': step_name}, ensure_ascii=False)}\n\n"
 
