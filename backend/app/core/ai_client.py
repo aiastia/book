@@ -716,28 +716,38 @@ class AIClient:
             # 没有工具调用 → 返回正文
             if not tool_calls:
                 # 推理模型可能输出过短（推理消耗大量 token 后正文被截断）
-                # 如果有内容但太短，且不是最后一轮，给它一次无工具重试机会
+                # 如果有内容但太短，且不是最后一轮，给它一次重试机会
                 min_output = 2000  # 正文至少 ~2000 token（约 1300 字）
                 if content and len(content) < min_output and not is_last_round:
                     logger.warning(
                         f"[tools] 正文过短（{len(content)} 字符），可能推理模型 token 分配异常，"
-                        f"强制无工具重试... 预览前100字：{content[:100]}"
+                        f"强制重试（保留工具能力）... 预览前100字：{content[:100]}"
                     )
-                    retry = await self.chat_stream_collect(
+                    # 保留工具能力重试：AI 仍可查询设定数据，但明确要求写够字数。
+                    # 不再强制 tool_choice=none（那会切断工具，重试质量更差）。
+                    retry = await self.chat_with_tools(
                         messages=current_messages
                         + [
                             {
                                 "role": "system",
-                                "content": "请直接输出完整正文，不要调用工具。内容不足会判定失败，请确保写够目标字数。",
+                                "content": (
+                                    "上一次输出内容不足（仅"
+                                    f"{len(content)}字符），判定为失败。"
+                                    "请重新输出完整正文，确保写够目标字数。"
+                                    "如需查询角色/世界观/大纲等设定，可继续调用工具。"
+                                ),
                             },
                         ],
+                        tools=tools,
+                        tool_executor=tool_executor,
                         model=model,
                         temperature=temperature,
                         max_tokens=max_tokens,
-                        tool_choice="none",
+                        max_rounds=2,
                     )
-                    if not retry.get("error") and (retry.get("content") or ""):
-                        retry["tool_call_history"] = tool_call_history
+                    retry_content = (retry.get("content") or "").strip() if not retry.get("error") else ""
+                    if retry_content and len(retry_content) >= len(content):
+                        retry["tool_call_history"] = tool_call_history + (retry.get("tool_call_history") or [])
                         return retry
                 result["tool_call_history"] = tool_call_history
                 return result
