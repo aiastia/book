@@ -111,6 +111,24 @@ def _build_world_info(proj) -> str:
     return "\n".join(parts) if parts else "暂无世界观信息"
 
 
+def _with_source(base_prompt: str, source_text: str, genre: str) -> str:
+    """把参考原书正文采样拼接到 user_prompt 前（拆书导入用）。
+
+    拆书复用 init 步骤时，让 AI 看到原书正文，从而「改编原书的设定」而非
+    「凭空创作」，减少与原书的气质断层。正常 init 不传 source_text，原样返回。
+    """
+    if not source_text or not source_text.strip():
+        return base_prompt
+    # 截断过长正文，避免 token 爆炸（取前 6000 字）
+    snippet = source_text.strip()[:6000]
+    return (
+        f"【参考原书正文——请据此改编，不要凭空创作，严格属于「{genre}」题材】\n"
+        f"以下是原书的正文节选，请学习其中的世界观/组织/物品/关系的气质与结构，"
+        f"为新书设计同气质但细节不同的设定（名称必须重新设计，不得照搬原文）：\n"
+        f"{snippet}\n\n{base_prompt}"
+    )
+
+
 from app.api.routes.projects_pkg.outlines import _build_outline
 from app.core.ai_client import AIClient
 from app.core.auth import get_current_user
@@ -193,11 +211,12 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
     return None
 
 
-async def _generate_world_details(db, pid, proj, engine, ai_client) -> int:
+async def _generate_world_details(db, pid, proj, engine, ai_client, source_text: str = None) -> int:
     """生成 6-8 个详细世界设定条目（WorldSetting）。
 
     抽自 _step_world，供正常初始化和拆书导入「补齐设定」共用。
     基于已有核心世界观（_build_world_info(proj)）追加详细条目。返回生成条数。
+    source_text: 拆书导入时传入的原书正文采样，让 AI 改编而非凭空创作（正常 init 不传）。
     """
     from app.models.world import WorldSetting
 
@@ -210,7 +229,9 @@ async def _generate_world_details(db, pid, proj, engine, ai_client) -> int:
             "title": proj.title,
             "synopsis": proj.synopsis or "暂无",
             "world_info": _build_world_info(proj),
-            "user_prompt": "请生成 6-8 个详细世界设定条目。",
+            "user_prompt": _with_source(
+                "请生成 6-8 个详细世界设定条目。", source_text, proj.genre or "网文"
+            ),
         },
         "详细设定",
         max_retries=2,
@@ -234,7 +255,7 @@ async def _generate_world_details(db, pid, proj, engine, ai_client) -> int:
     return added
 
 
-async def _step_career(db, task, pid, proj, engine, ai_client):
+async def _step_career(db, task, pid, proj, engine, ai_client, source_text: str = None):
     """步骤2：职业体系（拆分为两次请求：先主职业，后副职业，避免 Cloudflare 超时）"""
     from app.models.career import Career
 
@@ -255,10 +276,14 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
             "title": proj.title,
             "genre": proj.genre or "网文",
             "world_info": world_info,
-            "user_prompt": (
-                f'请为《{proj.title}》设计主职业（career_type="main"）。'
-                f"如果本作题材需要完整职业体系（修真/玄幻/游戏等），设计 5 个主职业，每个有 5-9 个阶段。"
-                f"如果本作题材不需要职业体系（如快穿甜宠/纯言情等），返回空数组即可。"
+            "user_prompt": _with_source(
+                (
+                    f'请为《{proj.title}》设计主职业（career_type="main"）。'
+                    f"如果本作题材需要完整职业体系（修真/玄幻/游戏等），设计 5 个主职业，每个有 5-9 个阶段。"
+                    f"如果本作题材不需要职业体系（如快穿甜宠/纯言情等），返回空数组即可。"
+                ),
+                source_text,
+                proj.genre or "网文",
             ),
         },
         "主职业",
@@ -296,10 +321,14 @@ async def _step_career(db, task, pid, proj, engine, ai_client):
             "title": proj.title,
             "genre": proj.genre or "网文",
             "world_info": world_info,
-            "user_prompt": (
-                f'请为《{proj.title}》设计副职业（career_type="sub"）。'
-                f"如果主职业已生成，副职业作为补充和变体，有 3-5 个精简阶段。"
-                f"如果主职业返回了空数组（题材不需要职业体系），副职业也返回空数组。"
+            "user_prompt": _with_source(
+                (
+                    f'请为《{proj.title}》设计副职业（career_type="sub"）。'
+                    f"如果主职业已生成，副职业作为补充和变体，有 3-5 个精简阶段。"
+                    f"如果主职业返回了空数组（题材不需要职业体系），副职业也返回空数组。"
+                ),
+                source_text,
+                proj.genre or "网文",
             ),
         },
         "副职业",
@@ -844,7 +873,7 @@ def _match_character(name, id_val, chars, name_to_id):
     return None
 
 
-async def _step_relations(db, task, pid, proj, engine, ai_client):
+async def _step_relations(db, task, pid, proj, engine, ai_client, source_text: str = None):
     """步骤：角色关系图谱
 
     修复历史 bug：旧逻辑用 rel.get("from")/rel.get("to") 精确匹配，
@@ -896,7 +925,11 @@ async def _step_relations(db, task, pid, proj, engine, ai_client):
         {
             "title": proj.title,
             "characters_info": char_list,
-            "user_prompt": f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
+            "user_prompt": _with_source(
+                f"请分析《{proj.title}》角色关系，用 from_id/to_id 指明两端，返回纯 JSON 数组。",
+                source_text,
+                proj.genre or "网文",
+            ),
         },
         "关系图谱",
     )
@@ -1145,7 +1178,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
     return None
 
 
-async def _step_org(db, task, pid, proj, engine, ai_client):
+async def _step_org(db, task, pid, proj, engine, ai_client, source_text: str = None):
     """步骤5：组织势力生成"""
     from sqlalchemy import func
 
@@ -1169,7 +1202,11 @@ async def _step_org(db, task, pid, proj, engine, ai_client):
             "genre": proj.genre or "网文",
             "synopsis": proj.synopsis or "暂无简介",
             "world_info": _build_world_info(proj),
-            "user_prompt": f"请为《{proj.title}》生成3-5个组织势力。",
+            "user_prompt": _with_source(
+                f"请为《{proj.title}》生成3-5个组织势力。",
+                source_text,
+                proj.genre or "网文",
+            ),
         },
         "组织",
     )
@@ -1351,7 +1388,7 @@ async def _link_characters_to_orgs(db, pid, proj, engine, ai_client):
     logger.info(f"[init] 角色-组织关联完成：{assigned}/{len(unassigned)} 个角色已分配")
 
 
-async def _step_locations(db, task, pid, proj, engine, ai_client):
+async def _step_locations(db, task, pid, proj, engine, ai_client, source_text: str = None):
     """步骤：地点地图生成"""
     from app.models.location import Location
 
@@ -1371,7 +1408,11 @@ async def _step_locations(db, task, pid, proj, engine, ai_client):
         {
             "title": proj.title,
             "world_info": _build_world_info(proj),
-            "user_prompt": f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。已有角色：{char_hint}。地点应形成关联网：至少一对地点在描述中互相引用（如'从A出发前往B''在C遇到D'），而非各自孤立。",
+            "user_prompt": _with_source(
+                f"请为《{proj.title}》生成5-8个地点，至少1个重要地点。已有角色：{char_hint}。地点应形成关联网：至少一对地点在描述中互相引用（如'从A出发前往B''在C遇到D'），而非各自孤立。",
+                source_text,
+                proj.genre or "网文",
+            ),
         },
         "地点",
     )
@@ -1398,7 +1439,7 @@ async def _step_locations(db, task, pid, proj, engine, ai_client):
     return None
 
 
-async def _step_items(db, task, pid, proj, engine, ai_client):
+async def _step_items(db, task, pid, proj, engine, ai_client, source_text: str = None):
     """步骤：物品道具生成"""
     from app.models.item import Item
 
@@ -1421,7 +1462,11 @@ async def _step_items(db, task, pid, proj, engine, ai_client):
         {
             "title": proj.title,
             "world_info": _build_world_info(proj),
-            "user_prompt": f"请为《{proj.title}》生成5-8个物品，至少1个关键剧情道具。已有角色：{char_hint}。已有地点：{loc_hint}。物品应与角色身份、能力以及地点环境相匹配。",
+            "user_prompt": _with_source(
+                f"请为《{proj.title}》生成5-8个物品，至少1个关键剧情道具。已有角色：{char_hint}。已有地点：{loc_hint}。物品应与角色身份、能力以及地点环境相匹配。",
+                source_text,
+                proj.genre or "网文",
+            ),
         },
         "物品",
     )

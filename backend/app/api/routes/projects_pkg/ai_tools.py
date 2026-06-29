@@ -773,6 +773,9 @@ async def book_import_deconstruct(
                 validate_done=0,
             )
 
+            # 采样一份原书正文，喂给补齐步骤，让它们「改编原书设定」而非凭空创作，减少与原书的气质断层
+            _source_text = _sample_chapters_text(chapters, "head", min(len(chapters), 8))
+
             # 各补齐步骤的 (label, 可调用)。单步失败仅告警并继续，不影响已生成内容。
             async def _run_fill_step(label, coro_factory):
                 await tracker.update(stage="generating", message=label)
@@ -783,31 +786,50 @@ async def book_import_deconstruct(
 
             await _run_fill_step(
                 "生成详细世界设定...",
-                lambda: _generate_world_details(task_db, new_proj.id, new_proj, engine, ai_client),
+                lambda: _generate_world_details(
+                    task_db, new_proj.id, new_proj, engine, ai_client, source_text=_source_text
+                ),
             )
             await _run_fill_step(
                 "生成职业体系...",
-                lambda: _step_career(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+                lambda: _step_career(
+                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                    source_text=_source_text,
+                ),
             )
             await _run_fill_step(
                 "生成地点地图...",
-                lambda: _step_locations(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+                lambda: _step_locations(
+                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                    source_text=_source_text,
+                ),
             )
             await _run_fill_step(
                 "生成物品道具...",
-                lambda: _step_items(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+                lambda: _step_items(
+                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                    source_text=_source_text,
+                ),
             )
             await _run_fill_step(
                 "生成组织势力...",
-                lambda: _step_org(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+                lambda: _step_org(
+                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                    source_text=_source_text,
+                ),
             )
             await _run_fill_step(
                 "生成角色关系...",
-                lambda: _step_relations(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+                lambda: _step_relations(
+                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                    source_text=_source_text,
+                ),
             )
             await _run_fill_step(
                 "验证并补全大纲...",
-                lambda: _step_validate_outline(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+                lambda: _step_validate_outline(
+                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client
+                ),
             )
 
             # 8. 回填
