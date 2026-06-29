@@ -186,7 +186,21 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
     task.progress = 10
     await db.commit()
 
-    # 详细世界设定
+    # 详细世界设定（抽成可复用函数，拆书导入等流程可单独调用）
+    await _generate_world_details(db, pid, proj, engine, ai_client)
+
+    task.world_done = 1
+    return None
+
+
+async def _generate_world_details(db, pid, proj, engine, ai_client) -> int:
+    """生成 6-8 个详细世界设定条目（WorldSetting）。
+
+    抽自 _step_world，供正常初始化和拆书导入「补齐设定」共用。
+    基于已有核心世界观（_build_world_info(proj)）追加详细条目。返回生成条数。
+    """
+    from app.models.world import WorldSetting
+
     detail_result, derr = await _safe_skill_call(
         engine,
         ai_client,
@@ -201,6 +215,7 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
         "详细设定",
         max_retries=2,
     )
+    added = 0
     if not derr and detail_result:
         items = detail_result.get("json") or []
         if isinstance(items, list):
@@ -214,10 +229,9 @@ async def _step_world(db, task, pid, proj, engine, ai_client):
                             content=str(item.get("content", ""))[:2000],
                         )
                     )
+                    added += 1
             await db.commit()
-
-    task.world_done = 1
-    return None
+    return added
 
 
 async def _step_career(db, task, pid, proj, engine, ai_client):

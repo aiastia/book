@@ -738,13 +738,85 @@ async def book_import_deconstruct(
             except Exception as e:
                 logger.warning("拆书世界观提取异常：%s", e)
 
-            # 7. 回填
+            # 7. 补齐设定：复用项目初始化步骤，补全拆书未覆盖的模块。
+            # 拆书已完成「角色 / 大纲 / 核心世界观」，这里补：
+            # 详细世界设定 → 职业体系 → 地点 → 物品 → 组织势力 → 角色关系 → 大纲验证补全。
+            # 补生成以已拆出的 proj/角色/世界观为上下文（init 步骤 prompt 用 _build_world_info + 查库角色）。
+            from types import SimpleNamespace
+
+            from app.api.routes.project_init import (
+                _generate_world_details,
+                _step_career,
+                _step_items,
+                _step_locations,
+                _step_org,
+                _step_relations,
+                _step_validate_outline,
+            )
+
+            # init 步骤签名是 (db, task, pid, proj, engine, ai_client)，会写 task 的 *_done/progress/status_message 并 commit。
+            # 拆书用的是 BackgroundTask，没有这些字段；用 SimpleNamespace 提供 duck-type 兼容对象，
+            # 它不是 ORM 映射对象，commit 不会把它持久化，无副作用。
+            mock_task = SimpleNamespace(
+                progress=0,
+                status_message="",
+                world_done=0,
+                career_done=0,
+                org_done=0,
+                characters_done=0,
+                assign_careers_done=0,
+                relations_done=0,
+                assign_org_members_done=0,
+                locations_done=0,
+                items_done=0,
+                outline_done=0,
+                validate_done=0,
+            )
+
+            # 各补齐步骤的 (label, 可调用)。单步失败仅告警并继续，不影响已生成内容。
+            async def _run_fill_step(label, coro_factory):
+                await tracker.update(stage="generating", message=label)
+                try:
+                    await coro_factory()
+                except Exception as e:
+                    logger.warning("拆书补齐[%s]异常：%s", label, e)
+
+            await _run_fill_step(
+                "生成详细世界设定...",
+                lambda: _generate_world_details(task_db, new_proj.id, new_proj, engine, ai_client),
+            )
+            await _run_fill_step(
+                "生成职业体系...",
+                lambda: _step_career(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+            )
+            await _run_fill_step(
+                "生成地点地图...",
+                lambda: _step_locations(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+            )
+            await _run_fill_step(
+                "生成物品道具...",
+                lambda: _step_items(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+            )
+            await _run_fill_step(
+                "生成组织势力...",
+                lambda: _step_org(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+            )
+            await _run_fill_step(
+                "生成角色关系...",
+                lambda: _step_relations(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+            )
+            await _run_fill_step(
+                "验证并补全大纲...",
+                lambda: _step_validate_outline(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
+            )
+
+            # 8. 回填
             bk.status = "project_created"
             bk.created_project_id = new_proj.id
             await task_db.commit()
 
             await tracker.complete(
-                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观"
+                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观 + 详细设定/职业/地点/物品/组织/关系"
             )
 
     task_id = await submit_async_task(
