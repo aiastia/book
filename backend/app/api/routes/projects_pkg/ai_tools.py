@@ -927,12 +927,15 @@ async def book_import_deconstruct(
                 if not batch_text.strip():
                     continue
                 # 拼入前情提要（前序批次已生成的大纲），让本批保持连贯
-                prior_block = (
-                    f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
-                    f"{prior_outlines_summary}\n\n"
-                    if prior_outlines_summary
-                    else ""
-                )
+                if prior_outlines_summary:
+                    prior_block = (
+                        f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
+                        f"{prior_outlines_summary}\n\n"
+                    )
+                    continuity_hint = "本批接续前情，保持叙事连贯。"
+                else:
+                    prior_block = ""
+                    continuity_hint = ""
                 try:
                     o_result = await engine.execute_skill(
                         "book_import_reverse_outlines",
@@ -949,7 +952,7 @@ async def book_import_deconstruct(
                             "user_prompt": (
                                 f"{prior_block}"
                                 f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。"
-                                f"本批接续前情，保持叙事连贯。"
+                                f"{continuity_hint}"
                             ),
                         },
                     )
