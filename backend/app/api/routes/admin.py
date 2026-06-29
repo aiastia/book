@@ -26,6 +26,7 @@ async def require_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def _user_dict(u: User) -> dict:
+    settings = u.settings or {}
     return {
         "id": u.id,
         "username": u.username,
@@ -34,6 +35,7 @@ def _user_dict(u: User) -> dict:
         "avatar_url": u.avatar_url or "",
         "is_active": u.is_active,
         "is_admin": u.is_admin,
+        "can_manage_prompts": settings.get("can_manage_prompts", False),
         "oauth_provider": u.oauth_provider,
         "created_at": u.created_at.isoformat() if u.created_at else "",
     }
@@ -111,6 +113,7 @@ class UpdateUserReq(BaseModel):
     email: str = None
     is_active: bool = None
     is_admin: bool = None
+    can_manage_prompts: bool = None  # 是否允许访问提示词模板/Skill管理页面
 
 
 @router.put("/users/{user_id}")
@@ -138,6 +141,11 @@ async def update_user(
         v = getattr(req, k)
         if v is not None:
             setattr(user, k, v)
+    # 提示词/Skill 页面访问权限（存在 settings JSON 里）
+    if req.can_manage_prompts is not None:
+        settings = user.settings or {}
+        settings["can_manage_prompts"] = req.can_manage_prompts
+        user.settings = settings
     await db.commit()
     return {"ok": True}
 

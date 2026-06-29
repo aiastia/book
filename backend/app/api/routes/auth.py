@@ -78,12 +78,15 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me")
 async def get_me(user=Depends(get_current_user)):
+    settings = user.settings or {}
     return {
         "id": user.id,
         "username": user.username,
         "nickname": user.nickname,
         "is_admin": user.is_admin,
         "settings": user.settings,
+        # 提示词模板/Skill管理页面访问权限：管理员或有明确授权的用户
+        "can_manage_prompts": user.is_admin or settings.get("can_manage_prompts", False),
     }
 
 

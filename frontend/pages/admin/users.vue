@@ -64,10 +64,11 @@ async function onReset(u: any) {
   } catch (e: any) { msg.error('重置失败：' + formatError(e)) }
 }
 
-// 切换管理员/启用状态
-async function onToggle(u: any, field: 'is_admin' | 'is_active') {
+// 切换管理员/启用/提示词权限状态
+async function onToggle(u: any, field: 'is_admin' | 'is_active' | 'can_manage_prompts') {
   const val = !u[field]
-  const label = field === 'is_admin' ? '管理员' : '启用'
+  const labels = { is_admin: '管理员', is_active: '启用', can_manage_prompts: '提示词权限' }
+  const label = labels[field]
   if (field === 'is_admin' && val && !await msg.confirm(`确认授予「${u.username}」管理员权限？`)) return
   try {
     await apiPut(`/api/admin/users/${u.id}`, { [field]: val })
@@ -91,6 +92,7 @@ const columns = [
   { title: '昵称', dataIndex: 'nickname', key: 'nickname' },
   { title: '邮箱', dataIndex: 'email', key: 'email' },
   { title: '管理员', key: 'is_admin', width: 90 },
+  { title: '提示词', key: 'can_manage_prompts', width: 100 },
   { title: '状态', key: 'is_active', width: 90 },
   { title: '注册时间', dataIndex: 'created_at', key: 'created_at', width: 160 },
   { title: '操作', key: 'actions', width: 240, fixed: 'right' as const },
@@ -125,6 +127,9 @@ const columns = [
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'is_admin'">
           <a-switch :checked="record.is_admin" size="small" @change="onToggle(record, 'is_admin')" />
+        </template>
+        <template v-else-if="column.key === 'can_manage_prompts'">
+          <a-switch :checked="record.can_manage_prompts || record.is_admin" size="small" :disabled="record.is_admin" @change="onToggle(record, 'can_manage_prompts')" />
         </template>
         <template v-else-if="column.key === 'is_active'">
           <a-tag :color="record.is_active ? 'success' : 'default'">{{ record.is_active ? '启用' : '禁用' }}</a-tag>

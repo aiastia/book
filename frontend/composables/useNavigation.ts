@@ -47,18 +47,21 @@ const writingNav: NavItem[] = [
   { label: '故事记忆', to: '/memories', icon: 'edit' },
 ]
 
-// 全局管理菜单（书架层 / 未选书时显示）
-const globalNav: NavItem[] = [
-  { label: '我的书架', to: '/books', icon: 'book' },
-  { label: '拆书导入', to: '/book-import', icon: 'edit' },
-  { label: '灵感模式', to: '/inspire', icon: 'message' },
-  { label: 'AI 设置', to: '/ai-settings', icon: 'bot' },
-  { label: '提示词模板', to: '/prompts', icon: 'message' },
-  { label: 'Skill 管理', to: '/skill-manage', icon: 'star' },
-  { label: 'MCP 插件', to: '/mcp', icon: 'plugin' },
-  { label: '帮助说明', to: '/help', icon: 'help' },
-  { label: '关于我们', to: '/about', icon: 'info' },
-]
+  // 全局管理菜单（书架层 / 未选书时显示）
+  // 提示词模板/Skill管理按用户权限条件显示
+  const globalNavBase: NavItem[] = [
+    { label: '我的书架', to: '/books', icon: 'book' },
+    { label: '拆书导入', to: '/book-import', icon: 'edit' },
+    { label: '灵感模式', to: '/inspire', icon: 'message' },
+    { label: 'AI 设置', to: '/ai-settings', icon: 'bot' },
+    { label: '帮助说明', to: '/help', icon: 'help' },
+    { label: '关于我们', to: '/about', icon: 'info' },
+  ]
+  const promptNavItems: NavItem[] = [
+    { label: '提示词模板', to: '/prompts', icon: 'message' },
+    { label: 'Skill 管理', to: '/skill-manage', icon: 'star' },
+    { label: 'MCP 插件', to: '/mcp', icon: 'plugin' },
+  ]
 
 // 管理员菜单（仅管理员可见）
 const adminNav: NavItem[] = [
@@ -80,6 +83,18 @@ export function useNavigation() {
   const isProject = computed(() => projectPages.some(p => currentPath.value.startsWith(p)))
   const isAdmin = computed(() => currentPath.value.startsWith('/admin'))
 
+  // 提示词/Skill/MCP 页面权限：管理员或被授权的用户可见
+  const canManagePrompts = computed(() => !!user.value?.is_admin || !!(user.value as any)?.can_manage_prompts)
+  // 动态全局菜单：按权限插入提示词相关项
+  const globalNav = computed<NavItem[]>(() => {
+    const base = [...globalNavBase]
+    if (canManagePrompts.value) {
+      // 插入到 AI设置 之后
+      base.splice(4, 0, ...promptNavItems)
+    }
+    return base
+  })
+
   // 给项目页面的链接自动追加 ?pid=（刷新时可恢复项目上下文）
   // SSR 和客户端同时追加，保证 HTML 一致性，避免水合警告
   function withPid(item: NavItem): NavItem {
@@ -91,8 +106,8 @@ export function useNavigation() {
 
   // 扁平化的项目菜单（兼容旧调用方：BatchGeneratePanel 等不直接用，但保留）
   const nav = computed<NavItem[]>(() => {
-    if (isAdmin.value) return adminNav
-    if (!isProject.value) return globalNav
+    if (isAdmin.value) return [...globalNav.value, ...adminNav]
+    if (!isProject.value) return globalNav.value
     return [backToShelfNav, dashboardNav, ...settingsNav, ...writingNav].map(withPid)
   })
 
@@ -100,10 +115,10 @@ export function useNavigation() {
   const groupedNav = computed<NavGroup[]>(() => {
     if (isAdmin.value) {
       // admin 页面也保持全局导航，管理入口在底部单独追加
-      return [{ title: '导航', items: globalNav }, { title: '管理', items: adminNav }]
+      return [{ title: '导航', items: globalNav.value }, { title: '管理', items: adminNav }]
     }
     if (!isProject.value) {
-      return [{ title: '导航', items: globalNav }]
+      return [{ title: '导航', items: globalNav.value }]
     }
     // 项目内：返回书架置顶 + 仪表盘 + 设定 + 大纲与写作
     return [
