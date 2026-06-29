@@ -962,27 +962,27 @@ async def book_import_deconstruct(
                     outlines_data = o_result.get("json") or []
                     if not isinstance(outlines_data, list):
                         continue
+                    # 复用 _build_outline 统一构建，确保 characters/scenes 等字段格式
+                    # 与正常 init 大纲一致（清洗角色/组织、过滤空场景、规范章号）
+                    from app.api.routes.projects_pkg.outlines import _build_outline
+
                     batch_summary_parts = []
-                    for item in outlines_data:
-                        task_db.add(
-                            Outline(
-                                project_id=new_proj.id,
-                                chapter_number=item.get("chapter_number", start_no),
-                                title=item.get("title", ""),
-                                summary=item.get("summary", ""),
-                                scenes=item.get("scenes", []),
-                                key_points=item.get("key_points", []),
-                                emotion=item.get("emotion", ""),
-                                goal=item.get("goal", ""),
-                                structure=item,
-                            )
-                        )
+                    for idx, item in enumerate(outlines_data):
+                        if not isinstance(item, dict):
+                            continue
+                        # 大纲生成时角色尚未建表，传空集兜底（_build_outline 会保留 AI 原始角色名）
+                        o = _build_outline(new_proj.id, item, offset=0, index=idx)
+                        # chapter_number 以 AI 返回为准，兜底用批次起始章号
+                        ch_num = item.get("chapter_number")
+                        if not isinstance(ch_num, int) or ch_num < 1:
+                            ch_num = start_no + idx
+                        o.chapter_number = ch_num
+                        task_db.add(o)
                         created_outlines += 1
                         # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
-                        ch_no = item.get("chapter_number", start_no)
                         ch_title = str(item.get("title", ""))[:30]
                         ch_summary = str(item.get("summary", ""))[:80]
-                        batch_summary_parts.append(f"第{ch_no}章《{ch_title}》：{ch_summary}")
+                        batch_summary_parts.append(f"第{ch_num}章《{ch_title}》：{ch_summary}")
                     # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
                     if batch_summary_parts:
                         prior_outlines_summary = "\n".join(batch_summary_parts)
@@ -1019,12 +1019,26 @@ async def book_import_deconstruct(
                     char_data = char_result.get("json") or []
                     if isinstance(char_data, dict):
                         char_data = char_data.get("characters") or char_data.get("data") or []
+                    # 去重：本批内重名 + 已入库同名/近名都不再添加
+                    existing_names = {
+                        c.name for c in (
+                            await task_db.execute(
+                                select(Character).where(Character.project_id == new_proj.id)
+                            )
+                        ).scalars().all()
+                    }
+                    seen_in_batch = set()
+                    added_chars = 0
                     for cd in char_data:
                         if not isinstance(cd, dict) or not cd.get("name"):
                             continue
+                        name = cd["name"].strip()
+                        if name in seen_in_batch or name in existing_names:
+                            continue
+                        seen_in_batch.add(name)
                         task_db.add(Character(
                             project_id=new_proj.id,
-                            name=cd["name"].strip(),
+                            name=name,
                             role=cd.get("role", "配角"),
                             gender=cd.get("gender", ""),
                             age=cd.get("age", ""),
@@ -1037,8 +1051,9 @@ async def book_import_deconstruct(
                             speech_style=cd.get("speech_style", ""),
                             status="alive",
                         ))
+                        added_chars += 1
                     await task_db.commit()
-                    logger.info("拆书角色提取完成：%d 个角色", len(char_data) if isinstance(char_data, list) else 0)
+                    logger.info("拆书角色提取完成：新增 %d 个角色（去重后）", added_chars)
             except Exception as e:
                 logger.warning("拆书角色提取异常：%s", e)
 
