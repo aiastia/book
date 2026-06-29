@@ -896,112 +896,13 @@ async def book_import_deconstruct(
             await task_db.commit()
             await task_db.refresh(new_proj)
 
-            # 4. 拆大纲（按 5 章/批）
-            available = min(payload["outline_chapters"], len(chapters))
-            theme = project_info.get("theme") or ""
-            narrative_pov = project_info.get("narrative_perspective") or "第三人称"
-            batch_size = 5
-            total_batches = (available + batch_size - 1) // batch_size
-            created_outlines = 0
-            batches_done = 0
-            # 累积前序批次已生成的大纲摘要，让后续批次感知前情，保持剧情/角色连贯
-            prior_outlines_summary = ""
-
-            for start_no in range(1, available + 1, batch_size):
-                # 检查取消
-                bk2 = (
-                    await task_db.execute(
-                        select(ImportedBook).where(ImportedBook.id == payload["book_id"])
-                    )
-                ).scalar_one_or_none()
-                batch_idx = (start_no - 1) // batch_size
-                await tracker.update(
-                    stage="generating",
-                    message=f"拆解大纲 第{start_no}-{min(start_no + batch_size - 1, available)}章（批次 {batch_idx + 1}/{total_batches}）",
-                    progress=int(batch_idx / total_batches * 100),
-                )
-
-                end_no = min(start_no + batch_size - 1, available)
-                batch_chapters = chapters[start_no - 1 : end_no]
-                batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
-                if not batch_text.strip():
-                    continue
-                # 拼入前情提要（前序批次已生成的大纲），让本批保持连贯
-                if prior_outlines_summary:
-                    prior_block = (
-                        f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
-                        f"{prior_outlines_summary}\n\n"
-                    )
-                    continuity_hint = "本批接续前情，保持叙事连贯。"
-                else:
-                    prior_block = ""
-                    continuity_hint = ""
-                try:
-                    o_result = await engine.execute_skill(
-                        "book_import_reverse_outlines",
-                        ai_client,
-                        {
-                            "title": new_proj.title,
-                            "genre": genre or "网文",
-                            "theme": theme,
-                            "narrative_perspective": narrative_pov,
-                            "start_chapter": str(start_no),
-                            "end_chapter": str(end_no),
-                            "expected_count": str(end_no - start_no + 1),
-                            "chapters_text": batch_text,
-                            "user_prompt": (
-                                f"{prior_block}"
-                                f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。"
-                                f"{continuity_hint}"
-                            ),
-                        },
-                    )
-                    if o_result.get("error"):
-                        logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
-                        continue
-                    outlines_data = o_result.get("json") or []
-                    if not isinstance(outlines_data, list):
-                        continue
-                    # 复用 _build_outline 统一构建，确保 characters/scenes 等字段格式
-                    # 与正常 init 大纲一致（清洗角色/组织、过滤空场景、规范章号）
-                    from app.api.routes.projects_pkg.outlines import _build_outline
-
-                    batch_summary_parts = []
-                    for idx, item in enumerate(outlines_data):
-                        if not isinstance(item, dict):
-                            continue
-                        # 大纲生成时角色尚未建表，传空集兜底（_build_outline 会保留 AI 原始角色名）
-                        o = _build_outline(new_proj.id, item, offset=0, index=idx)
-                        # chapter_number 以 AI 返回为准，兜底用批次起始章号
-                        ch_num = item.get("chapter_number")
-                        if not isinstance(ch_num, int) or ch_num < 1:
-                            ch_num = start_no + idx
-                        o.chapter_number = ch_num
-                        task_db.add(o)
-                        created_outlines += 1
-                        # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
-                        ch_title = str(item.get("title", ""))[:30]
-                        ch_summary = str(item.get("summary", ""))[:80]
-                        batch_summary_parts.append(f"第{ch_num}章《{ch_title}》：{ch_summary}")
-                    # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
-                    if batch_summary_parts:
-                        prior_outlines_summary = "\n".join(batch_summary_parts)
-                        # 若累积过长，只保留最近的若干章
-                        lines = prior_outlines_summary.split("\n")
-                        if len(lines) > 10:
-                            prior_outlines_summary = "（更早章节略）\n" + "\n".join(lines[-10:])
-                    batches_done += 1
-                    await task_db.commit()
-                except Exception as e:
-                    logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
-                    continue
-
-            # 5. 提取角色档案（均匀采样全书，避免只看开头漏掉后文出场的角色）
-            await tracker.update(stage="generating", message="提取角色档案...", progress=80)
+            # 4. 提取角色档案（均匀采样全书，避免只看开头漏掉后文出场的角色）
+            #    先于大纲生成，让大纲能复用已提取的角色名，避免大纲与角色各编一套名字
+            #    导致 validate_outline 补建第二套角色（总数膨胀）。
+            await tracker.update(stage="generating", message="提取角色档案...", progress=20)
+            from app.models.character import Character
             try:
                 char_sample = _sample_chapters_evenly(chapters, 12)
-                from app.models.character import Character
-
                 char_result = await engine.execute_skill(
                     "book_import_reverse_characters",
                     ai_client,
@@ -1061,8 +962,126 @@ async def book_import_deconstruct(
             except Exception as e:
                 logger.warning("拆书角色提取异常：%s", e)
 
-            # 6. 提取世界观设定（均匀采样全书，覆盖中后期才展开的世界观）
-            await tracker.update(stage="generating", message="提取世界观设定...", progress=90)
+            # 收集已提取的角色名，供大纲生成复用（避免大纲另编一套角色名）
+            existing_char_list = (
+                (await task_db.execute(
+                    select(Character.name, Character.role).where(Character.project_id == new_proj.id)
+                )).all()
+            )
+            char_names_hint = "、".join(
+                f"{n}（{r or '角色'}）" for n, r in existing_char_list[:12]
+            ) if existing_char_list else ""
+
+            # 5. 拆大纲（按 5 章/批）
+            available = min(payload["outline_chapters"], len(chapters))
+            theme = project_info.get("theme") or ""
+            narrative_pov = project_info.get("narrative_perspective") or "第三人称"
+            batch_size = 5
+            total_batches = (available + batch_size - 1) // batch_size
+            created_outlines = 0
+            batches_done = 0
+            # 累积前序批次已生成的大纲摘要，让后续批次感知前情，保持剧情/角色连贯
+            prior_outlines_summary = ""
+
+            for start_no in range(1, available + 1, batch_size):
+                # 检查取消
+                bk2 = (
+                    await task_db.execute(
+                        select(ImportedBook).where(ImportedBook.id == payload["book_id"])
+                    )
+                ).scalar_one_or_none()
+                batch_idx = (start_no - 1) // batch_size
+                await tracker.update(
+                    stage="generating",
+                    message=f"拆解大纲 第{start_no}-{min(start_no + batch_size - 1, available)}章（批次 {batch_idx + 1}/{total_batches}）",
+                    progress=int(batch_idx / total_batches * 100),
+                )
+
+                end_no = min(start_no + batch_size - 1, available)
+                batch_chapters = chapters[start_no - 1 : end_no]
+                batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
+                if not batch_text.strip():
+                    continue
+                # 拼入前情提要（前序批次已生成的大纲），让本批保持连贯
+                if prior_outlines_summary:
+                    prior_block = (
+                        f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
+                        f"{prior_outlines_summary}\n\n"
+                    )
+                    continuity_hint = "本批接续前情，保持叙事连贯。"
+                else:
+                    prior_block = ""
+                    continuity_hint = ""
+                # 角色名约束：强制大纲复用已提取的角色名，不得另编新名（避免角色库与大纲各一套）
+                char_constraint = (
+                    f"【角色名约束】大纲 characters 字段必须只使用以下已建立的角色名：{char_names_hint}。"
+                    f"不得自创新角色名；如需新角色，先用已有配角承担。"
+                    if char_names_hint
+                    else ""
+                )
+                try:
+                    o_result = await engine.execute_skill(
+                        "book_import_reverse_outlines",
+                        ai_client,
+                        {
+                            "title": new_proj.title,
+                            "genre": genre or "网文",
+                            "theme": theme,
+                            "narrative_perspective": narrative_pov,
+                            "start_chapter": str(start_no),
+                            "end_chapter": str(end_no),
+                            "expected_count": str(end_no - start_no + 1),
+                            "chapters_text": batch_text,
+                            "user_prompt": (
+                                f"{prior_block}"
+                                f"{char_constraint}"
+                                f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。"
+                                f"{continuity_hint}"
+                            ),
+                        },
+                    )
+                    if o_result.get("error"):
+                        logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
+                        continue
+                    outlines_data = o_result.get("json") or []
+                    if not isinstance(outlines_data, list):
+                        continue
+                    # 复用 _build_outline 统一构建，确保 characters/scenes 等字段格式
+                    # 与正常 init 大纲一致（清洗角色/组织、过滤空场景、规范章号）
+                    from app.api.routes.projects_pkg.outlines import _build_outline
+
+                    batch_summary_parts = []
+                    for idx, item in enumerate(outlines_data):
+                        if not isinstance(item, dict):
+                            continue
+                        # 大纲生成时角色尚未建表，传空集兜底（_build_outline 会保留 AI 原始角色名）
+                        o = _build_outline(new_proj.id, item, offset=0, index=idx)
+                        # chapter_number 以 AI 返回为准，兜底用批次起始章号
+                        ch_num = item.get("chapter_number")
+                        if not isinstance(ch_num, int) or ch_num < 1:
+                            ch_num = start_no + idx
+                        o.chapter_number = ch_num
+                        task_db.add(o)
+                        created_outlines += 1
+                        # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
+                        ch_title = str(item.get("title", ""))[:30]
+                        ch_summary = str(item.get("summary", ""))[:80]
+                        batch_summary_parts.append(f"第{ch_num}章《{ch_title}》：{ch_summary}")
+                    # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
+                    if batch_summary_parts:
+                        prior_outlines_summary = "\n".join(batch_summary_parts)
+                        # 若累积过长，只保留最近的若干章
+                        lines = prior_outlines_summary.split("\n")
+                        if len(lines) > 10:
+                            prior_outlines_summary = "（更早章节略）\n" + "\n".join(lines[-10:])
+                    batches_done += 1
+                    await task_db.commit()
+                except Exception as e:
+                    logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
+                    continue
+
+            # 5. 提取世界观设定（均匀采样全书，覆盖中后期才展开的世界观）
+            await tracker.update(stage="generating", message="提取世界观设定...", progress=80)
             try:
                 world_sample = _sample_chapters_evenly(chapters, 12)
                 world_result = await engine.execute_skill(
