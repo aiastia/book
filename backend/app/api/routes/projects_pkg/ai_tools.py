@@ -985,45 +985,16 @@ async def book_import_deconstruct(
                     char_data = char_result.get("json") or []
                     if isinstance(char_data, dict):
                         char_data = char_data.get("characters") or char_data.get("data") or []
-                    # 去重：本批内重名 + 已入库同名/近名都不再添加
-                    existing_names = {
-                        c.name for c in (
-                            await task_db.execute(
-                                select(Character).where(Character.project_id == new_proj.id)
-                            )
-                        ).scalars().all()
-                    }
-                    seen_in_batch = set()
-                    added_chars = 0
+                    # 复用 init 的 _save_characters 统一保存，确保字段与正常 init 角色完全一致
+                    # （含多别名兜底、职业匹配、growth_experience/story_goal/weakness/arc_type 等完整字段）
+                    from app.api.routes.project_init import _save_characters
+
                     MAX_CORE_CHARS = 8  # 只保留核心角色，边缘角色不入库（避免冗余）
-                    for cd in char_data:
-                        if added_chars >= MAX_CORE_CHARS:
-                            logger.info("拆书角色提取达到上限 %d，后续角色不再添加", MAX_CORE_CHARS)
-                            break
-                        if not isinstance(cd, dict) or not cd.get("name"):
-                            continue
-                        name = cd["name"].strip()
-                        if name in seen_in_batch or name in existing_names:
-                            continue
-                        seen_in_batch.add(name)
-                        task_db.add(Character(
-                            project_id=new_proj.id,
-                            name=name,
-                            role=cd.get("role", "配角"),
-                            gender=cd.get("gender", ""),
-                            age=cd.get("age", ""),
-                            identity=cd.get("identity", ""),
-                            appearance=cd.get("appearance", ""),
-                            personality=cd.get("personality", ""),
-                            background=cd.get("background", ""),
-                            ability=cd.get("ability", ""),
-                            motivation=cd.get("motivation", ""),
-                            speech_style=cd.get("speech_style", ""),
-                            status="alive",
-                        ))
-                        added_chars += 1
+                    truncated = char_data[:MAX_CORE_CHARS]
+                    saved_names = set()
+                    await _save_characters(task_db, new_proj.id, truncated, saved_names)
                     await task_db.commit()
-                    logger.info("拆书角色提取完成：新增 %d 个角色（去重后）", added_chars)
+                    logger.info("拆书角色提取完成：新增 %d 个角色（复用 _save_characters）", len(saved_names))
             except Exception as e:
                 logger.warning("拆书角色提取异常：%s", e)
 

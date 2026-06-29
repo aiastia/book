@@ -31,14 +31,25 @@
     "gender": "男/女",
     "age": "年龄段或具体年龄",
     "identity": "全新身份职业（必须符合{genre}题材的世界观，不得跨题材）",
-    "appearance": "全新外貌设计",
-    "personality": "全新性格特征（2-4个关键词）",
-    "background": "全新背景故事（必须符合{genre}题材）",
-    "ability": "全新能力/技能（必须符合{genre}题材的力量体系）",
-    "motivation": "全新行为动机",
-    "speech_style": "全新说话风格"
+    "main_career": "主职业（从常见职业中选，如骑士/法师/盗贼/剑修等）",
+    "appearance": "全新外貌描述（100-200字）",
+    "personality": "全新性格特征（100-200字）",
+    "background": "全新背景故事（100-300字，必须符合{genre}题材）",
+    "growth_experience": "全新成长经历（100-200字，必须填写）",
+    "ability": "全新能力/技能（必须符合{genre}题材的力量体系，必须填写）",
+    "story_goal": "全新故事目标（必须填写）",
+    "motivation": "全新内在动机（必须填写）",
+    "weakness": "全新弱点/软肋（必须填写）",
+    "arc_type": "变化类型（成长/堕落/救赎/顿悟/平淡）",
+    "character_change": "全新人物变化轨迹",
+    "speech_style": "全新说话风格（必须填写）"
   }
 ]
+
+【字段要求】每个字段都必须有实质内容，不得为空字符串：
+- growth_experience/story_goal/motivation/weakness/ability/speech_style 是必填字段，缺一不可
+- 各字段长度参考：appearance 100-200字、personality 100-200字、background 100-300字、ability 100-200字
+- 不要只写关键词，要写完整的描述性内容
 
 【设计原则——保留气质中度改编】
 
