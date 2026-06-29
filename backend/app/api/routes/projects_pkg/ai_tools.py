@@ -1029,7 +1029,11 @@ async def book_import_deconstruct(
                     }
                     seen_in_batch = set()
                     added_chars = 0
+                    MAX_CORE_CHARS = 8  # 只保留核心角色，边缘角色不入库（避免冗余）
                     for cd in char_data:
+                        if added_chars >= MAX_CORE_CHARS:
+                            logger.info("拆书角色提取达到上限 %d，后续角色不再添加", MAX_CORE_CHARS)
+                            break
                         if not isinstance(cd, dict) or not cd.get("name"):
                             continue
                         name = cd["name"].strip()
