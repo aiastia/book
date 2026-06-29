@@ -299,7 +299,7 @@ function onDirectUpload(file: any) {
     <!-- 步骤1: 配置采样 -->
     <div v-if="parseStep === 1">
       <a-alert type="info" show-icon :closable="false" style="margin-bottom:16px">
-        <template #message>将基于采样章节反向提炼立项信息，并连续拆解前 {{ outlineChapters }} 章大纲，一次性生成完整项目。</template>
+        <template #message>将基于采样章节反向提炼立项信息，并逐章拆解大纲（{{ outlineChapters >= 99999 ? '全书' : '前 ' + outlineChapters + ' 章' }}），一次性生成完整项目。</template>
       </a-alert>
       <a-descriptions :column="1" size="small" bordered style="margin-bottom:16px">
         <a-descriptions-item label="书名">{{ parseTarget?.title }}</a-descriptions-item>
@@ -317,13 +317,14 @@ function onDirectUpload(file: any) {
       </div>
 
       <div style="margin-bottom:20px">
-        <div style="font-weight:500;margin-bottom:8px;">② 大纲深度（连续拆解前 N 章）</div>
+        <div style="font-weight:500;margin-bottom:8px;">② 大纲深度（逐章拆解，每5章一批）</div>
         <a-radio-group v-model:value="outlineChapters" button-style="solid">
           <a-radio-button :value="10">前 10 章</a-radio-button>
           <a-radio-button :value="20">前 20 章</a-radio-button>
-          <a-radio-button :value="30">前 30 章</a-radio-button>
+          <a-radio-button :value="50">前 50 章</a-radio-button>
+          <a-radio-button :value="99999">拆全书（{{ parseTarget?.total_chapters || parseTarget?.chapters || '?' }} 章）</a-radio-button>
         </a-radio-group>
-        <div style="font-size:12px;color:#909399;margin-top:6px;">章数越多 token 消耗越大。拆解含多批 AI 调用，预计耗时 1-3 分钟。</div>
+        <div style="font-size:12px;color:#909399;margin-top:6px;">章数越多 token 消耗越大、耗时越长（每5章一批AI调用）。全书拆解可能需要较长时间。</div>
       </div>
 
       <div style="display:flex;justify-content:flex-end;gap:8px;">
@@ -336,7 +337,7 @@ function onDirectUpload(file: any) {
     <div v-if="parseStep === 2" style="text-align:center;padding:30px 20px;">
       <LoadingOutlined :spin="true" style="font-size:28px;color:#4D8088;" />
       <p style="margin-top:14px;color:#666;font-size:15px;">正在拆解「{{ parseTarget?.title }}」…</p>
-      <p style="color:#909399;font-size:13px;margin-top:4px;">采样立项 + 拆解前 {{ outlineChapters }} 章大纲，预计 1-3 分钟，请勿关闭</p>
+      <p style="color:#909399;font-size:13px;margin-top:4px;">采样立项 + 拆解{{ outlineChapters >= 99999 ? '全书' : '前 ' + outlineChapters + ' 章' }}大纲，预计 {{ outlineChapters >= 99999 ? '10-30' : '1-5' }} 分钟，请勿关闭</p>
     </div>
 
     <!-- 步骤3: 完成 -->
