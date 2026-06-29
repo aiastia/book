@@ -129,6 +129,20 @@ def _with_source(base_prompt: str, source_text: str, genre: str) -> str:
     )
 
 
+def _agent_tools(use_tools: bool):
+    """use_tools 为真时返回 chapter_tools 工具定义，否则返回 None。"""
+    if not use_tools:
+        return None
+    return get_chapter_tools()
+
+
+def _agent_tool_executor(use_tools: bool, db, project_id: int):
+    """use_tools 为真时返回工具执行器闭包，否则返回 None。"""
+    if not use_tools:
+        return None
+    return make_tool_executor(db, project_id)
+
+
 from app.api.routes.projects_pkg.outlines import _build_outline
 from app.core.ai_client import AIClient
 from app.core.auth import get_current_user
@@ -366,10 +380,11 @@ async def _step_career(db, task, pid, proj, engine, ai_client, source_text: str 
     return None
 
 
-async def _step_characters(db, task, pid, proj, engine, ai_client):
+async def _step_characters(db, task, pid, proj, engine, ai_client, use_tools: bool = True):
     """步骤：角色批量生成（含主角/配角/反派，职业从已有体系中选择）。
 
     组织在后续步骤生成，角色暂不关联组织。
+    use_tools=True 时走 agent：AI 先用工具查已有角色/职业体系，避免重名和引用不存在的职业。
     """
     import logging
 
@@ -414,6 +429,8 @@ async def _step_characters(db, task, pid, proj, engine, ai_client):
             ),
         },
         "角色",
+        tools=_agent_tools(use_tools),
+        tool_executor=_agent_tool_executor(use_tools, db, pid),
     )
     if cerr:
         return cerr
@@ -873,7 +890,7 @@ def _match_character(name, id_val, chars, name_to_id):
     return None
 
 
-async def _step_relations(db, task, pid, proj, engine, ai_client, source_text: str = None):
+async def _step_relations(db, task, pid, proj, engine, ai_client, source_text: str = None, use_tools: bool = True):
     """步骤：角色关系图谱
 
     修复历史 bug：旧逻辑用 rel.get("from")/rel.get("to") 精确匹配，
@@ -932,6 +949,8 @@ async def _step_relations(db, task, pid, proj, engine, ai_client, source_text: s
             ),
         },
         "关系图谱",
+        tools=_agent_tools(use_tools),
+        tool_executor=_agent_tool_executor(use_tools, db, pid),
     )
     if rerr:
         return rerr
@@ -1178,7 +1197,7 @@ async def _step_assign_org_members(db, task, pid, proj, engine, ai_client):
     return None
 
 
-async def _step_org(db, task, pid, proj, engine, ai_client, source_text: str = None):
+async def _step_org(db, task, pid, proj, engine, ai_client, source_text: str = None, use_tools: bool = True):
     """步骤5：组织势力生成"""
     from sqlalchemy import func
 
@@ -1209,6 +1228,8 @@ async def _step_org(db, task, pid, proj, engine, ai_client, source_text: str = N
             ),
         },
         "组织",
+        tools=_agent_tools(use_tools),
+        tool_executor=_agent_tool_executor(use_tools, db, pid),
     )
     if oerr:
         return oerr
