@@ -8,6 +8,17 @@ from app.core.database import async_session
 router = make_router()
 
 
+def _deep_replace_name(obj, old_name: str, new_name: str):
+    """递归替换 dict/list/str 中的旧角色名为新名（用于大纲 structure JSON 深层替换）。"""
+    if isinstance(obj, dict):
+        return {k: _deep_replace_name(v, old_name, new_name) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_replace_name(v, old_name, new_name) for v in obj]
+    if isinstance(obj, str):
+        return obj.replace(old_name, new_name)
+    return obj
+
+
 async def _sync_org_membership(
     db: AsyncSession, project_id: int, character_id: int, organization_id: int | None
 ):
@@ -283,9 +294,55 @@ async def update_character(
     ).scalar_one_or_none()
     if not c:
         raise HTTPException(404, "角色不存在")
+    old_name = c.name  # 记录旧名，用于联动更新大纲
     for key, value in req.model_dump().items():
         setattr(c, key, value)
     await db.commit()
+
+    # 联动更新：角色改名后，同步大纲的 characters 字段（结构化角色名列表）
+    new_name = c.name
+    if old_name and new_name and old_name != new_name:
+        try:
+            from app.models.outline import Outline
+
+            outlines = (
+                (
+                    await db.execute(
+                        select(Outline).where(Outline.project_id == project_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for o in outlines:
+                changed = False
+                # 更新 characters 字段（角色名字符串列表）
+                if isinstance(o.characters, list) and old_name in o.characters:
+                    o.characters = [new_name if n == old_name else n for n in o.characters]
+                    changed = True
+                # 更新 structure JSON 里的 characters
+                if isinstance(o.structure, dict):
+                    raw_chars = o.structure.get("characters")
+                    if isinstance(raw_chars, list) and old_name in raw_chars:
+                        o.structure["characters"] = [
+                            {"name": new_name, "type": "character"} if isinstance(n, dict) and n.get("name") == old_name else n
+                            for n in raw_chars
+                        ]
+                        changed = True
+                    # structure 里可能有其它地方存了旧名（如 summary）
+                    struct_str = str(o.structure)
+                    if old_name in struct_str:
+                        # 字典内深层替换
+                        o.structure = _deep_replace_name(o.structure, old_name, new_name)
+                        changed = True
+                if changed:
+                    db.add(o)
+            if outlines:
+                await db.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("角色改名联动更新大纲失败：%s", e)
+
     await _sync_org_membership(db, project_id, character_id, c.organization_id)
     return {"ok": True}
 
