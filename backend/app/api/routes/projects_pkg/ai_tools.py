@@ -1086,23 +1086,79 @@ async def book_import_deconstruct(
                     # 与正常 init 大纲一致（清洗角色/组织、过滤空场景、规范章号）
                     from app.api.routes.projects_pkg.outlines import _build_outline
 
+                    # 收集已建角色名/组织名，传给 _build_outline 做角色/组织区分校正
+                    from app.models.organization import Organization
+
+                    char_name_set = {
+                        n for n in (
+                            await task_db.execute(
+                                select(Character.name).where(Character.project_id == new_proj.id)
+                            )
+                        ).scalars()
+                    }
+                    org_name_set = {
+                        n for n in (
+                            await task_db.execute(
+                                select(Organization.name).where(
+                                    Organization.project_id == new_proj.id
+                                )
+                            )
+                        ).scalars()
+                    }
+
                     batch_summary_parts = []
+                    created_outline_objs = []
                     for idx, item in enumerate(outlines_data):
                         if not isinstance(item, dict):
                             continue
-                        # 大纲生成时角色尚未建表，传空集兜底（_build_outline 会保留 AI 原始角色名）
-                        o = _build_outline(new_proj.id, item, offset=0, index=idx)
+                        o = _build_outline(
+                            new_proj.id, item, offset=0, index=idx,
+                            char_names=char_name_set, org_names=org_name_set,
+                        )
                         # chapter_number 以 AI 返回为准，兜底用批次起始章号
                         ch_num = item.get("chapter_number")
                         if not isinstance(ch_num, int) or ch_num < 1:
                             ch_num = start_no + idx
                         o.chapter_number = ch_num
                         task_db.add(o)
+                        created_outline_objs.append(o)
                         created_outlines += 1
                         # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
                         ch_title = str(item.get("title", ""))[:30]
                         ch_summary = str(item.get("summary", ""))[:80]
                         batch_summary_parts.append(f"第{ch_num}章《{ch_title}》：{ch_summary}")
+
+                    # flush 让大纲对象拿到 id，供后续章节引用
+                    if created_outline_objs:
+                        await task_db.flush()
+                        # 与正常 init 一致：1对1模式自动为每条大纲创建对应空章节
+                        from app.models.chapter import Chapter
+
+                        for o in created_outline_objs:
+                            existing_ch = (
+                                (
+                                    await task_db.execute(
+                                        select(Chapter).where(
+                                            Chapter.project_id == new_proj.id,
+                                            Chapter.chapter_number == o.chapter_number,
+                                        )
+                                    )
+                                )
+                                .scalars()
+                                .first()
+                            )
+                            if existing_ch:
+                                continue
+                            ch = Chapter(
+                                project_id=new_proj.id,
+                                chapter_number=o.chapter_number,
+                                title=o.title,
+                                summary=o.summary[:200] if o.summary else "",
+                                status="draft",
+                                sub_index=1,
+                                generation_mode="one_to_one",
+                            )
+                            task_db.add(ch)
                     # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
                     if batch_summary_parts:
                         prior_outlines_summary = "\n".join(batch_summary_parts)
