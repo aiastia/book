@@ -1302,16 +1302,15 @@ async def book_import_deconstruct(
                         select(Outline).where(Outline.project_id == new_proj.id)
                     )
                 ).scalars().all()
-                existing_ch_nums = {
-                    c.chapter_number
-                    for c in (
+                existing_ch_nums = set(
+                    (
                         await task_db.execute(
                             select(Chapter.chapter_number).where(
                                 Chapter.project_id == new_proj.id
                             )
                         )
                     ).scalars()
-                }
+                )
                 missing = [o for o in all_outlines if o.chapter_number not in existing_ch_nums]
                 for o in missing:
                     task_db.add(

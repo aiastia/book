@@ -687,7 +687,7 @@ async def _query_organization(db: AsyncSession, project_id: int, name: str) -> s
             ch = (
                 await db.execute(select(Character).where(Character.id == m.character_id))
             ).scalar_one_or_none()
-            member_list.append({"name": ch.name if ch else "?", "role": m.role or "成员"})
+            member_list.append({"name": ch.name if ch else "?", "role": m.position or "成员"})
         # 结构信息
         extra = o.structure or {}
         results.append(
