@@ -1,0 +1,12 @@
+{
+  "name": "_shared_book_import_naming",
+  "display_name": "拆书命名规则（共享）",
+  "description": "拆书导入各步骤共享的命名硬性规则（禁用字/姓/模板名/美感原则）。用户可在 skill 管理页面自定义覆盖。",
+  "category": "import_book",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_book_import_naming.md"
+}

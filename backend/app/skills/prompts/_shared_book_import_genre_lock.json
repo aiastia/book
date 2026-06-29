@@ -1,0 +1,12 @@
+{
+  "name": "_shared_book_import_genre_lock",
+  "display_name": "拆书题材锁定（共享）",
+  "description": "拆书导入各步骤共享的题材锁定规则（禁跨题材/禁科技乱入/力量体系同类）。用户可在 skill 管理页面自定义覆盖。",
+  "category": "import_book",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_book_import_genre_lock.md"
+}
