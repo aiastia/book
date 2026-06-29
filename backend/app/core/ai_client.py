@@ -165,11 +165,18 @@ class AIClient:
         return settings.AI_TOP_P
 
     def _resolve_max_tokens(self, max_tokens: int) -> int:
-        """max_tokens 解析：显式传参 > 模型配置 > settings。"""
+        """max_tokens 解析：显式传参 > 模型配置 > settings。
+
+        模型配置 max_tokens 较小（≤8192）时自动升级为全局默认，
+        避免用户未调整默认值（4096）导致长输出（大纲/角色）被截断。
+        """
         if max_tokens is not None:
             return max_tokens
         if self.default_max_tokens is not None:
-            return self.default_max_tokens
+            # 模型配置 max_tokens 过小（历史默认4096）→ 升级到全局默认
+            if self.default_max_tokens >= 8192:
+                return self.default_max_tokens
+            return settings.AI_DEFAULT_MAX_TOKENS
         return settings.AI_DEFAULT_MAX_TOKENS
 
     @staticmethod

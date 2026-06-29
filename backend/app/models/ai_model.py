@@ -20,7 +20,7 @@ class AIModelConfig(Base):
     model = Column(String(100), nullable=False)
     temperature = Column(Integer, default=85)  # *100 存储
     top_p = Column(Integer, default=90)
-    max_tokens = Column(Integer, default=4096)
+    max_tokens = Column(Integer, default=16384)
     frequency_penalty = Column(Integer, nullable=True, default=None)  # *100 存储，NULL=不发送
     presence_penalty = Column(Integer, nullable=True, default=None)  # *100 存储，NULL=不发送
     # 灵感模式独立参数（NULL=跟随全局模型配置，留空即用上面的全局值）
