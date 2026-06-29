@@ -1292,6 +1292,45 @@ async def book_import_deconstruct(
                 ),
             )
 
+            # 兜底：扫描所有没有对应章节的大纲，补建缺失的空章节（确保用户在章节页
+            # 不会看到多余的"从大纲创建"按钮——拆书模式下章节应已全部自动建好）
+            try:
+                from app.models.chapter import Chapter
+
+                all_outlines = (
+                    await task_db.execute(
+                        select(Outline).where(Outline.project_id == new_proj.id)
+                    )
+                ).scalars().all()
+                existing_ch_nums = {
+                    c.chapter_number
+                    for c in (
+                        await task_db.execute(
+                            select(Chapter.chapter_number).where(
+                                Chapter.project_id == new_proj.id
+                            )
+                        )
+                    ).scalars()
+                }
+                missing = [o for o in all_outlines if o.chapter_number not in existing_ch_nums]
+                for o in missing:
+                    task_db.add(
+                        Chapter(
+                            project_id=new_proj.id,
+                            chapter_number=o.chapter_number,
+                            title=o.title,
+                            summary=o.summary[:200] if o.summary else "",
+                            status="draft",
+                            sub_index=1,
+                            generation_mode="one_to_one",
+                        )
+                    )
+                if missing:
+                    await task_db.commit()
+                    logger.info("拆书兜底补建 %d 个空章节", len(missing))
+            except Exception as e:
+                logger.warning("拆书兜底补建章节异常：%s", e)
+
             # 8. 一致性自查（轻量 agent）：用工具查实体，发现矛盾并自动修复
             await tracker.update(stage="generating", message="设定一致性自查...", progress=95)
             try:
