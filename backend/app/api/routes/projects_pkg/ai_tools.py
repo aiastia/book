@@ -773,7 +773,9 @@ async def book_import_deconstruct(
                 validate_done=0,
             )
 
-            # 采样一份原书正文，喂给补齐步骤，让它们「改编原书设定」而非凭空创作，减少与原书的气质断层
+            # 采样一份原书正文，只喂给「最依赖原书细节」的步骤（组织、角色关系），
+            # 减少与原书的气质断层。其余步骤（详细设定/职业/地点/物品）的题材已被
+            # 核心世界观四字段 + 已拆角色锁死，喂正文边际收益低却浪费 token，故不喂。
             _source_text = _sample_chapters_text(chapters, "head", min(len(chapters), 8))
 
             # 各补齐步骤的 (label, 可调用)。单步失败仅告警并继续，不影响已生成内容。
@@ -784,33 +786,24 @@ async def book_import_deconstruct(
                 except Exception as e:
                     logger.warning("拆书补齐[%s]异常：%s", label, e)
 
+            # 详细设定/职业/地点/物品：不喂正文（题材已被已拆结果锁定，省 token）
             await _run_fill_step(
                 "生成详细世界设定...",
-                lambda: _generate_world_details(
-                    task_db, new_proj.id, new_proj, engine, ai_client, source_text=_source_text
-                ),
+                lambda: _generate_world_details(task_db, new_proj.id, new_proj, engine, ai_client),
             )
             await _run_fill_step(
                 "生成职业体系...",
-                lambda: _step_career(
-                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
-                    source_text=_source_text,
-                ),
+                lambda: _step_career(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
             )
             await _run_fill_step(
                 "生成地点地图...",
-                lambda: _step_locations(
-                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
-                    source_text=_source_text,
-                ),
+                lambda: _step_locations(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
             )
             await _run_fill_step(
                 "生成物品道具...",
-                lambda: _step_items(
-                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
-                    source_text=_source_text,
-                ),
+                lambda: _step_items(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
             )
+            # 组织/关系：最依赖原书人际与势力细节，喂入正文采样，让 AI 据此改编
             await _run_fill_step(
                 "生成组织势力...",
                 lambda: _step_org(
