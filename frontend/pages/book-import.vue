@@ -12,8 +12,7 @@ const fileList = ref<any[]>([])
 const parseStep = ref(0)
 const parseTarget = ref<any>(null)
 const parseLoading = ref(false)
-const sampleSide = ref<'head' | 'tail'>('head')   // 立项采样方向
-const sampleCount = ref(5)                          // 立项采样章数
+const sampleCount = ref(10)                         // 立项均匀采样章数
 const outlineChapters = ref(20)                     // 大纲拆解章数
 const deconstructResult = ref<any>(null)            // 拆解结果
 
@@ -75,7 +74,7 @@ async function startParse(b: any) {
   parseStep.value = 1
   deconstructResult.value = null
   // 默认采样不超过该书的章数
-  sampleCount.value = Math.min(5, b.total_chapters || b.chapters || 5) || 5
+  sampleCount.value = Math.min(10, b.total_chapters || b.chapters || 10) || 10
 }
 
 // 确认配置 → 执行一键拆解
@@ -85,7 +84,6 @@ async function onDeconstruct() {
   parseStep.value = 2
   try {
     const res = await API.bookImport.deconstruct(parseTarget.value.id, {
-      sample_side: sampleSide.value,
       sample_count: sampleCount.value,
       outline_chapters: outlineChapters.value,
     })
@@ -309,11 +307,13 @@ function onDirectUpload(file: any) {
       </a-descriptions>
 
       <div style="margin-bottom:16px">
-        <div style="font-weight:500;margin-bottom:8px;">① 立项采样（用于提炼简介/题材/视角）</div>
-        <a-radio-group v-model:value="sampleSide" button-style="solid">
-          <a-radio-button value="head">采样前 {{ sampleCount }} 章（看开头定调）</a-radio-button>
-          <a-radio-button value="tail">采样后 {{ sampleCount }} 章（看结局走向）</a-radio-button>
+        <div style="font-weight:500;margin-bottom:8px;">① 立项采样（均匀采样全书前中后，用于提炼简介/题材/视角）</div>
+        <a-radio-group v-model:value="sampleCount" button-style="solid">
+          <a-radio-button :value="5">采样 5 章</a-radio-button>
+          <a-radio-button :value="10">采样 10 章</a-radio-button>
+          <a-radio-button :value="20">采样 20 章</a-radio-button>
         </a-radio-group>
+        <div style="font-size:12px;color:#909399;margin-top:6px;">从全书前/中/后均匀取样，比只看开头更能把握整体气质。</div>
       </div>
 
       <div style="margin-bottom:20px">

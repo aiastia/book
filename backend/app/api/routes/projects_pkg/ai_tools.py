@@ -863,7 +863,7 @@ async def book_import_deconstruct(
 ):
     """异步一键拆解：立即返回 task_id，后台执行采样立项→建项目→拆大纲。
 
-    req: { sample_side: head|tail, sample_count=5, outline_chapters=20 }
+    req: { sample_count=10, outline_chapters=20 }
     前端通过右下角浮窗查看进度。
     """
     from app.models.imported_book import ImportedBook
@@ -925,10 +925,10 @@ async def book_import_deconstruct(
 
             engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
 
-            # 2. 立项采样
+            # 2. 立项采样（均匀采样全书前中后，和角色/世界观统一策略）
             await tracker.update(stage="analyzing", message="AI 分析项目信息...")
             sample_count = max(1, payload["sample_count"])
-            sampled_text = _sample_chapters_text(chapters, payload["sample_side"], sample_count)
+            sampled_text = _sample_chapters_evenly(chapters, min(sample_count, len(chapters) or 1))
             sug_result = await engine.execute_skill(
                 "book_import_reverse_project_suggestion",
                 ai_client,
@@ -1387,7 +1387,6 @@ async def book_import_deconstruct(
         payload={
             "book_id": book_id,
             "user_id": user.id,
-            "sample_side": req.sample_side,
             "sample_count": req.sample_count,
             "outline_chapters": outline_chapters,
         },

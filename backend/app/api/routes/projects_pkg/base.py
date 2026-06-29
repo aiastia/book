@@ -249,10 +249,9 @@ class BookImportUploadRequest(BaseModel):
 
 
 class BookImportDeconstructRequest(BaseModel):
-    """一键拆解：采样方向 + 采样章数 + 大纲拆解章数。"""
+    """一键拆解：采样章数 + 大纲拆解章数。"""
 
-    sample_side: str = "head"  # head(前N章) / tail(后N章)
-    sample_count: int = 5  # 立项采样章数
+    sample_count: int = 10  # 立项均匀采样章数（全书前中后）
     outline_chapters: int = 20  # 大纲拆解章数（连续前N章，按5章/批）
 
 

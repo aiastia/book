@@ -716,10 +716,10 @@ export function useProjectApi() {
   }
 
   /** 一键拆解：采样立项 + 建项目 + 拆前 N 章大纲（慢，300s）。 */
-  function bookImportDeconstruct(bookId: number, body: { sample_side?: 'head' | 'tail'; sample_count?: number; outline_chapters?: number }) {
+  function bookImportDeconstruct(bookId: number, body: { sample_count?: number; outline_chapters?: number }) {
     return apiPost<{ project_id: number; project_info: any; outline_count: number; batches_done: number }>(
       `/api/projects/book-import/${bookId}/deconstruct`,
-      { sample_side: 'head', sample_count: 5, outline_chapters: 20, ...body },
+      { sample_count: 10, outline_chapters: 20, ...body },
       { timeout: 300000 },
     )
   }
