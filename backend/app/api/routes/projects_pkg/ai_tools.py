@@ -968,33 +968,41 @@ async def book_import_deconstruct(
             from app.models.character import Character
             try:
                 char_sample = _sample_chapters_evenly(chapters, 12)
-                char_result = await engine.execute_skill(
-                    "book_import_reverse_characters",
-                    ai_client,
-                    {
-                        "title": new_proj.title,
-                        "genre": genre or "网文",
-                        "synopsis": synopsis or "",
-                        "chapters_text": char_sample,
-                        "user_prompt": "请从以下正文中提取角色档案。",
-                    },
-                )
-                if char_result.get("error"):
-                    logger.warning("拆书角色提取失败：%s", char_result["error"])
+                if not char_sample.strip():
+                    logger.warning("拆书角色提取跳过：均匀采样正文为空（章节数=%d）", len(chapters))
                 else:
-                    char_data = char_result.get("json") or []
-                    if isinstance(char_data, dict):
-                        char_data = char_data.get("characters") or char_data.get("data") or []
-                    # 复用 init 的 _save_characters 统一保存，确保字段与正常 init 角色完全一致
-                    # （含多别名兜底、职业匹配、growth_experience/story_goal/weakness/arc_type 等完整字段）
-                    from app.api.routes.project_init import _save_characters
+                    import asyncio as _asyncio
 
-                    MAX_CORE_CHARS = 8  # 只保留核心角色，边缘角色不入库（避免冗余）
-                    truncated = char_data[:MAX_CORE_CHARS]
-                    saved_names = set()
-                    await _save_characters(task_db, new_proj.id, truncated, saved_names)
-                    await task_db.commit()
-                    logger.info("拆书角色提取完成：新增 %d 个角色（复用 _save_characters）", len(saved_names))
+                    char_result = await _asyncio.wait_for(
+                        engine.execute_skill(
+                            "book_import_reverse_characters",
+                            ai_client,
+                            {
+                                "title": new_proj.title,
+                                "genre": genre or "网文",
+                                "synopsis": synopsis or "",
+                                "chapters_text": char_sample,
+                                "user_prompt": "请从以下正文中提取角色档案。",
+                            },
+                        ),
+                        timeout=660,  # 单步超时11分钟（略大于AI_TIMEOUT的10分钟，让httpx先超时）
+                    )
+                    if char_result.get("error"):
+                        logger.warning("拆书角色提取失败：%s", char_result["error"])
+                    else:
+                        char_data = char_result.get("json") or []
+                        if isinstance(char_data, dict):
+                            char_data = char_data.get("characters") or char_data.get("data") or []
+                        # 复用 init 的 _save_characters 统一保存，确保字段与正常 init 角色完全一致
+                        # （含多别名兜底、职业匹配、growth_experience/story_goal/weakness/arc_type 等完整字段）
+                        from app.api.routes.project_init import _save_characters
+
+                        MAX_CORE_CHARS = 8  # 只保留核心角色，边缘角色不入库（避免冗余）
+                        truncated = char_data[:MAX_CORE_CHARS]
+                        saved_names = set()
+                        await _save_characters(task_db, new_proj.id, truncated, saved_names)
+                        await task_db.commit()
+                        logger.info("拆书角色提取完成：新增 %d 个角色（复用 _save_characters）", len(saved_names))
             except Exception as e:
                 logger.warning("拆书角色提取异常：%s", e)
 

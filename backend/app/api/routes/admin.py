@@ -97,7 +97,11 @@ async def create_user(
         is_admin=req.is_admin,
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(400, "用户名或邮箱已存在")
     await db.refresh(user)
     return {**_user_dict(user), "initial_password": pwd}
 
