@@ -49,6 +49,92 @@ if (import.meta.client) {
   if (s) targetWords.value = Number(s)
 }
 
+// ===== 选中文字浮动工具栏 =====
+const selPopup = reactive({ visible: false, top: 0, left: 0, text: '', start: 0, end: 0 })
+const selRewriting = ref(false)
+const selDenoising = ref(false)
+const selRewriteResult = ref('')
+const selDenoiseResult = ref('')
+const selCompareOpen = ref(false)
+const selCompareOriginal = ref('')
+const selCompareNew = ref('')
+const selAction = ref<'rewrite' | 'denoise' | null>(null)
+
+function onEditorMouseup(e: MouseEvent) {
+  const ta = (e.target as HTMLElement).closest('textarea') as HTMLTextAreaElement | null
+  if (!ta) return
+  const start = ta.selectionStart
+  const end = ta.selectionEnd
+  const text = ta.value.substring(start, end)
+  if (!text || text.length < 2) {
+    selPopup.visible = false
+    return
+  }
+  const rect = ta.getBoundingClientRect()
+  selPopup.top = rect.top + window.scrollY - 50
+  selPopup.left = rect.left + window.scrollX + rect.width / 2 - 90
+  selPopup.text = text
+  selPopup.start = start
+  selPopup.end = end
+  selPopup.visible = true
+}
+
+function hideSelPopup() {
+  selPopup.visible = false
+}
+
+async function onSelPartialRewrite() {
+  if (!editing.value?.id || !selPopup.text) return
+  selRewriting.value = true
+  try {
+    const r = await API.chapter.partialRegenerate(editing.value.id, {
+      selected_text: selPopup.text,
+      start_position: selPopup.start,
+      end_position: selPopup.end,
+      length_mode: 'similar',
+      user_instructions: '',
+    })
+    selCompareOriginal.value = selPopup.text
+    selCompareNew.value = r.regenerated_text || r.content || ''
+    selAction.value = 'rewrite'
+    selCompareOpen.value = true
+  } catch (e: any) {
+    msg.error('局部重写失败：' + formatError(e))
+  } finally {
+    selRewriting.value = false
+  }
+}
+
+async function onSelDenoise() {
+  if (!selPopup.text) return
+  selDenoising.value = true
+  try {
+    const r = await API.chapter.aiDenoising({ text: selPopup.text })
+    selCompareOriginal.value = selPopup.text
+    selCompareNew.value = r.processed_text || ''
+    selAction.value = 'denoise'
+    selCompareOpen.value = true
+  } catch (e: any) {
+    msg.error('去AI味失败：' + formatError(e))
+  } finally {
+    selDenoising.value = false
+  }
+}
+
+function onApplySelCompare() {
+  if (!editingContent.value) return
+  const newText = selCompareNew.value
+  editingContent.value = editingContent.value.substring(0, selPopup.start) + newText + editingContent.value.substring(selPopup.end)
+  selPopup.visible = false
+  selCompareOpen.value = false
+  msg.success(selAction.value === 'rewrite' ? '已替换局部重写内容' : '已应用去AI味')
+}
+
+function onDiscardSelCompare() {
+  selPopup.visible = false
+  selCompareOpen.value = false
+}
+
 // ===== 编辑器高级选项 =====
 const writingStyles = ref<any[]>([])
 const selectedStyleId = ref<number | undefined>()
@@ -1113,9 +1199,18 @@ async function onPlanSaved() {
         />
 
         <!-- 内容编辑区 -->
-        <div class="ch-editor">
+        <div class="ch-editor" @mouseup="onEditorMouseup" @click="hideSelPopup">
           <a-textarea v-model:value="editingContent" :rows="18" :disabled="generating" placeholder="点击AI创作生成正文..." />
         </div>
+
+        <!-- 选中文字浮动工具栏 -->
+        <Teleport to="body">
+          <div v-if="selPopup.visible" class="sel-popup" :style="{ top: selPopup.top + 'px', left: selPopup.left + 'px' }">
+            <a-button size="small" type="primary" :loading="selRewriting" @click.stop="onSelPartialRewrite">✏️ 局部重写</a-button>
+            <a-button size="small" :loading="selDenoising" @click.stop="onSelDenoise">去AI味</a-button>
+            <a-button size="small" @click.stop="hideSelPopup">取消</a-button>
+          </div>
+        </Teleport>
         <div class="editor-foot">
           <span>字数：{{ editingContent.length.toLocaleString() }}</span>
         </div>
