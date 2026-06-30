@@ -292,7 +292,10 @@ async def analyze_style(
     # 复用项目通用的引擎/客户端构建（与 inspire、去味等 AI 路由同链路）
     from app.api.routes.projects_pkg.base import make_engine_and_client
 
-    engine, ai_client = await make_engine_and_client(db, user.id)
+    try:
+        engine, ai_client = await make_engine_and_client(db, user.id)
+    except Exception as e:
+        raise HTTPException(500, f"AI 模型配置异常：{e}")
     if not ai_client:
         raise HTTPException(500, "未找到可用的 AI 模型配置，请先在 AI 设置中配置模型")
 
@@ -301,7 +304,10 @@ async def analyze_style(
         "author_hint": f"目标作家：{s.author_name}" if s.author_name else "",
         "user_prompt": "请提炼上述范文的文风特征，严格按 JSON schema 输出。",
     }
-    result = await engine.execute_skill("style_analysis", ai_client, context)
+    try:
+        result = await engine.execute_skill("style_analysis", ai_client, context)
+    except Exception as e:
+        raise HTTPException(500, f"文风提炼调用失败：{e}")
     if result.get("error"):
         raise HTTPException(500, f"文风提炼失败：{result['error']}")
 
