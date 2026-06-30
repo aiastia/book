@@ -124,6 +124,7 @@ const editForm = reactive({
   key_points_text: '',
   characters: [] as string[],       // 涉及角色（多选 + 可手输新名）
   organizations: [] as string[],    // 涉及组织（多选 + 可手输新名）
+  scenes: [] as Array<{ scene_title: string; scene_desc: string; emotion: string }>,
   extraFields: [] as Array<{ key: string; value: string }>,
 })
 // 角色 / 组织候选列表（供下拉多选）
@@ -443,6 +444,11 @@ function openEdit(o: any) {
     key_points_text: (o.key_points || []).join('\n'),
     characters: [...chars],
     organizations: [...orgs],
+    scenes: getScenes(o).map((sc: any) => ({
+      scene_title: sc.scene_title || '',
+      scene_desc: sc.scene_desc || '',
+      emotion: sc.emotion || '',
+    })),
     extraFields: extras,
   })
   newFieldKey.value = ''
@@ -469,7 +475,7 @@ async function onSave() {
       key_points: editForm.key_points_text.split('\n').filter(s => s.trim()),
       characters: [...editForm.characters],
       organizations: [...editForm.organizations],
-      scenes: getScenes(orig),  // 保留原 scenes
+      scenes: editForm.scenes.filter(s => s.scene_title.trim() || s.scene_desc.trim()),
       structure: {
         ...origStructure,
         title: editForm.title, summary: editForm.summary,
@@ -826,6 +832,26 @@ async function deleteExpansion() {
           <a-col :span="12"><a-form-item label="叙事目标"><a-input v-model:value="editForm.goal" /></a-form-item></a-col>
         </a-row>
 
+        <!-- 场景设定编辑 -->
+        <a-form-item>
+          <template #label>
+            <span>🎬 场景设定</span>
+            <a-button type="link" size="small" @click="editForm.scenes.push({ scene_title: '', scene_desc: '', emotion: '' })" style="padding:0 4px">+ 添加场景</a-button>
+          </template>
+          <div v-if="editForm.scenes.length" class="scenes-edit-list">
+            <div v-for="(sc, i) in editForm.scenes" :key="i" class="scene-edit-item">
+              <div class="scene-edit-head">
+                <span class="scene-edit-num">场景 {{ i + 1 }}</span>
+                <a-button type="link" danger size="small" @click="editForm.scenes.splice(i, 1)">删除</a-button>
+              </div>
+              <a-input v-model:value="sc.scene_title" placeholder="场景名称（如：密室/浮岛废墟）" style="margin-bottom:6px" />
+              <a-textarea v-model:value="sc.scene_desc" :rows="2" placeholder="纯环境描写：在哪里、什么样子、什么氛围" />
+              <a-input v-model:value="sc.emotion" placeholder="情绪基调（如：紧张/压抑/空旷）" style="margin-top:6px" />
+            </div>
+          </div>
+          <div v-else class="extra-empty">暂无场景，点击上方"+ 添加场景"</div>
+        </a-form-item>
+
         <!-- AI 额外字段（爽点/钩子/伏笔等）-->
         <a-form-item>
           <template #label>
@@ -965,6 +991,11 @@ async function deleteExpansion() {
 .extra-edit-key { font-size: 11px; color: #BFBFBF; font-family: monospace; }
 .extra-edit-head :deep(.ant-btn) { margin-left: auto; padding: 0 4px; height: auto; }
 .extra-empty { font-size: 12px; color: #BFBFBF; padding: 8px 0; }
+.scenes-edit-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.scene-edit-item { background: #FAFAF7; border: 1px solid #F0F0F0; border-radius: 6px; padding: 8px 10px; }
+.scene-edit-head { display: flex; align-items: center; margin-bottom: 6px; }
+.scene-edit-num { font-size: 13px; font-weight: 600; color: #2B2B2B; }
+.scene-edit-head :deep(.ant-btn) { margin-left: auto; padding: 0 4px; height: auto; }
 .extra-add { display: flex; gap: 8px; align-items: center; }
 .char-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .key-points { display: flex; flex-direction: column; gap: 6px; }
