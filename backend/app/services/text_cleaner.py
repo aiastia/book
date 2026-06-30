@@ -124,6 +124,8 @@ _BODY_TRIGGERS: dict[str, list[str]] = {
     "打了个冷战":   ["后颈一紧", "尾椎一麻", "肩胛一僵"],
     "打了个颤":     ["小臂绷紧", "虎口发麻", "指尖发凉"],
     "指节发白":     ["指节泛青", "虎口发麻", "指尖用力"],
+    "指节因为用力发白": ["指节攥得泛青", "虎口绷得发麻", "指尖死死抠住", "手背上青筋鼓起"],
+    "指节因为用力而发白": ["指节攥得泛青", "虎口绷得发麻", "指尖死死抠住", "手背上青筋鼓起"],
     "呼吸一滞":     ["呼吸顿住", "喉头发紧", "胸口一闷"],
     "心跳漏了一拍": ["心跳重了一拍", "太阳穴一跳", "胃里一沉"],
     "喉结滚动":     ["喉头微动", "咽了一下", "喉间一紧"],
@@ -397,75 +399,109 @@ def _text_similarity(a: str, b: str) -> float:
     return len(ga & gb) / len(ga | gb)
 
 
-# 句子切分：按句末标点或换行
-_SENT_SPLIT_RE = re.compile(r"(?<=[。！？\n])")
-
 
 def _dedupe_repeated_clauses(text: str) -> tuple[str, dict]:
-    """检测并删除句级/分句级重复（AI 卡顿式复述）。
+    """检测并删除分句级重复（AI 卡顿式复述）。
 
-    抓两类典型 AI 重复：
-    1) 分句完全或高度重复：「南边天空暗了下来，南边天空暗了下来」→ 删第二个
-    2) 首尾相接的短语复述：「像沙漠里的人看见绿洲。绿洲，像溺水的人……」→ 删第二个
-       （前句结尾词 == 后句开头词，且后句是对前句的复述/扩展）
+    抓三类典型 AI 重复：
+    1) 分句完全重复：「南边天空暗了下来，南边天空暗了下来」→ 删第二个
+    2) 分句高度相似（短分句 3-gram 重叠 >0.85）：「他握紧了拳头，他攥紧了拳头」→ 删第二个
+    3) 首尾相接的短语复述：「像沙漠里的人看见绿洲。绿洲，像溺水的人……」
+       （后句以「绿洲，」开头且前句以「绿洲」结尾，且后句是对前句意象的复述扩展）
 
-    策略：按句号/换行拆成最小单位，比对相邻两个单位。
+    策略：把全文按「，；。！？\n」拆成有序分句列表（带原始分隔符），
+    遍历时把每个分句与前 1~2 个分句比对，命中则标记删除。
     """
-    units = [u for u in _SENT_SPLIT_RE.split(text) if u.strip()]
-    if len(units) < 2:
+    # 用正则把文本切成「内容片断 + 分隔符」交替的 token 流，保留分隔符以便还原
+    tokens = re.split(r"([，；。！？\n])", text)
+    # 组装成 clause 单元：每个单元 = (内容, 尾随分隔符)
+    clauses: list[list[str]] = []  # [content, sep]
+    i = 0
+    while i < len(tokens):
+        content = tokens[i]
+        sep = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if content.strip() or sep:
+            clauses.append([content, sep])
+        i += 2
+
+    if len(clauses) < 2:
         return text, {}
-    kept: list[str] = []
+
     removed = 0
-    for u in units:
-        u_clean = u.strip()
-        if not u_clean:
-            kept.append(u)
+    # 标记哪些 clause 要删除
+    delete_flags = [False] * len(clauses)
+
+    for idx in range(len(clauses)):
+        if delete_flags[idx]:
             continue
-        is_dup = False
-        if kept:
-            prev = kept[-1].strip()
-            # 同时比对前一句；再比对前前一句（抓隔一句的重复）
-            candidates = [prev]
-            if len(kept) >= 2:
-                candidates.append(kept[-2].strip())
-            for cand in candidates:
-                if not cand or len(cand) < 4:
-                    continue
-                # 按标点（，；）拆成更小的分句再比对，去掉分句内部重复
-                cand_parts = [p for p in re.split(r"[，；]", cand) if p.strip()]
-                u_parts = [p for p in re.split(r"[，；]", u_clean) if p.strip()]
-                all_parts = cand_parts + u_parts
-                # 类型1：相邻分句完全相同或高度相似
-                seen_parts: list[str] = []
-                for p in all_parts:
-                    p_s = p.strip()
-                    if not p_s or len(p_s) < 4:
-                        seen_parts.append(p)
+        cur = clauses[idx][0].strip()
+        # 首尾复述时，被复述的词可能很短（如「绿洲」），不能一刀切跳过。
+        # 但完全空或极短（<2字）的无意义分句跳过。
+        if len(cur) < 2:
+            continue
+        # 与前 1~2 个未删除的分句比对
+        for back in (1, 2):
+            j = idx - back
+            if j < 0 or delete_flags[j]:
+                continue
+            prev = clauses[j][0].strip()
+            if len(prev) < 4:
+                continue
+            # 类型1/2/子串：完全相同 / 高度相似 / 子串包含
+            is_dup = False
+            if cur == prev:
+                is_dup = True
+            elif len(cur) <= 20 and len(prev) <= 20 and _text_similarity(cur, prev) > 0.85:
+                is_dup = True
+            # 子串包含：一个短分句整体出现在前句里（前句是它的扩展），判为重复
+            # 例：前「他们看见南边天空暗了下来」 后「南边天空暗了下来」→ 后者是前句子串，删后
+            elif (
+                len(cur) >= 5 and len(cur) <= 25
+                and (cur in prev or (len(prev) >= 5 and len(prev) <= 25 and prev in cur))
+            ):
+                is_dup = True
+            # 类型3：首尾复述——前句结尾词在后句开头重现，且后句是对前句意象的复述扩展
+            #   例：前「...看见绿洲」 后「绿洲，像溺水...」→ 后句重复了前句的结尾意象再展开，删后
+            # 注意：复述词和扩展常被逗号分成两个 clause，需把当前短 clause 与下一个 clause 拼起来判断
+            if not is_dup and len(prev) >= 6:
+                # 构造判断用的 cur：若当前 clause 很短（<=4字，疑似被复述的词），拼上下一个 clause
+                cur_for_check = cur
+                extra_delete_idx = -1  # 若拼了下一个 clause，命中时它也要删
+                if len(cur) <= 4 and idx + 1 < len(clauses) and not delete_flags[idx + 1]:
+                    nxt = clauses[idx + 1][0].strip()
+                    if nxt:
+                        cur_for_check = cur + "，" + nxt
+                        extra_delete_idx = idx + 1
+                # 取前句结尾 2~4 字作为可能复述的词
+                for tail_len in (4, 3, 2):
+                    if tail_len > len(prev):
                         continue
-                    for sp in seen_parts:
-                        sp_s = sp.strip()
-                        if len(sp_s) < 4:
-                            continue
-                        if p_s == sp_s:
-                            is_dup = True
-                            break
-                        # 高度相似（短分句 3-gram 重叠 >0.8）
-                        if len(p_s) <= 15 and len(sp_s) <= 15:
-                            if _text_similarity(p_s, sp_s) > 0.8:
+                    tail = prev[-tail_len:]
+                    if cur_for_check.startswith(tail):
+                        rest = cur_for_check[tail_len:].lstrip("，, ")
+                        # rest 是对前句意象的复述扩展：以「像/如/是/仿佛」开头，或与前句相似
+                        if rest and len(rest) >= 4 and len(rest) <= 30:
+                            if re.match(r"^(?:像|如|是|仿佛|宛如)", rest) or _text_similarity(rest, prev) > 0.55:
                                 is_dup = True
+                                if extra_delete_idx >= 0:
+                                    delete_flags[extra_delete_idx] = True
                                 break
-                    if is_dup:
-                        break
-                    seen_parts.append(p)
-                if is_dup:
-                    break
-        if is_dup:
-            removed += 1
-        else:
-            kept.append(u)
+            if is_dup:
+                delete_flags[idx] = True
+                removed += 1
+                break
+
     if removed == 0:
         return text, {}
-    result = "".join(kept)
+
+    # 重组文本：跳过被删除的 clause，但保留其分隔符合并到前一个保留项
+    out_parts: list[str] = []
+    for idx, (content, sep) in enumerate(clauses):
+        if delete_flags[idx]:
+            # 被删的分句：其分隔符并入输出流（通常直接丢弃，除非是换行）
+            continue
+        out_parts.append(content + sep)
+    result = "".join(out_parts)
     return result, {"删除重复分句": removed}
 
 
@@ -488,6 +524,10 @@ def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
     # ---- 第零层：删除连续重复段落（最严重的硬伤，先于一切处理） ----
     text, dup_stats = _dedupe_repeated_paragraphs(text)
     stats_report.update(dup_stats)
+
+    # ---- 第零点五层：删除句级/分句级重复（AI 卡顿式复述）----
+    text, clause_stats = _dedupe_repeated_clauses(text)
+    stats_report.update(clause_stats)
 
     # ---- 第一层：Lexical ----
     for pattern, replacement in LEXICAL_SAFE:

@@ -196,8 +196,18 @@ class ForeshadowService:
                 except ValueError:
                     ref_id = None
             fs_subtype = fs_data.get("foreshadow_type", "")
-            importance = fs_data.get("importance") or fs_data.get("priority") or 5
-            target_resolve = fs_data.get("target_resolve_chapter_number")
+
+            def _coerce_int(value, default):
+                """AI 返回的数值字段可能是字符串（如 "7"），强制转 int 防止后续比较类型错误。"""
+                if value is None or value == "":
+                    return default
+                try:
+                    return int(float(value))
+                except (ValueError, TypeError):
+                    return default
+
+            importance = _coerce_int(fs_data.get("importance") or fs_data.get("priority"), 5)
+            target_resolve = _coerce_int(fs_data.get("target_resolve_chapter_number"), None)
             # 解析关联角色（AI 新增字段）
             related_chars = fs_data.get("related_characters") or []
             if isinstance(related_chars, str):

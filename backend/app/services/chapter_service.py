@@ -570,7 +570,7 @@ class ChapterService:
 
         优先向量检索（有 embedding 配置时），无向量库时降级为 DB 查询（按 importance 排序）。
         只取最近章节窗口之外的记忆（避免与已注入的最近章节摘要重复）。
-        最多 3 条，不截断内容。
+        最多 5 条，不截断内容。
         """
         if not self.user_id:
             return ""
@@ -625,7 +625,7 @@ class ChapterService:
                     self.project_id,
                     query_text,
                     memory_types=["foreshadow", "plot", "conflict"],
-                    limit=3,
+                    limit=5,
                     min_importance=0.3,
                 )
                 # 过滤掉最近 2 章的记忆（已通过摘要链注入）
@@ -636,7 +636,7 @@ class ChapterService:
                         r.get("chapter_number", 0) and r["chapter_number"] >= lookback_before + 1
                     )
                 ]
-                memories = results[:3]
+                memories = results[:5]
             else:
                 # 降级模式：无向量库时按 importance 从 DB 取高价值长期记忆
                 if lookback_before >= 1:
@@ -651,7 +651,7 @@ class ChapterService:
                                     StoryMemory.chapter_number <= lookback_before,
                                 )
                                 .order_by(StoryMemory.importance.desc())
-                                .limit(3)
+                                .limit(5)
                             )
                         )
                         .scalars()
@@ -886,7 +886,10 @@ class ChapterService:
                 .first()
             )
             if prev and prev.content:
-                return prev.content[-500:]
+                # 扩大上一章结尾的喂入范围：从 500 字 → 1500 字。
+                # 更完整的结尾能让下一章 AI 接住更多伏笔铺垫、人物状态、场景余温，
+                # 减少衔接断裂和设定遗忘。1500 字在 token 成本和连贯性间取得平衡。
+                return prev.content[-1500:]
             return ""
         except Exception:
             return ""
@@ -1399,7 +1402,9 @@ class ChapterService:
             # 相关记忆从最近章节摘要聚合
             try:
                 recent_summaries = []
-                start_n = max(1, chapter.chapter_number - 5)
+                # 扩大历史摘要回看范围：从 5 章 → 8 章。
+                # 更长的回看窗口让 AI 接住更早的伏笔和剧情线，减少设定遗忘。
+                start_n = max(1, chapter.chapter_number - 8)
                 for n in range(start_n, chapter.chapter_number):
                     s = await self._query_chapter_summary(n)
                     if s:
@@ -1407,7 +1412,8 @@ class ChapterService:
                             data = json.loads(s) if isinstance(s, str) else s
                             title = data.get("title", "")
                             summary = data.get("summary", "")
-                            # 如果没有分析摘要，用章节正文前150字兜底
+                            # 如果没有分析摘要，用章节正文前 400 字兜底（原 150 字只能看到开头，
+                            # 扩到 400 字能覆盖本章主要事件，让回看真正有意义）
                             if not summary:
                                 ch = (
                                     (
@@ -1422,7 +1428,7 @@ class ChapterService:
                                     .first()
                                 )
                                 if ch and ch.content:
-                                    summary = ch.content.strip()[:150]
+                                    summary = ch.content.strip()[:400]
                             if summary or title:
                                 recent_summaries.append(
                                     f"第{n}章「{title}」：{summary}"
@@ -1908,10 +1914,15 @@ class ChapterService:
         must_resolve, upcoming, others = [], [], []
         for f in existing_fs:
             entry = f"(id: {f.id}) {f.title}({f.foreshadow_type or '未分类'})：{f.content[:60]}"
-            tgt = f.target_resolve_chapter_number
-            if tgt and tgt <= chapter.chapter_number and f.status in ("pending", "planted"):
+            # 防御：DB 里可能残留字符串类型的 chapter_number（早期写入未转换），统一转 int
+            try:
+                tgt = int(f.target_resolve_chapter_number) if f.target_resolve_chapter_number else None
+            except (ValueError, TypeError):
+                tgt = None
+            ch_num = chapter.chapter_number or 0
+            if tgt and tgt <= ch_num and f.status in ("pending", "planted"):
                 must_resolve.append(entry + f" [应于第{tgt}章回收]")
-            elif tgt and tgt - chapter.chapter_number <= 3 and f.status in ("pending", "planted"):
+            elif tgt and tgt - ch_num <= 3 and f.status in ("pending", "planted"):
                 upcoming.append(entry + f" [计划第{tgt}章回收]")
             else:
                 others.append(entry)
@@ -2055,8 +2066,17 @@ class ChapterService:
 
             # 质量告警检测
             alert_parts = []
-            overall = quality_scores_data.get("overall", 10)
-            coherence = quality_scores_data.get("coherence", 10)
+
+            def _score_float(key, default):
+                """评分字段 AI 可能返回字符串（如 "8.2"），强制转 float 防止比较类型错误。"""
+                v = quality_scores_data.get(key, default)
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    return default
+
+            overall = _score_float("overall", 10)
+            coherence = _score_float("coherence", 10)
             consistency_issues = analysis_data.get("consistency_issues", [])
             if overall < 5:
                 alert_parts.append("low_score")
