@@ -73,6 +73,8 @@ async def create_batch_task(
         session.add(bg)
         await session.commit()
         await session.refresh(bg)
+        # 把 BackgroundTask.id 挂到 BatchGenerationTask 上，方便前端轮询
+        task.bg_task_id = bg.id
         return task
 
     if db is not None:

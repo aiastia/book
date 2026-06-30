@@ -168,7 +168,12 @@ async def batch_generate(
     )
     # 后台执行（fire-and-forget）
     asyncio.create_task(bgs.run_batch_generation(task.id))
-    return {"task_id": task.id, "total": task.total_chapters, "status": "pending"}
+    return {
+        "task_id": task.id,
+        "bg_task_id": getattr(task, "bg_task_id", None),
+        "total": task.total_chapters,
+        "status": "pending",
+    }
 
 
 @router.get("/{project_id}/batch-generate/active")
