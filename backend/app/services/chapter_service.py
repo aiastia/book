@@ -2061,7 +2061,7 @@ class ChapterService:
             await _report(62, "正在更新章节质量评分...")
 
             # 更新章节质量评分
-            chapter.quality_score = quality_scores_data.get("overall")
+            chapter.quality_score = _score_float("overall", None)
             chapter.quality_detail = quality_scores_data
 
             # 质量告警检测
