@@ -88,6 +88,10 @@ _ACTION_TEMPLATE_WORDS: list[tuple[str, str]] = [
 ]
 # 每个动作词全章允许出现的最大次数（超过则多余部分标记改写）
 _ACTION_TEMPLATE_THRESHOLD = 2
+# 动作模板句的最小长度：模板动作句往往很短（"呼吸一滞。"5字），
+# 不能套用全局 _MIN_SENTENCE_LEN=12，单独设低阈值。
+# 5 字已足够让润色 AI 知道要改哪个词并换承载方式。
+_ACTION_MIN_LEN = 5
 
 
 def _scan_action_template_density(text: str, existing_hits: list[dict]) -> list[dict]:
@@ -111,10 +115,11 @@ def _scan_action_template_density(text: str, existing_hits: list[dict]) -> list[
         # 超过阈值才处理：前 threshold 次保留，多余部分标记
         if len(positions) <= _ACTION_TEMPLATE_THRESHOLD:
             continue
-        # 对多余的每一次，提取所在句子
-        for p in positions[_ACTION_TEMPLATE_THRESHOLD:]:
+        # 阈值触发说明该词在滥用——前后出现的一起改，不保留前面几处"特例"
+        # （保留特例等于认可了套路模式，改就要改全套）
+        for p in positions:
             start, end, sentence = _extract_sentence(text, p)
-            if len(sentence) < _MIN_SENTENCE_LEN:
+            if len(sentence) < _ACTION_MIN_LEN:
                 continue
             key = (start, end)
             if key not in seen:
@@ -443,6 +448,15 @@ async def _call_rewrite_api(
         "是 AI 节奏腔，合并改写成一句自然的陈述，保留冲击力但去掉排比套路。\n"
         "  例：「没有预警。没有前摇。」→「连个预警都没有。」\n"
         "  例：「不需要语言。不需要翅膀。」→「语言和翅膀此刻都是多余。」\n"
+        "特殊处理3：套路动作词替换。以下动作词反复出现时，换成更具体的承载方式：\n"
+        "  目光落在/投向 → 换成：目光扫过来又移开/盯着无关的东西/看天看地就是不看对方\n"
+        "  握紧/攥紧 → 换成：手指无意识攥住衣摆/摩挲某个物件/把手背到身后\n"
+        "  呼吸一滞/一紧 → 换成：呼吸乱了半拍/长出一口气/把气憋回去\n"
+        "  指节发白 → 换成：指节攥得泛青/虎口绷得发麻/手背上青筋鼓起\n"
+        "  喉结滚动 → 换成：喉间动了一下/咽了口唾沫/清了清嗓子\n"
+        "  心跳漏 → 换成：太阳穴一跳/胃里一沉/胸口猛地一跳\n"
+        "  瞳孔 → 换成：目光收紧/眼神一闪/眼睫垂了一下\n"
+        "  原则：同样的情绪用不同的身体部位承载，画面立刻不同。\n"
         "严格输出 JSON 数组：[{\"i\": 编号, \"t\": \"改后句子\"}]，不要任何其他文字。"
     )
 
@@ -585,7 +599,13 @@ async def diff_rewrite(
     # 从后往前替换，避免位置偏移
     replacements = []
     # 句式重写类 reason：这些是改变句式的改写，走宽松校验
-    _REWRITE_REASONS = {"AI句式密度过高-不是A是B", "AI节奏套路-否定/祈使短句排比"}
+    _REWRITE_REASONS = {
+        "AI句式密度过高-不是A是B",
+        "AI节奏套路-否定/祈使短句排比",
+        # 动作模板密度改写：换承载方式会改变长度和用词
+    }
+    _ACTION_REASONS = {cat for _, cat in _ACTION_TEMPLATE_WORDS}
+    _REWRITE_REASONS |= _ACTION_REASONS
     for r in results:
         idx = r.get("i")
         new_text = r.get("t", "")
