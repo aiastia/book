@@ -211,7 +211,7 @@ async function onAnalyze() {
   }
   analyzeLoading.value = true
   try {
-    const res = await apiPost<{ style_traits: Record<string, string> }>(`/api/writing-styles/${editingStyle.value.id}/analyze`, {})
+    const res = await apiPost<{ style_traits: Record<string, string> }>(`/api/writing-styles/${editingStyle.value.id}/analyze`, {}, { timeout: 120000 })
     editForm.style_traits = res?.style_traits || {}
     msg.success('文风特征已提炼完成')
   } catch (e: any) {
