@@ -231,7 +231,8 @@ def _dedupe_consecutive_psych(text: str) -> dict:
 _STATS_THRESHOLD: dict[str, int] = {
     "仿佛": 5,  "似乎": 5,  "好像": 5,  "像是": 5,
     "几乎": 5,  "完全": 4,  "彻底": 3,  "整个": 4,
-    "无比": 3,  "前所未有": 1, "突然": 5, "忽然": 5,
+    "无比": 3,  "前所未有": 1, "突然": 3, "忽然": 3,
+    "骤然": 2,  "猛地": 2,  "瞬间": 2,
     "甚至": 6,  "意识到": 6, "发现": 8,  "试图": 5,
     "表示": 5,  "那一刻": 3, "这一瞬": 3, "这一刻": 3,
 }
@@ -240,6 +241,7 @@ _STATS_REPLACEMENTS: dict[str, str] = {
     "仿佛": "像",   "似乎": "像",   "好像": "像",   "像是": "像",
     "几乎": "",      "完全": "",     "彻底": "",     "整个": "整",
     "无比": "极",   "前所未有": "", "突然": "",     "忽然": "",
+    "骤然": "",     "猛地": "",     "瞬间": "",
     "甚至": "",      "那一刻": "",  "这一瞬": "",   "这一刻": "",
 }
 
@@ -248,8 +250,13 @@ def _apply_stats(text: str) -> tuple[str, dict]:
     """统计高频 AI 词，超阈值时按比例替换。返回 (cleaned_text, stats_report)。"""
     report = {}
     for word, threshold in _STATS_THRESHOLD.items():
-        # 用 finditer 避免匹配子串（"像"不匹配"画像/雕像/像素"）
-        pattern = re.compile(rf"(?<!\w){re.escape(word)}(?!\w)")
+        # 边界策略：
+        # - 多字词（如"突然/仿佛/那一刻"）本身不会是别的词的子串，直接匹配即可。
+        # - 单字词（如"像"）需要前后非汉字断言，否则会匹配到"画像/雕像/像素"等。
+        if len(word) >= 2:
+            pattern = re.compile(re.escape(word))
+        else:
+            pattern = re.compile(rf"(?<![A-Za-z0-9\u4e00-\u9fff]){re.escape(word)}(?![A-Za-z0-9\u4e00-\u9fff])")
         matches = list(pattern.finditer(text))
         count = len(matches)
         report[word] = count
