@@ -130,8 +130,13 @@ def scan_fingerprint_sentences(text: str) -> list[dict]:
     return hits
 
 
-# "不是A，（而）是B" 密度扫描（仅当全文超过 4 次时，标记超出部分）
-_NOT_A_BUT_B_RE = re.compile(r"不是[^。！？\n]{1,25}(?:。|，)\s*(?:而是?|是)[^。！？\n]{1,60}")
+# "不是A，（而）是B" 扫描：覆盖三种写法
+#   1) 不是A，是B / 不是A。是B   （标点分隔）
+#   2) 不是A，而是B              （标点+而）
+#   3) 不是A而是B                （无标点，必须有"而"，否则会误伤"不是这样的是…"）
+_NOT_A_BUT_B_RE = re.compile(
+    r"不是[^。！？\n]{1,25}?(?:[，。]\s*(?:而)?是|而是)[^。！？\n]{1,60}"
+)
 
 
 def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
@@ -231,6 +236,99 @@ def _scan_repeated_subject(text: str, existing_hits: list[dict]) -> list[dict]:
     return extra_hits
 
 
+# AI 节奏套路：连续的否定/祈使短句排比（"没有X。没有Y。""不需要X。不需要Y。""不是X。是Y。"）
+# 这类句式偶尔用一次有冲击力，连续 2 句以上即沦为 AI 节奏腔。
+_NEG_PARALLEL_PATTERNS = [
+    re.compile(rf"^(?:没有|无)[^。！？\n]{{1,12}}[。！？]"),      # 没有预警。/ 无声。
+    re.compile(rf"^(?:不需要?|不用|不必)[^。！？\n]{{1,12}}[。！？]"),  # 不需要语言。/ 不用翅膀。
+    re.compile(rf"^不是[^。！？\n]{{1,12}}[。！？]"),             # 不是死。
+    re.compile(rf"^是[^。！？\n]{{1,12}}[。！？]"),               # 是活。（承接上一句"不是…"）
+]
+
+
+def _scan_negation_parallel(text: str, existing_hits: list[dict]) -> list[dict]:
+    """扫描连续的否定/祈使短句排比。
+
+    连续 2 句以上匹配套路句式（不论是否同前缀），整组（除第一句外）标记改写。
+    例：
+      "没有预警。\n没有前摇。" → 第 2 句标记
+      "不需要语言。\n不需要翅膀。" → 第 2 句标记
+    短句阈值：单句 ≤14 字才算"断句套路"（长句不算）。
+    """
+    # 手动拆句（与 _scan_repeated_subject 一致）
+    sentences = []
+    buf = []
+    for ch in text:
+        buf.append(ch)
+        if ch in "。！？\n":
+            sent = "".join(buf).strip()
+            if sent:
+                sentences.append(sent)
+            buf = []
+    if buf:
+        sent = "".join(buf).strip()
+        if sent:
+            sentences.append(sent)
+
+    # 找出哪些句子是"套路短句"
+    flagged_idx = []
+    for i, s in enumerate(sentences):
+        if len(s) > 14:  # 长句不算断句套路
+            continue
+        if any(p.search(s) for p in _NEG_PARALLEL_PATTERNS):
+            flagged_idx.append(i)
+
+    if len(flagged_idx) < 2:
+        return []
+
+    # 找连续段（相邻或间隔 ≤1）：连续 2+ 个 flagged 句算一组套路
+    groups = []
+    cur = [flagged_idx[0]]
+    for i in range(1, len(flagged_idx)):
+        if flagged_idx[i] - flagged_idx[i - 1] <= 2:
+            cur.append(flagged_idx[i])
+        else:
+            if len(cur) >= 2:
+                groups.append(cur)
+            cur = [flagged_idx[i]]
+    if len(cur) >= 2:
+        groups.append(cur)
+
+    if not groups:
+        return []
+
+    # 构建位置映射
+    sent_positions = []
+    pos = 0
+    for s in sentences:
+        start = text.find(s, pos)
+        if start == -1:
+            sent_positions.append((pos, pos + len(s)))
+            pos += len(s)
+        else:
+            sent_positions.append((start, start + len(s)))
+            pos = start + len(s)
+
+    extra_hits = []
+    seen = {(h["start"], h["end"]) for h in existing_hits}
+    for group in groups:
+        # 整组连起来作为一条改写（带前一句作为完整上下文），第一句保留、其后标记
+        # 把整组拼成一个区间交给模型改写，避免改完前后不连贯
+        g_start = sent_positions[group[0]][0]
+        g_end = sent_positions[group[-1]][1]
+        key = (g_start, g_end)
+        if key not in seen:
+            seen.add(key)
+            joined = "".join(sentences[i] for i in group)
+            extra_hits.append({
+                "start": g_start,
+                "end": g_end,
+                "sentence": joined,
+                "reason": "AI节奏套路-否定/祈使短句排比",
+            })
+    return extra_hits
+
+
 # ====================================================================
 # 打包：带上下文
 # ====================================================================
@@ -280,9 +378,13 @@ async def _call_rewrite_api(
         "对每个「原句」，只改掉 AI 味（过度解释/心理说明/连接词/解释性从句），"
         "保持意思不变，禁止扩写，禁止新增内容，禁止改变人称。\n"
         "如果原句已经够好，原样返回。\n"
-        "特殊处理：「不是A，是B」句式改成直接陈述。\n"
+        "特殊处理1：「不是A，是B」句式改成直接陈述。\n"
         "  例：「不是矿道，是裂隙」→「矿道裂成了一条向下的裂隙」\n"
         "  例：「不是消失，是变形」→「轮廓正在变形」\n"
+        "特殊处理2：连续的否定/祈使短句排比（如「没有预警。没有前摇。」「不需要语言。不需要翅膀。」）"
+        "是 AI 节奏腔，合并改写成一句自然的陈述，保留冲击力但去掉排比套路。\n"
+        "  例：「没有预警。没有前摇。」→「连个预警都没有。」\n"
+        "  例：「不需要语言。不需要翅膀。」→「语言和翅膀此刻都是多余。」\n"
         "严格输出 JSON 数组：[{\"i\": 编号, \"t\": \"改后句子\"}]，不要任何其他文字。"
     )
 
@@ -378,10 +480,10 @@ async def diff_rewrite(
     """
     # 1. 扫描
     hits = scan_fingerprint_sentences(text)
-    # 1b. "不是A，是B" 密度扫描（全章 > 4 次时标记超出部分）
+    # 1b. "不是A，是B" 扫描（提示词已禁，残留一处改一处，threshold=0）
     not_a_but_b_hits = _scan_not_a_but_b(text, hits)
     if not_a_but_b_hits:
-        logger.warning(f"[rewrite] 「不是A是B」密度过高: 全文 {len(not_a_but_b_hits) + 4}+ 次，标记 {len(not_a_but_b_hits)} 句改写")
+        logger.warning(f"[rewrite] 「不是A是B」残留: 标记 {len(not_a_but_b_hits)} 句改写")
         hits.extend(not_a_but_b_hits)
         hits.sort(key=lambda h: h["start"])
     # 1c. 句式重复扫描（连续 "她...她...她..."）
@@ -389,6 +491,12 @@ async def diff_rewrite(
     if repeated_subject_hits:
         logger.warning(f"[rewrite] 句式重复: 标记 {len(repeated_subject_hits)} 句改写")
         hits.extend(repeated_subject_hits)
+        hits.sort(key=lambda h: h["start"])
+    # 1d. 否定/祈使短句排比扫描（"没有预警。没有前摇。""不需要语言。不需要翅膀。"）
+    neg_parallel_hits = _scan_negation_parallel(text, hits)
+    if neg_parallel_hits:
+        logger.warning(f"[rewrite] 否定/祈使短句排比: 标记 {len(neg_parallel_hits)} 处改写")
+        hits.extend(neg_parallel_hits)
         hits.sort(key=lambda h: h["start"])
     if not hits:
         logger.warning("[rewrite] 未命中任何 AI 指纹句，跳过 API 调用（无请求发出）")
@@ -412,6 +520,8 @@ async def diff_rewrite(
     skipped = 0
     # 从后往前替换，避免位置偏移
     replacements = []
+    # 句式重写类 reason：这些是改变句式的改写，走宽松校验
+    _REWRITE_REASONS = {"AI句式密度过高-不是A是B", "AI节奏套路-否定/祈使短句排比"}
     for r in results:
         idx = r.get("i")
         new_text = r.get("t", "")
@@ -419,7 +529,9 @@ async def diff_rewrite(
             continue
         hit = hits[idx]
         original = hit["sentence"]
-        if _validate_rewrite(original, new_text):
+        # "不是A是B" 等句式重写走宽松闸，避免合理的改写被长度/专名检测误杀
+        kind = "rewrite" if hit.get("reason") in _REWRITE_REASONS else "normal"
+        if _validate_rewrite(original, new_text, kind=kind):
             replacements.append((hit["start"], hit["end"], new_text))
             rewritten_count += 1
         else:
