@@ -28,6 +28,45 @@ const generating = ref(false)
 const genCount = ref(10)
 const showGen = ref(false)
 
+// 手动创建大纲
+const showManualCreate = ref(false)
+const manualForm = reactive({
+  chapter_number: 1,
+  title: '',
+  summary: '',
+  emotion: '',
+  goal: '',
+  key_points_text: '',
+})
+async function onManualCreate() {
+  try {
+    const nextChapter = outlines.value && outlines.value.length > 0
+      ? Math.max(...outlines.value.map((o: any) => o.chapter_number)) + 1
+      : 1
+    manualForm.chapter_number = nextChapter
+    showManualCreate.value = true
+  } catch {}
+}
+async function submitManualCreate() {
+  try {
+    await API.outline.create(currentProjectId.value, {
+      chapter_number: manualForm.chapter_number,
+      title: manualForm.title,
+      summary: manualForm.summary,
+      emotion: manualForm.emotion,
+      goal: manualForm.goal,
+      key_points: manualForm.key_points_text.split('\n').filter((s: string) => s.trim()),
+      characters: [],
+      organizations: [],
+      scenes: [],
+      structure: {},
+    })
+    showManualCreate.value = false
+    msg.success('大纲已创建')
+    await refreshOutlines()
+  } catch (e: any) { msg.error('创建失败：' + formatError(e)) }
+}
+
 // 待补充物品/地点
 const pendingEntities = ref<{ pending_items: any[]; pending_locations: any[]; total: number } | null>(null)
 const fillingEntities = ref(false)
@@ -544,6 +583,7 @@ async function deleteExpansion() {
       <a-button v-if="isOneToMany && hasUnexpanded" @click="openBatchExpand" :loading="batchExpanding">
         批量展开
       </a-button>
+      <a-button @click="onManualCreate">手动创建</a-button>
       <a-button type="primary" :loading="generating" @click="openContinue">
         {{ outlines && outlines.length ? '续写大纲' : 'AI 生成大纲' }}
       </a-button>
@@ -619,6 +659,46 @@ async function deleteExpansion() {
       />
     </div>
     <a-empty v-else-if="!outlines || !outlines.length" description="暂无大纲，点击 AI 生成" />
+
+    <!-- 手动创建弹窗 -->
+    <a-modal v-model:open="showManualCreate" title="手动创建大纲" width="520px">
+      <a-form layout="vertical">
+        <a-row :gutter="12">
+          <a-col :span="8">
+            <a-form-item label="章节序号">
+              <a-input-number v-model:value="manualForm.chapter_number" :min="1" style="width:100%" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="16">
+            <a-form-item label="标题">
+              <a-input v-model:value="manualForm.title" placeholder="章节标题" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="梗概">
+          <a-textarea v-model:value="manualForm.summary" :rows="3" placeholder="200字以内的章节概要" />
+        </a-form-item>
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="情感基调">
+              <a-input v-model:value="manualForm.emotion" placeholder="如：压抑→反击→暗爽" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="叙事目标">
+              <a-input v-model:value="manualForm.goal" placeholder="本章在全书中的目的" />
+            </a-form-item>
+          </a-col>
+        </a-row>
+        <a-form-item label="情节要点（每行一个）">
+          <a-textarea v-model:value="manualForm.key_points_text" :rows="3" placeholder="每行一个情节点" />
+        </a-form-item>
+      </a-form>
+      <template #footer>
+        <a-button @click="showManualCreate = false">取消</a-button>
+        <a-button type="primary" @click="submitManualCreate">创建</a-button>
+      </template>
+    </a-modal>
 
     <!-- 生成弹窗 -->
     <a-modal v-model:open="showGen" title="AI 生成大纲" width="400px">
