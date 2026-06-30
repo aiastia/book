@@ -15,8 +15,8 @@ export const aiApi = {
   fetchRemoteModels: (baseUrl: string, apiKey: string, provider = 'openai') =>
     post('/ai-models/fetch-remote', { base_url: baseUrl, api_key: apiKey, provider }),
   fetchModelRemoteModels: (modelId: number) => get(`/ai-models/${modelId}/remote-models`),
-  fetchRewriteRemoteModels: (baseUrl: string, apiKey: string) =>
-    post('/ai-models/fetch-rewrite-models', { base_url: baseUrl, api_key: apiKey }),
+  fetchRewriteRemoteModels: (baseUrl: string, apiKey: string, provider = 'openai') =>
+    post('/ai-models/fetch-remote', { base_url: baseUrl, api_key: apiKey, provider }),
   // 封面
   generateCoverPrompt: (id?: number) => post(`/projects/${P(id)}/cover/generate-prompt`),
   generateCoverImage: (prompt: string, id?: number) => post(`/projects/${P(id)}/cover/generate-image`, { prompt }),
