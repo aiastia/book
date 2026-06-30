@@ -31,12 +31,14 @@
 @include:_shared_writing_rules.md
 @include:_shared_constraints.md
 @include:_shared_common_rules.md
+@include:_shared_quality_target.md
 
 <output>
 【输出规范】
 直接输出重写后的章节正文内容。
 - 不要包含章节标题、序号或其他元信息
 - 不要输出任何解释、注释或创作说明
+- 输出前默念 9 分自检：全章至少 1 个"想截屏"的瞬间？比喻里没有套路词？新设定不超 2 个？角色说话有"人味"？不达标先改再输出。
 - 从故事内容直接开始，保持叙事的连贯性
 </output>
 
