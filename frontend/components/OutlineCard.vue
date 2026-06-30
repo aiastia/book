@@ -54,6 +54,7 @@ const FIELD_LABELS: Record<string, string> = {
   shuang_design: '爽点设计', reader_hook: '读者钩子', decision_basis: '决策依据',
   obstacle_type: '障碍类型', hook_type: '钩子类型', chapter_breath: '叙事节奏',
   foreshadow_plant: '伏笔埋设', foreshadow_advance: '伏笔推进',
+  chapter_advance: '本章推进目标',
   character_intents: '角色微意图', scene_anchor: '场景锚点', emotional_arc: '情绪弧线',
   narrative_goal: '叙事目标', conflict_type: '冲突类型', rhythm_tag: '节奏标记',
   character: '角色', this_chapter_goal: '本章目标', immediate_want: '当前欲求',
