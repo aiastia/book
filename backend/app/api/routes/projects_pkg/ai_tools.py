@@ -882,459 +882,293 @@ async def book_import_deconstruct(
 
     outline_chapters = max(5, req.outline_chapters or 20)
 
-    async def _run_deconstruct(task_id: int, payload: dict):
+    async def _run_deconstruct(task_id: int, payload: dict, db: AsyncSession):
         import logging
 
         from app.services import background_task_service as bgs
         from app.services.txt_parser_service import parse_txt_file
 
         logger = logging.getLogger(__name__)
-        tracker = bgs.TaskProgressTracker(task_id)
+        tracker = bgs.TaskProgressTracker(task_id, db=db)
 
-        async with async_session() as task_db:
-            # 1. 取书
-            bk = (
-                await task_db.execute(
-                    select(ImportedBook).where(
-                        ImportedBook.id == payload["book_id"],
-                        ImportedBook.user_id == payload["user_id"],
-                    )
+        # 1. 取书
+        bk = (
+            await db.execute(
+                select(ImportedBook).where(
+                    ImportedBook.id == payload["book_id"],
+                    ImportedBook.user_id == payload["user_id"],
                 )
-            ).scalar_one_or_none()
-            if not bk or not bk.raw_text:
-                await tracker.fail("书籍不存在或正文为空")
-                return
-
-            # 重新拆解：若该书已生成过项目，先级联清理旧项目所有数据，避免残留
-            if bk.created_project_id:
-                await tracker.update(stage="preparing", message="清理上次拆解的旧项目...")
-                try:
-                    await _cascade_delete_project(task_db, bk.created_project_id)
-                    await task_db.commit()
-                    bk.created_project_id = None
-                    bk.status = "uploaded"
-                    logger.info("已清理旧项目 %s，准备重新拆解", bk.created_project_id)
-                except Exception as e:
-                    logger.warning("清理旧项目异常（继续重新拆解）：%s", e)
-
-            await tracker.update(stage="preparing", message="解析章节...")
-            chapters = parse_txt_file(bk.raw_text.encode("utf-8")).get("chapters", [])
-            if not chapters:
-                await tracker.fail("未识别到章节")
-                return
-
-            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
-
-            # 2. 立项采样（均匀采样全书前中后，和角色/世界观统一策略）
-            await tracker.update(stage="analyzing", message="AI 分析项目信息...")
-            sample_count = max(1, payload["sample_count"])
-            sampled_text = _sample_chapters_evenly(chapters, min(sample_count, len(chapters) or 1))
-            sug_result = await engine.execute_skill(
-                "book_import_reverse_project_suggestion",
-                ai_client,
-                {
-                    "title": bk.title or "未知书名",
-                    "sampled_text": sampled_text,
-                    "target_platform": payload.get("target_platform", ""),
-                    "user_prompt": (
-                        f"参考小说《{bk.title}》的正文，策划一本**全新的**小说立项。"
-                        f"新书名绝对不能是「{bk.title}」，也不能是它的变体（加后缀/改字）。"
-                        f"请取一个完全不同的新书名。"
-                    ),
-                },
             )
-            if sug_result.get("error"):
-                await tracker.fail(f"项目分析失败: {sug_result['error']}")
-                return
-            project_info = sug_result.get("json") or {}
+        ).scalar_one_or_none()
+        if not bk or not bk.raw_text:
+            await tracker.fail("书籍不存在或正文为空")
+            return
 
-            # 3. 建项目
-            genre = project_info.get("genre") or ""
-            synopsis = project_info.get("description") or project_info.get("synopsis") or ""
-            # 新书名兜底：若 AI 返回了和原书名一样/为空/只有文件名后缀，自动加「（改编版）」区分
-            new_title = (project_info.get("title") or "").strip()
-            orig_title = (bk.title or "").strip()
-            if not new_title or new_title == orig_title or new_title in orig_title or orig_title in new_title:
-                new_title = f"《{orig_title}》改编版"
-            new_proj = Project(
-                user_id=payload["user_id"],
-                title=new_title,
-                genre=genre,
-                synopsis=synopsis,
-                chapter_count=payload["outline_chapters"],
-                current_word_count=0,
-                target_word_count=project_info.get("target_words") or 0,
-                narrative_pov=project_info.get("narrative_perspective") or "第三人称",
-                target_platform=payload.get("target_platform", ""),
-                status="active",
-            )
-            task_db.add(new_proj)
-            await task_db.commit()
-            await task_db.refresh(new_proj)
-
-            # 4. 提取角色档案（均匀采样全书，避免只看开头漏掉后文出场的角色）
-            #    先于大纲生成，让大纲能复用已提取的角色名，避免大纲与角色各编一套名字
-            #    导致 validate_outline 补建第二套角色（总数膨胀）。
-            await tracker.update(stage="generating", message="提取角色档案...", progress=20)
-            from app.models.character import Character
+        # 重新拆解：若该书已生成过项目，先级联清理旧项目所有数据，避免残留
+        if bk.created_project_id:
+            await tracker.update(stage="preparing", message="清理上次拆解的旧项目...")
             try:
-                char_sample = _sample_chapters_evenly(chapters, 12)
-                if not char_sample.strip():
-                    logger.warning("拆书角色提取跳过：均匀采样正文为空（章节数=%d）", len(chapters))
-                else:
-                    import asyncio as _asyncio
-
-                    char_result = await _asyncio.wait_for(
-                        engine.execute_skill(
-                            "book_import_reverse_characters",
-                            ai_client,
-                            {
-                                "title": new_proj.title,
-                                "genre": genre or "网文",
-                                "synopsis": synopsis or "",
-                                "chapters_text": char_sample,
-                                "user_prompt": "请从以下正文中提取角色档案。",
-                            },
-                        ),
-                        timeout=660,  # 单步超时11分钟（略大于AI_TIMEOUT的10分钟，让httpx先超时）
-                    )
-                    if char_result.get("error"):
-                        logger.warning("拆书角色提取失败：%s", char_result["error"])
-                    else:
-                        char_data = char_result.get("json") or []
-                        if isinstance(char_data, dict):
-                            char_data = char_data.get("characters") or char_data.get("data") or []
-                        # 复用 init 的 _save_characters 统一保存，确保字段与正常 init 角色完全一致
-                        # （含多别名兜底、职业匹配、growth_experience/story_goal/weakness/arc_type 等完整字段）
-                        from app.api.routes.project_init import _save_characters
-
-                        MAX_CORE_CHARS = 8  # 只保留核心角色，边缘角色不入库（避免冗余）
-                        truncated = char_data[:MAX_CORE_CHARS]
-                        saved_names = set()
-                        await _save_characters(task_db, new_proj.id, truncated, saved_names)
-                        await task_db.commit()
-                        logger.info("拆书角色提取完成：新增 %d 个角色（复用 _save_characters）", len(saved_names))
+                await _cascade_delete_project(db, bk.created_project_id)
+                await db.commit()
+                bk.created_project_id = None
+                bk.status = "uploaded"
+                logger.info("已清理旧项目 %s，准备重新拆解", bk.created_project_id)
             except Exception as e:
-                logger.warning("拆书角色提取异常：%s", e)
+                logger.warning("清理旧项目异常（继续重新拆解）：%s", e)
 
-            # 收集已提取的角色名，供大纲生成复用（避免大纲另编一套角色名）
-            existing_char_list = (
-                (await task_db.execute(
-                    select(Character.name, Character.role).where(Character.project_id == new_proj.id)
-                )).all()
-            )
-            char_names_hint = "、".join(
-                f"{n}（{r or '角色'}）" for n, r in existing_char_list[:12]
-            ) if existing_char_list else ""
+        await tracker.update(stage="preparing", message="解析章节...")
+        chapters = parse_txt_file(bk.raw_text.encode("utf-8")).get("chapters", [])
+        if not chapters:
+            await tracker.fail("未识别到章节")
+            return
 
-            # 5. 拆大纲（按 5 章/批）
-            available = min(payload["outline_chapters"], len(chapters))
-            theme = project_info.get("theme") or ""
-            narrative_pov = project_info.get("narrative_perspective") or "第三人称"
-            batch_size = 5
-            total_batches = (available + batch_size - 1) // batch_size
-            created_outlines = 0
-            batches_done = 0
-            # 累积前序批次已生成的大纲摘要，让后续批次感知前情，保持剧情/角色连贯
-            prior_outlines_summary = ""
+        engine, ai_client = await make_engine_and_client(db, payload["user_id"])
 
-            for start_no in range(1, available + 1, batch_size):
-                # 检查取消
-                bk2 = (
-                    await task_db.execute(
-                        select(ImportedBook).where(ImportedBook.id == payload["book_id"])
-                    )
-                ).scalar_one_or_none()
-                batch_idx = (start_no - 1) // batch_size
-                await tracker.update(
-                    stage="generating",
-                    message=f"拆解大纲 第{start_no}-{min(start_no + batch_size - 1, available)}章（批次 {batch_idx + 1}/{total_batches}）",
-                    progress=int(batch_idx / total_batches * 100),
-                )
+        # 2. 立项采样（均匀采样全书前中后，和角色/世界观统一策略）
+        await tracker.update(stage="analyzing", message="AI 分析项目信息...")
+        sample_count = max(1, payload["sample_count"])
+        sampled_text = _sample_chapters_evenly(chapters, min(sample_count, len(chapters) or 1))
+        sug_result = await engine.execute_skill(
+            "book_import_reverse_project_suggestion",
+            ai_client,
+            {
+                "title": bk.title or "未知书名",
+                "sampled_text": sampled_text,
+                "target_platform": payload.get("target_platform", ""),
+                "user_prompt": (
+                    f"参考小说《{bk.title}》的正文，策划一本**全新的**小说立项。"
+                    f"新书名绝对不能是「{bk.title}」，也不能是它的变体（加后缀/改字）。"
+                    f"请取一个完全不同的新书名。"
+                ),
+            },
+        )
+        if sug_result.get("error"):
+            await tracker.fail(f"项目分析失败: {sug_result['error']}")
+            return
+        project_info = sug_result.get("json") or {}
 
-                end_no = min(start_no + batch_size - 1, available)
-                batch_chapters = chapters[start_no - 1 : end_no]
-                batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
-                if not batch_text.strip():
-                    continue
-                # 拼入前情提要（前序批次已生成的大纲），让本批保持连贯
-                if prior_outlines_summary:
-                    prior_block = (
-                        f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
-                        f"{prior_outlines_summary}\n\n"
-                    )
-                    continuity_hint = "本批接续前情，保持叙事连贯。"
-                else:
-                    prior_block = ""
-                    continuity_hint = ""
-                # 角色名约束：强制大纲复用已提取的角色名，不得另编新名（避免角色库与大纲各一套）
-                char_constraint = (
-                    f"【角色名约束】大纲 characters 字段必须只使用以下已建立的角色名：{char_names_hint}。"
-                    f"不得自创新角色名；如需新角色，先用已有配角承担。"
-                    if char_names_hint
-                    else ""
-                )
-                try:
-                    o_result = await engine.execute_skill(
-                        "book_import_reverse_outlines",
+        # 3. 建项目
+        genre = project_info.get("genre") or ""
+        synopsis = project_info.get("description") or project_info.get("synopsis") or ""
+        # 新书名兜底：若 AI 返回了和原书名一样/为空/只有文件名后缀，自动加「（改编版）」区分
+        new_title = (project_info.get("title") or "").strip()
+        orig_title = (bk.title or "").strip()
+        if not new_title or new_title == orig_title or new_title in orig_title or orig_title in new_title:
+            new_title = f"《{orig_title}》改编版"
+        new_proj = Project(
+            user_id=payload["user_id"],
+            title=new_title,
+            genre=genre,
+            synopsis=synopsis,
+            chapter_count=payload["outline_chapters"],
+            current_word_count=0,
+            target_word_count=project_info.get("target_words") or 0,
+            narrative_pov=project_info.get("narrative_perspective") or "第三人称",
+            target_platform=payload.get("target_platform", ""),
+            status="active",
+        )
+        db.add(new_proj)
+        await db.commit()
+        await db.refresh(new_proj)
+
+        # 4. 提取角色档案（均匀采样全书，避免只看开头漏掉后文出场的角色）
+        #    先于大纲生成，让大纲能复用已提取的角色名，避免大纲与角色各编一套名字
+        #    导致 validate_outline 补建第二套角色（总数膨胀）。
+        await tracker.update(stage="generating", message="提取角色档案...", progress=20)
+        from app.models.character import Character
+        try:
+            char_sample = _sample_chapters_evenly(chapters, 12)
+            if not char_sample.strip():
+                logger.warning("拆书角色提取跳过：均匀采样正文为空（章节数=%d）", len(chapters))
+            else:
+                import asyncio as _asyncio
+
+                char_result = await _asyncio.wait_for(
+                    engine.execute_skill(
+                        "book_import_reverse_characters",
                         ai_client,
                         {
                             "title": new_proj.title,
                             "genre": genre or "网文",
-                            "theme": theme,
-                            "narrative_perspective": narrative_pov,
-                            "target_platform": payload.get("target_platform", ""),
-                            "start_chapter": str(start_no),
-                            "end_chapter": str(end_no),
-                            "expected_count": str(end_no - start_no + 1),
-                            "chapters_text": batch_text,
-                            "user_prompt": (
-                                f"{prior_block}"
-                                f"{char_constraint}"
-                                f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。"
-                                f"{continuity_hint}"
-                            ),
+                            "synopsis": synopsis or "",
+                            "chapters_text": char_sample,
+                            "user_prompt": "请从以下正文中提取角色档案。",
                         },
-                    )
-                    if o_result.get("error"):
-                        logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
-                        continue
-                    outlines_data = o_result.get("json") or []
-                    if not isinstance(outlines_data, list):
-                        continue
-                    # 复用 _build_outline 统一构建，确保 characters/scenes 等字段格式
-                    # 与正常 init 大纲一致（清洗角色/组织、过滤空场景、规范章号）
-                    from app.api.routes.projects_pkg.outlines import _build_outline
+                    ),
+                    timeout=660,  # 单步超时11分钟（略大于AI_TIMEOUT的10分钟，让httpx先超时）
+                )
+                if char_result.get("error"):
+                    logger.warning("拆书角色提取失败：%s", char_result["error"])
+                else:
+                    char_data = char_result.get("json") or []
+                    if isinstance(char_data, dict):
+                        char_data = char_data.get("characters") or char_data.get("data") or []
+                    # 复用 init 的 _save_characters 统一保存，确保字段与正常 init 角色完全一致
+                    # （含多别名兜底、职业匹配、growth_experience/story_goal/weakness/arc_type 等完整字段）
+                    from app.api.routes.project_init import _save_characters
 
-                    # 收集已建角色名/组织名，传给 _build_outline 做角色/组织区分校正
-                    from app.models.organization import Organization
+                    MAX_CORE_CHARS = 8  # 只保留核心角色，边缘角色不入库（避免冗余）
+                    truncated = char_data[:MAX_CORE_CHARS]
+                    saved_names = set()
+                    await _save_characters(db, new_proj.id, truncated, saved_names)
+                    await db.commit()
+                    logger.info("拆书角色提取完成：新增 %d 个角色（复用 _save_characters）", len(saved_names))
+        except Exception as e:
+            logger.warning("拆书角色提取异常：%s", e)
 
-                    char_name_set = {
-                        n for n in (
-                            await task_db.execute(
-                                select(Character.name).where(Character.project_id == new_proj.id)
-                            )
-                        ).scalars()
-                    }
-                    org_name_set = {
-                        n for n in (
-                            await task_db.execute(
-                                select(Organization.name).where(
-                                    Organization.project_id == new_proj.id
-                                )
-                            )
-                        ).scalars()
-                    }
+        # 收集已提取的角色名，供大纲生成复用（避免大纲另编一套角色名）
+        existing_char_list = (
+            (await db.execute(
+                select(Character.name, Character.role).where(Character.project_id == new_proj.id)
+            )).all()
+        )
+        char_names_hint = "、".join(
+            f"{n}（{r or '角色'}）" for n, r in existing_char_list[:12]
+        ) if existing_char_list else ""
 
-                    batch_summary_parts = []
-                    created_outline_objs = []
-                    for idx, item in enumerate(outlines_data):
-                        if not isinstance(item, dict):
-                            continue
-                        o = _build_outline(
-                            new_proj.id, item, offset=0, index=idx,
-                            char_names=char_name_set, org_names=org_name_set,
-                        )
-                        # chapter_number 以 AI 返回为准，兜底用批次起始章号
-                        ch_num = item.get("chapter_number")
-                        if not isinstance(ch_num, int) or ch_num < 1:
-                            ch_num = start_no + idx
-                        o.chapter_number = ch_num
-                        task_db.add(o)
-                        created_outline_objs.append(o)
-                        created_outlines += 1
-                        # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
-                        ch_title = str(item.get("title", ""))[:30]
-                        ch_summary = str(item.get("summary", ""))[:80]
-                        batch_summary_parts.append(f"第{ch_num}章《{ch_title}》：{ch_summary}")
+        # 5. 拆大纲（按 5 章/批）
+        available = min(payload["outline_chapters"], len(chapters))
+        theme = project_info.get("theme") or ""
+        narrative_pov = project_info.get("narrative_perspective") or "第三人称"
+        batch_size = 5
+        total_batches = (available + batch_size - 1) // batch_size
+        created_outlines = 0
+        batches_done = 0
+        # 累积前序批次已生成的大纲摘要，让后续批次感知前情，保持剧情/角色连贯
+        prior_outlines_summary = ""
 
-                    # flush 让大纲对象拿到 id，供后续章节引用
-                    if created_outline_objs:
-                        await task_db.flush()
-                        # 与正常 init 一致：1对1模式自动为每条大纲创建对应空章节
-                        from app.models.chapter import Chapter
+        for start_no in range(1, available + 1, batch_size):
+            # 检查取消
+            bk2 = (
+                await db.execute(
+                    select(ImportedBook).where(ImportedBook.id == payload["book_id"])
+                )
+            ).scalar_one_or_none()
+            batch_idx = (start_no - 1) // batch_size
+            await tracker.update(
+                stage="generating",
+                message=f"拆解大纲 第{start_no}-{min(start_no + batch_size - 1, available)}章（批次 {batch_idx + 1}/{total_batches}）",
+                progress=int(batch_idx / total_batches * 100),
+            )
 
-                        for o in created_outline_objs:
-                            existing_ch = (
-                                (
-                                    await task_db.execute(
-                                        select(Chapter).where(
-                                            Chapter.project_id == new_proj.id,
-                                            Chapter.chapter_number == o.chapter_number,
-                                        )
-                                    )
-                                )
-                                .scalars()
-                                .first()
-                            )
-                            if existing_ch:
-                                continue
-                            ch = Chapter(
-                                project_id=new_proj.id,
-                                chapter_number=o.chapter_number,
-                                title=o.title,
-                                summary=o.summary[:200] if o.summary else "",
-                                status="draft",
-                                sub_index=1,
-                                generation_mode="one_to_one",
-                            )
-                            task_db.add(ch)
-                    # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
-                    if batch_summary_parts:
-                        prior_outlines_summary = "\n".join(batch_summary_parts)
-                        # 若累积过长，只保留最近的若干章
-                        lines = prior_outlines_summary.split("\n")
-                        if len(lines) > 10:
-                            prior_outlines_summary = "（更早章节略）\n" + "\n".join(lines[-10:])
-                    batches_done += 1
-                    await task_db.commit()
-                except Exception as e:
-                    logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
-                    continue
-
-            # 5. 提取世界观设定（均匀采样全书，覆盖中后期才展开的世界观）
-            await tracker.update(stage="generating", message="提取世界观设定...", progress=80)
+            end_no = min(start_no + batch_size - 1, available)
+            batch_chapters = chapters[start_no - 1 : end_no]
+            batch_text = _sample_chapters_text(batch_chapters, "head", len(batch_chapters))
+            if not batch_text.strip():
+                continue
+            # 拼入前情提要（前序批次已生成的大纲），让本批保持连贯
+            if prior_outlines_summary:
+                prior_block = (
+                    f"【前情提要——前序章节已生成的大纲，请保持剧情/角色/伏笔连贯，不要断裂或重复】\n"
+                    f"{prior_outlines_summary}\n\n"
+                )
+                continuity_hint = "本批接续前情，保持叙事连贯。"
+            else:
+                prior_block = ""
+                continuity_hint = ""
+            # 角色名约束：强制大纲复用已提取的角色名，不得另编新名（避免角色库与大纲各一套）
+            char_constraint = (
+                f"【角色名约束】大纲 characters 字段必须只使用以下已建立的角色名：{char_names_hint}。"
+                f"不得自创新角色名；如需新角色，先用已有配角承担。"
+                if char_names_hint
+                else ""
+            )
             try:
-                world_sample = _sample_chapters_evenly(chapters, 12)
-                world_result = await engine.execute_skill(
-                    "book_import_reverse_world",
+                o_result = await engine.execute_skill(
+                    "book_import_reverse_outlines",
                     ai_client,
                     {
                         "title": new_proj.title,
                         "genre": genre or "网文",
-                        "synopsis": synopsis or "",
-                        "chapters_text": world_sample,
-                        "user_prompt": "请从以下正文中提取世界观设定。",
+                        "theme": theme,
+                        "narrative_perspective": narrative_pov,
+                        "target_platform": payload.get("target_platform", ""),
+                        "start_chapter": str(start_no),
+                        "end_chapter": str(end_no),
+                        "expected_count": str(end_no - start_no + 1),
+                        "chapters_text": batch_text,
+                        "user_prompt": (
+                            f"{prior_block}"
+                            f"{char_constraint}"
+                            f"请从以下章节文本中反向生成第{start_no}到{end_no}章的大纲。"
+                            f"{continuity_hint}"
+                        ),
                     },
                 )
-                if world_result.get("error"):
-                    logger.warning("拆书世界观提取失败：%s", world_result["error"])
-                else:
-                    wd = world_result.get("json") or {}
-                    if isinstance(wd, dict):
-                        if wd.get("world_time_period"):
-                            new_proj.world_time_period = wd["world_time_period"][:500]
-                        if wd.get("world_location"):
-                            new_proj.world_location = wd["world_location"][:500]
-                        if wd.get("world_atmosphere"):
-                            new_proj.world_atmosphere = wd["world_atmosphere"][:500]
-                        if wd.get("world_rules"):
-                            new_proj.world_rules = wd["world_rules"][:1000]
-                        await task_db.commit()
-                        logger.info("拆书世界观提取完成")
-            except Exception as e:
-                logger.warning("拆书世界观提取异常：%s", e)
+                if o_result.get("error"):
+                    logger.warning("拆书大纲批次 %s-%s 失败：%s", start_no, end_no, o_result["error"])
+                    continue
+                outlines_data = o_result.get("json") or []
+                if not isinstance(outlines_data, list):
+                    continue
+                # 复用 _build_outline 统一构建，确保 characters/scenes 等字段格式
+                # 与正常 init 大纲一致（清洗角色/组织、过滤空场景、规范章号）
+                from app.api.routes.projects_pkg.outlines import _build_outline
 
-            # 7. 补齐设定：复用项目初始化步骤，补全拆书未覆盖的模块。
-            # 拆书已完成「角色 / 大纲 / 核心世界观」，这里补：
-            # 详细世界设定 → 职业体系 → 地点 → 物品 → 组织势力 → 角色关系 → 大纲验证补全。
-            # 补生成以已拆出的 proj/角色/世界观为上下文（init 步骤 prompt 用 _build_world_info + 查库角色）。
-            from types import SimpleNamespace
+                # 收集已建角色名/组织名，传给 _build_outline 做角色/组织区分校正
+                from app.models.organization import Organization
 
-            from app.api.routes.project_init import (
-                _generate_world_details,
-                _step_career,
-                _step_items,
-                _step_locations,
-                _step_org,
-                _step_relations,
-                _step_validate_outline,
-            )
-
-            # init 步骤签名是 (db, task, pid, proj, engine, ai_client)，会写 task 的 *_done/progress/status_message 并 commit。
-            # 拆书用的是 BackgroundTask，没有这些字段；用 SimpleNamespace 提供 duck-type 兼容对象，
-            # 它不是 ORM 映射对象，commit 不会把它持久化，无副作用。
-            mock_task = SimpleNamespace(
-                progress=0,
-                status_message="",
-                world_done=0,
-                career_done=0,
-                org_done=0,
-                characters_done=0,
-                assign_careers_done=0,
-                relations_done=0,
-                assign_org_members_done=0,
-                locations_done=0,
-                items_done=0,
-                outline_done=0,
-                validate_done=0,
-            )
-
-            # 均匀采样全书正文，只喂给「最依赖原书细节」的步骤（组织、角色关系），
-            # 减少与原书的气质断层。其余步骤（详细设定/职业/地点/物品）的题材已被
-            # 核心世界观四字段 + 已拆角色锁死，喂正文边际收益低却浪费 token，故不喂。
-            _source_text = _sample_chapters_evenly(chapters, 8)
-
-            # 各补齐步骤的 (label, 可调用)。单步失败仅告警并继续，不影响已生成内容。
-            async def _run_fill_step(label, coro_factory):
-                await tracker.update(stage="generating", message=label)
-                try:
-                    await coro_factory()
-                except Exception as e:
-                    logger.warning("拆书补齐[%s]异常：%s", label, e)
-
-            # 详细设定/职业/地点/物品：不喂正文（题材已被已拆结果锁定，省 token）
-            await _run_fill_step(
-                "生成详细世界设定...",
-                lambda: _generate_world_details(task_db, new_proj.id, new_proj, engine, ai_client),
-            )
-            await _run_fill_step(
-                "生成职业体系...",
-                lambda: _step_career(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
-            )
-            await _run_fill_step(
-                "生成地点地图...",
-                lambda: _step_locations(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
-            )
-            await _run_fill_step(
-                "生成物品道具...",
-                lambda: _step_items(task_db, mock_task, new_proj.id, new_proj, engine, ai_client),
-            )
-            # 组织/关系：最依赖原书人际与势力细节，喂入正文采样，让 AI 据此改编
-            await _run_fill_step(
-                "生成组织势力...",
-                lambda: _step_org(
-                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
-                    source_text=_source_text,
-                ),
-            )
-            await _run_fill_step(
-                "生成角色关系...",
-                lambda: _step_relations(
-                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client,
-                    source_text=_source_text,
-                ),
-            )
-            await _run_fill_step(
-                "验证并补全大纲...",
-                lambda: _step_validate_outline(
-                    task_db, mock_task, new_proj.id, new_proj, engine, ai_client
-                ),
-            )
-
-            # 兜底：扫描所有没有对应章节的大纲，补建缺失的空章节（确保用户在章节页
-            # 不会看到多余的"从大纲创建"按钮——拆书模式下章节应已全部自动建好）
-            try:
-                from app.models.chapter import Chapter
-
-                all_outlines = (
-                    await task_db.execute(
-                        select(Outline).where(Outline.project_id == new_proj.id)
-                    )
-                ).scalars().all()
-                existing_ch_nums = set(
-                    (
-                        await task_db.execute(
-                            select(Chapter.chapter_number).where(
-                                Chapter.project_id == new_proj.id
+                char_name_set = {
+                    n for n in (
+                        await db.execute(
+                            select(Character.name).where(Character.project_id == new_proj.id)
+                        )
+                    ).scalars()
+                }
+                org_name_set = {
+                    n for n in (
+                        await db.execute(
+                            select(Organization.name).where(
+                                Organization.project_id == new_proj.id
                             )
                         )
                     ).scalars()
-                )
-                missing = [o for o in all_outlines if o.chapter_number not in existing_ch_nums]
-                for o in missing:
-                    task_db.add(
-                        Chapter(
+                }
+
+                batch_summary_parts = []
+                created_outline_objs = []
+                for idx, item in enumerate(outlines_data):
+                    if not isinstance(item, dict):
+                        continue
+                    o = _build_outline(
+                        new_proj.id, item, offset=0, index=idx,
+                        char_names=char_name_set, org_names=org_name_set,
+                    )
+                    # chapter_number 以 AI 返回为准，兜底用批次起始章号
+                    ch_num = item.get("chapter_number")
+                    if not isinstance(ch_num, int) or ch_num < 1:
+                        ch_num = start_no + idx
+                    o.chapter_number = ch_num
+                    db.add(o)
+                    created_outline_objs.append(o)
+                    created_outlines += 1
+                    # 累积本批大纲的精简摘要（章号+标题+summary前80字），供下一批参考
+                    ch_title = str(item.get("title", ""))[:30]
+                    ch_summary = str(item.get("summary", ""))[:80]
+                    batch_summary_parts.append(f"第{ch_num}章《{ch_title}》：{ch_summary}")
+
+                # flush 让大纲对象拿到 id，供后续章节引用
+                if created_outline_objs:
+                    await db.flush()
+                    # 与正常 init 一致：1对1模式自动为每条大纲创建对应空章节
+                    from app.models.chapter import Chapter
+
+                    for o in created_outline_objs:
+                        existing_ch = (
+                            (
+                                await db.execute(
+                                    select(Chapter).where(
+                                        Chapter.project_id == new_proj.id,
+                                        Chapter.chapter_number == o.chapter_number,
+                                    )
+                                )
+                            )
+                            .scalars()
+                            .first()
+                        )
+                        if existing_ch:
+                            continue
+                        ch = Chapter(
                             project_id=new_proj.id,
                             chapter_number=o.chapter_number,
                             title=o.title,
@@ -1343,53 +1177,218 @@ async def book_import_deconstruct(
                             sub_index=1,
                             generation_mode="one_to_one",
                         )
-                    )
-                if missing:
-                    await task_db.commit()
-                    logger.info("拆书兜底补建 %d 个空章节", len(missing))
+                        db.add(ch)
+                # 更新前情摘要（控制总长度，避免 token 爆炸——最多保留最近 10 章摘要）
+                if batch_summary_parts:
+                    prior_outlines_summary = "\n".join(batch_summary_parts)
+                    # 若累积过长，只保留最近的若干章
+                    lines = prior_outlines_summary.split("\n")
+                    if len(lines) > 10:
+                        prior_outlines_summary = "（更早章节略）\n" + "\n".join(lines[-10:])
+                batches_done += 1
+                await db.commit()
             except Exception as e:
-                logger.warning("拆书兜底补建章节异常：%s", e)
+                logger.warning("拆书大纲批次 %s-%s 异常：%s", start_no, end_no, e)
+                continue
 
-            # 8. 一致性自查（轻量 agent）：用工具查实体，发现矛盾并自动修复
-            await tracker.update(stage="generating", message="设定一致性自查...", progress=95)
-            try:
-                from app.services.chapter_tools import get_chapter_tools, make_tool_executor
-
-                check_result = await engine.execute_skill(
-                    "book_import_consistency_check",
-                    ai_client,
-                    {
-                        "title": new_proj.title,
-                        "genre": genre or "网文",
-                        "synopsis": synopsis or "",
-                        "world_info": _build_world_info_for_proj(new_proj),
-                        "user_prompt": "请用工具自查项目设定一致性，找出矛盾并给出修复指令。",
-                    },
-                    tools=get_chapter_tools(),
-                    tool_executor=make_tool_executor(task_db, new_proj.id),
-                )
-                if check_result.get("error"):
-                    logger.warning("拆书一致性自查失败：%s", check_result["error"])
-                else:
-                    fixed = await _apply_consistency_fixes(
-                        task_db, new_proj.id, check_result.get("json") or {}
-                    )
-                    if fixed:
-                        logger.info("拆书一致性自查修复 %d 处", fixed)
-                        await tracker.update(
-                            stage="generating", message=f"一致性自查完成（自动修复 {fixed} 处）"
-                        )
-            except Exception as e:
-                logger.warning("拆书一致性自查异常：%s", e)
-
-            # 9. 回填
-            bk.status = "project_created"
-            bk.created_project_id = new_proj.id
-            await task_db.commit()
-
-            await tracker.complete(
-                message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观 + 详细设定/职业/地点/物品/组织/关系 + 一致性自查"
+        # 5. 提取世界观设定（均匀采样全书，覆盖中后期才展开的世界观）
+        await tracker.update(stage="generating", message="提取世界观设定...", progress=80)
+        try:
+            world_sample = _sample_chapters_evenly(chapters, 12)
+            world_result = await engine.execute_skill(
+                "book_import_reverse_world",
+                ai_client,
+                {
+                    "title": new_proj.title,
+                    "genre": genre or "网文",
+                    "synopsis": synopsis or "",
+                    "chapters_text": world_sample,
+                    "user_prompt": "请从以下正文中提取世界观设定。",
+                },
             )
+            if world_result.get("error"):
+                logger.warning("拆书世界观提取失败：%s", world_result["error"])
+            else:
+                wd = world_result.get("json") or {}
+                if isinstance(wd, dict):
+                    if wd.get("world_time_period"):
+                        new_proj.world_time_period = wd["world_time_period"][:500]
+                    if wd.get("world_location"):
+                        new_proj.world_location = wd["world_location"][:500]
+                    if wd.get("world_atmosphere"):
+                        new_proj.world_atmosphere = wd["world_atmosphere"][:500]
+                    if wd.get("world_rules"):
+                        new_proj.world_rules = wd["world_rules"][:1000]
+                    await db.commit()
+                    logger.info("拆书世界观提取完成")
+        except Exception as e:
+            logger.warning("拆书世界观提取异常：%s", e)
+
+        # 7. 补齐设定：复用项目初始化步骤，补全拆书未覆盖的模块。
+        # 拆书已完成「角色 / 大纲 / 核心世界观」，这里补：
+        # 详细世界设定 → 职业体系 → 地点 → 物品 → 组织势力 → 角色关系 → 大纲验证补全。
+        # 补生成以已拆出的 proj/角色/世界观为上下文（init 步骤 prompt 用 _build_world_info + 查库角色）。
+        from types import SimpleNamespace
+
+        from app.api.routes.project_init import (
+            _generate_world_details,
+            _step_career,
+            _step_items,
+            _step_locations,
+            _step_org,
+            _step_relations,
+            _step_validate_outline,
+        )
+
+        # init 步骤签名是 (db, task, pid, proj, engine, ai_client)，会写 task 的 *_done/progress/status_message 并 commit。
+        # 拆书用的是 BackgroundTask，没有这些字段；用 SimpleNamespace 提供 duck-type 兼容对象，
+        # 它不是 ORM 映射对象，commit 不会把它持久化，无副作用。
+        mock_task = SimpleNamespace(
+            progress=0,
+            status_message="",
+            world_done=0,
+            career_done=0,
+            org_done=0,
+            characters_done=0,
+            assign_careers_done=0,
+            relations_done=0,
+            assign_org_members_done=0,
+            locations_done=0,
+            items_done=0,
+            outline_done=0,
+            validate_done=0,
+        )
+
+        # 均匀采样全书正文，只喂给「最依赖原书细节」的步骤（组织、角色关系），
+        # 减少与原书的气质断层。其余步骤（详细设定/职业/地点/物品）的题材已被
+        # 核心世界观四字段 + 已拆角色锁死，喂正文边际收益低却浪费 token，故不喂。
+        _source_text = _sample_chapters_evenly(chapters, 8)
+
+        # 各补齐步骤的 (label, 可调用)。单步失败仅告警并继续，不影响已生成内容。
+        async def _run_fill_step(label, coro_factory):
+            await tracker.update(stage="generating", message=label)
+            try:
+                await coro_factory()
+            except Exception as e:
+                logger.warning("拆书补齐[%s]异常：%s", label, e)
+
+        # 详细设定/职业/地点/物品：不喂正文（题材已被已拆结果锁定，省 token）
+        await _run_fill_step(
+            "生成详细世界设定...",
+            lambda: _generate_world_details(db, new_proj.id, new_proj, engine, ai_client),
+        )
+        await _run_fill_step(
+            "生成职业体系...",
+            lambda: _step_career(db, mock_task, new_proj.id, new_proj, engine, ai_client),
+        )
+        await _run_fill_step(
+            "生成地点地图...",
+            lambda: _step_locations(db, mock_task, new_proj.id, new_proj, engine, ai_client),
+        )
+        await _run_fill_step(
+            "生成物品道具...",
+            lambda: _step_items(db, mock_task, new_proj.id, new_proj, engine, ai_client),
+        )
+        # 组织/关系：最依赖原书人际与势力细节，喂入正文采样，让 AI 据此改编
+        await _run_fill_step(
+            "生成组织势力...",
+            lambda: _step_org(
+                db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                source_text=_source_text,
+            ),
+        )
+        await _run_fill_step(
+            "生成角色关系...",
+            lambda: _step_relations(
+                db, mock_task, new_proj.id, new_proj, engine, ai_client,
+                source_text=_source_text,
+            ),
+        )
+        await _run_fill_step(
+            "验证并补全大纲...",
+            lambda: _step_validate_outline(
+                db, mock_task, new_proj.id, new_proj, engine, ai_client
+            ),
+        )
+
+        # 兜底：扫描所有没有对应章节的大纲，补建缺失的空章节（确保用户在章节页
+        # 不会看到多余的"从大纲创建"按钮——拆书模式下章节应已全部自动建好）
+        try:
+            from app.models.chapter import Chapter
+
+            all_outlines = (
+                await db.execute(
+                    select(Outline).where(Outline.project_id == new_proj.id)
+                )
+            ).scalars().all()
+            existing_ch_nums = set(
+                (
+                    await db.execute(
+                        select(Chapter.chapter_number).where(
+                            Chapter.project_id == new_proj.id
+                        )
+                    )
+                ).scalars()
+            )
+            missing = [o for o in all_outlines if o.chapter_number not in existing_ch_nums]
+            for o in missing:
+                db.add(
+                    Chapter(
+                        project_id=new_proj.id,
+                        chapter_number=o.chapter_number,
+                        title=o.title,
+                        summary=o.summary[:200] if o.summary else "",
+                        status="draft",
+                        sub_index=1,
+                        generation_mode="one_to_one",
+                    )
+                )
+            if missing:
+                await db.commit()
+                logger.info("拆书兜底补建 %d 个空章节", len(missing))
+        except Exception as e:
+            logger.warning("拆书兜底补建章节异常：%s", e)
+
+        # 8. 一致性自查（轻量 agent）：用工具查实体，发现矛盾并自动修复
+        await tracker.update(stage="generating", message="设定一致性自查...", progress=95)
+        try:
+            from app.services.chapter_tools import get_chapter_tools, make_tool_executor
+
+            check_result = await engine.execute_skill(
+                "book_import_consistency_check",
+                ai_client,
+                {
+                    "title": new_proj.title,
+                    "genre": genre or "网文",
+                    "synopsis": synopsis or "",
+                    "world_info": _build_world_info_for_proj(new_proj),
+                    "user_prompt": "请用工具自查项目设定一致性，找出矛盾并给出修复指令。",
+                },
+                tools=get_chapter_tools(),
+                tool_executor=make_tool_executor(db, new_proj.id),
+            )
+            if check_result.get("error"):
+                logger.warning("拆书一致性自查失败：%s", check_result["error"])
+            else:
+                fixed = await _apply_consistency_fixes(
+                    db, new_proj.id, check_result.get("json") or {}
+                )
+                if fixed:
+                    logger.info("拆书一致性自查修复 %d 处", fixed)
+                    await tracker.update(
+                        stage="generating", message=f"一致性自查完成（自动修复 {fixed} 处）"
+                    )
+        except Exception as e:
+            logger.warning("拆书一致性自查异常：%s", e)
+
+        # 9. 回填
+        bk.status = "project_created"
+        bk.created_project_id = new_proj.id
+        await db.commit()
+
+        await tracker.complete(
+            message=f"拆解完成：项目《{new_proj.title}》，{created_outlines} 条大纲 + 角色 + 世界观 + 详细设定/职业/地点/物品/组织/关系 + 一致性自查"
+        )
 
     task_id = await submit_async_task(
         user_id=user.id,

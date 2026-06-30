@@ -310,29 +310,28 @@ async def generate_chapter_async(
         except Exception:
             pass
 
-    async def _run_chapter(task_id: int, payload: dict):
+    async def _run_chapter(task_id: int, payload: dict, db: AsyncSession):
         from app.services import background_task_service as bgs
 
-        tracker = bgs.TaskProgressTracker(task_id)
+        tracker = bgs.TaskProgressTracker(task_id, db=db)
         await tracker.update(
             stage="preparing", message=f"准备生成第{payload['chapter_number']}章..."
         )
-        async with async_session() as task_db:
-            service = ChapterService(task_db, payload["project_id"], payload["user_id"])
-            await tracker.update(
-                stage="generating", message=f"AI 正在生成第{payload['chapter_number']}章..."
-            )
-            result = await service.generate_chapter(
-                payload["chapter_id"], overrides=payload.get("overrides")
-            )
-            if result.get("error"):
-                await tracker.fail(result["error"])
-                return
-            await _refresh_project_word_count(task_db, payload["project_id"])
-            await tracker.complete(
-                result=result,
-                message=f"第{payload['chapter_number']}章生成完成（{result.get('word_count', 0)}字）",
-            )
+        service = ChapterService(db, payload["project_id"], payload["user_id"])
+        await tracker.update(
+            stage="generating", message=f"AI 正在生成第{payload['chapter_number']}章..."
+        )
+        result = await service.generate_chapter(
+            payload["chapter_id"], overrides=payload.get("overrides")
+        )
+        if result.get("error"):
+            await tracker.fail(result["error"])
+            return
+        await _refresh_project_word_count(db, payload["project_id"])
+        await tracker.complete(
+            result=result,
+            message=f"第{payload['chapter_number']}章生成完成（{result.get('word_count', 0)}字）",
+        )
 
     task_id = await submit_async_task(
         user_id=user.id,
@@ -467,67 +466,66 @@ async def _get_latest_analyze_task(db: AsyncSession, chapter_id: int) -> Optiona
     return None
 
 
-async def _run_chapter_analysis(task_id: int, payload: dict):
-    """分析任务后台执行协程（独立 session）。
+async def _run_chapter_analysis(task_id: int, payload: dict, db: AsyncSession):
+    """分析任务后台执行协程（共享 session）。
 
     复用 ChapterService._auto_analyze，通过 on_progress 回调上报进度到 BackgroundTask。
     """
-    tracker = bg_service.TaskProgressTracker(task_id)
+    tracker = bg_service.TaskProgressTracker(task_id, db=db)
 
     async def on_progress(progress: int, message: str):
         await tracker.update(progress=progress, message=message)
 
-    async with async_session() as task_db:
-        chapter_id = payload["chapter_id"]
-        project_id = payload["project_id"]
-        user_id = payload["user_id"]
-        # 重新校验权限（后台独立 session）
-        proj = (
-            await task_db.execute(select(Project).where(Project.id == project_id))
-        ).scalar_one_or_none()
-        if not proj or proj.user_id != user_id:
-            await tracker.fail("项目不存在或无权访问")
-            return
+    chapter_id = payload["chapter_id"]
+    project_id = payload["project_id"]
+    user_id = payload["user_id"]
+    # 重新校验权限（后台共享 session）
+    proj = (
+        await db.execute(select(Project).where(Project.id == project_id))
+    ).scalar_one_or_none()
+    if not proj or proj.user_id != user_id:
+        await tracker.fail("项目不存在或无权访问")
+        return
 
-        c = (
-            await task_db.execute(
-                select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
-            )
-        ).scalar_one_or_none()
-        if not c:
-            await tracker.fail("章节不存在")
-            return
-        if not c.content or len(c.content.strip()) < 50:
-            await tracker.fail("章节内容过少，无法分析")
-            return
-
-        # 删除旧分析（避免重复）
-        old_analyses = (
-            (
-                await task_db.execute(
-                    select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
-                )
-            )
-            .scalars()
-            .all()
+    c = (
+        await db.execute(
+            select(Chapter).where(Chapter.id == chapter_id, Chapter.project_id == project_id)
         )
-        for old in old_analyses:
-            await task_db.delete(old)
-        await task_db.commit()
+    ).scalar_one_or_none()
+    if not c:
+        await tracker.fail("章节不存在")
+        return
+    if not c.content or len(c.content.strip()) < 50:
+        await tracker.fail("章节内容过少，无法分析")
+        return
 
-        await tracker.update(
-            stage="analyzing", progress=3, message=f"正在分析第{c.chapter_number}章..."
-        )
-
-        service = ChapterService(task_db, project_id, user_id)
-        try:
-            await service._auto_analyze(c, on_progress=on_progress)
-            await tracker.complete(
-                result={"chapter_id": chapter_id, "chapter_number": c.chapter_number},
-                message=f"第{c.chapter_number}章分析完成",
+    # 删除旧分析（避免重复）
+    old_analyses = (
+        (
+            await db.execute(
+                select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
             )
-        except Exception as e:
-            await tracker.fail(f"分析失败: {str(e)[:500]}")
+        )
+        .scalars()
+        .all()
+    )
+    for old in old_analyses:
+        await db.delete(old)
+    await db.commit()
+
+    await tracker.update(
+        stage="analyzing", progress=3, message=f"正在分析第{c.chapter_number}章..."
+    )
+
+    service = ChapterService(db, project_id, user_id)
+    try:
+        await service._auto_analyze(c, on_progress=on_progress)
+        await tracker.complete(
+            result={"chapter_id": chapter_id, "chapter_number": c.chapter_number},
+            message=f"第{c.chapter_number}章分析完成",
+        )
+    except Exception as e:
+        await tracker.fail(f"分析失败: {str(e)[:500]}")
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/analyze")
@@ -652,59 +650,58 @@ async def get_analysis_status(
     }
 
 
-async def _run_batch_analysis(task_id: int, payload: dict):
+async def _run_batch_analysis(task_id: int, payload: dict, db: AsyncSession):
     """批量分析后台执行协程：逐章串行分析，逐章上报进度。"""
-    tracker = bg_service.TaskProgressTracker(task_id)
+    tracker = bg_service.TaskProgressTracker(task_id, db=db)
     project_id = payload["project_id"]
     user_id = payload["user_id"]
     chapter_ids: list[int] = payload.get("chapter_ids", [])
 
-    async with async_session() as task_db:
-        service = ChapterService(task_db, project_id, user_id)
-        total = len(chapter_ids)
-        completed = 0
-        failed = []
-        for i, chapter_id in enumerate(chapter_ids):
-            if await tracker.is_cancelled():
-                await tracker.update(message="批量分析已取消")
-                return
-            c = (
-                await task_db.execute(
-                    select(Chapter).where(
-                        Chapter.id == chapter_id, Chapter.project_id == project_id
-                    )
+    service = ChapterService(db, project_id, user_id)
+    total = len(chapter_ids)
+    completed = 0
+    failed = []
+    for i, chapter_id in enumerate(chapter_ids):
+        if await tracker.is_cancelled():
+            await tracker.update(message="批量分析已取消")
+            return
+        c = (
+            await db.execute(
+                select(Chapter).where(
+                    Chapter.id == chapter_id, Chapter.project_id == project_id
                 )
-            ).scalar_one_or_none()
-            if not c:
-                continue
-            await tracker.update(
-                progress=int(5 + (i / max(total, 1)) * 90),
-                message=f"正在分析第{c.chapter_number}章（{i + 1}/{total}）...",
             )
-            try:
-                # 删除旧分析
-                olds = (
-                    (
-                        await task_db.execute(
-                            select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                for o in olds:
-                    await task_db.delete(o)
-                await task_db.commit()
-                await service._auto_analyze(c)
-                completed += 1
-            except Exception as e:
-                failed.append({"chapter_number": c.chapter_number, "error": str(e)[:200]})
-
-        await tracker.complete(
-            result={"analyzed": completed, "failed": failed, "total": total},
-            message=f"批量分析完成：成功 {completed} 章"
-            + (f"，失败 {len(failed)} 章" if failed else ""),
+        ).scalar_one_or_none()
+        if not c:
+            continue
+        await tracker.update(
+            progress=int(5 + (i / max(total, 1)) * 90),
+            message=f"正在分析第{c.chapter_number}章（{i + 1}/{total}）...",
         )
+        try:
+            # 删除旧分析
+            olds = (
+                (
+                    await db.execute(
+                        select(PlotAnalysis).where(PlotAnalysis.chapter_id == chapter_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for o in olds:
+                await db.delete(o)
+            await db.commit()
+            await service._auto_analyze(c)
+            completed += 1
+        except Exception as e:
+            failed.append({"chapter_number": c.chapter_number, "error": str(e)[:200]})
+
+    await tracker.complete(
+        result={"analyzed": completed, "failed": failed, "total": total},
+        message=f"批量分析完成：成功 {completed} 章"
+        + (f"，失败 {len(failed)} 章" if failed else ""),
+    )
 
 
 @router.post("/{project_id}/chapters/analyze-all")

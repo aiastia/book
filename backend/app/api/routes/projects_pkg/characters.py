@@ -706,28 +706,27 @@ async def batch_generate_characters_async(
 
     from app.services.async_ai_service import submit_async_task
 
-    async def _run_chars(task_id: int, payload: dict):
+    async def _run_chars(task_id: int, payload: dict, db: AsyncSession):
         from app.services import background_task_service as bgs
 
-        tracker = bgs.TaskProgressTracker(task_id)
+        tracker = bgs.TaskProgressTracker(task_id, db=db)
         await tracker.update(stage="preparing", message="准备生成角色...")
         # 复用同步逻辑（调用 MockReq）
-        async with async_session() as task_db:
 
-            class MockReq:
-                count = payload["count"]
-                requirements = payload.get("requirements", "")
+        class MockReq:
+            count = payload["count"]
+            requirements = payload.get("requirements", "")
 
-            result = await batch_generate_characters(
-                payload["project_id"],
-                MockReq(),
-                task_db,
-                type("U", (), {"id": payload["user_id"]})(),
-            )
-            if isinstance(result, dict) and result.get("count", 0) > 0:
-                await tracker.complete(message=f"生成完成（{result['count']}个角色）")
-            else:
-                await tracker.fail("角色生成失败")
+        result = await batch_generate_characters(
+            payload["project_id"],
+            MockReq(),
+            db,
+            type("U", (), {"id": payload["user_id"]})(),
+        )
+        if isinstance(result, dict) and result.get("count", 0) > 0:
+            await tracker.complete(message=f"生成完成（{result['count']}个角色）")
+        else:
+            await tracker.fail("角色生成失败")
 
     task_id = await submit_async_task(
         user_id=user.id,
@@ -912,27 +911,26 @@ async def auto_generate_character_async(
 
     from app.services.async_ai_service import submit_async_task
 
-    async def _run_auto_gen(task_id: int, payload: dict):
+    async def _run_auto_gen(task_id: int, payload: dict, db: AsyncSession):
         from app.services import background_task_service as bgs
 
-        tracker = bgs.TaskProgressTracker(task_id)
+        tracker = bgs.TaskProgressTracker(task_id, db=db)
         await tracker.update(stage="generating", message="AI 正在生成角色...")
-        async with async_session() as task_db:
 
-            class MockReq:
-                analysis_result = payload.get("analysis_result", {})
-                specification = payload.get("specification", "")
+        class MockReq:
+            analysis_result = payload.get("analysis_result", {})
+            specification = payload.get("specification", "")
 
-            result = await auto_generate_character(
-                payload["project_id"],
-                MockReq(),
-                task_db,
-                type("U", (), {"id": payload["user_id"]})(),
-            )
-            if isinstance(result, dict):
-                await tracker.complete(message="角色生成完成")
-            else:
-                await tracker.fail("角色生成失败")
+        result = await auto_generate_character(
+            payload["project_id"],
+            MockReq(),
+            db,
+            type("U", (), {"id": payload["user_id"]})(),
+        )
+        if isinstance(result, dict):
+            await tracker.complete(message="角色生成完成")
+        else:
+            await tracker.fail("角色生成失败")
 
     task_id = await submit_async_task(
         user_id=user.id,

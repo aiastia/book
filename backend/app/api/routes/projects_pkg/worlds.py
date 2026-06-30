@@ -168,45 +168,44 @@ async def generate_world_core_async(
 
     from app.services.async_ai_service import submit_async_task
 
-    async def _run(task_id: int, payload: dict):
+    async def _run(task_id: int, payload: dict, db: AsyncSession):
         from app.services import background_task_service as bgs
 
-        tracker = bgs.TaskProgressTracker(task_id)
+        tracker = bgs.TaskProgressTracker(task_id, db=db)
         await tracker.update(stage="generating", message="AI 正在生成世界观核心设定...")
-        async with async_session() as task_db:
-            engine, ai_client = await make_engine_and_client(task_db, payload["user_id"])
-            result = await engine.execute_skill(
-                "world_core_generate",
-                ai_client,
-                {
-                    "title": payload["title"],
-                    "genre": payload.get("genre", "网文"),
-                    "synopsis": payload.get("synopsis", "暂无"),
-                    "user_prompt": f"请为《{payload['title']}》生成核心世界观。",
-                },
-            )
-            if result.get("error"):
-                await tracker.fail(result["error"])
-                return
-            await tracker.update(stage="saving", message="保存世界观...")
-            data = result.get("json") or {}
-            if isinstance(data, dict):
-                proj_obj = (
-                    await task_db.execute(
-                        select(Project).where(Project.id == payload["project_id"])
-                    )
-                ).scalar_one_or_none()
-                if proj_obj:
-                    proj_obj.world_time_period = str(data.get("world_time_period", ""))[:2000]
-                    proj_obj.world_location = str(data.get("world_location", ""))[:2000]
-                    proj_obj.world_atmosphere = str(data.get("world_atmosphere", ""))[:2000]
-                    proj_obj.world_rules = str(data.get("world_rules", ""))[:2000]
-                    await task_db.commit()
-                    await tracker.complete(message="世界观核心设定已生成")
-                else:
-                    await tracker.fail("项目不存在")
+        engine, ai_client = await make_engine_and_client(db, payload["user_id"])
+        result = await engine.execute_skill(
+            "world_core_generate",
+            ai_client,
+            {
+                "title": payload["title"],
+                "genre": payload.get("genre", "网文"),
+                "synopsis": payload.get("synopsis", "暂无"),
+                "user_prompt": f"请为《{payload['title']}》生成核心世界观。",
+            },
+        )
+        if result.get("error"):
+            await tracker.fail(result["error"])
+            return
+        await tracker.update(stage="saving", message="保存世界观...")
+        data = result.get("json") or {}
+        if isinstance(data, dict):
+            proj_obj = (
+                await db.execute(
+                    select(Project).where(Project.id == payload["project_id"])
+                )
+            ).scalar_one_or_none()
+            if proj_obj:
+                proj_obj.world_time_period = str(data.get("world_time_period", ""))[:2000]
+                proj_obj.world_location = str(data.get("world_location", ""))[:2000]
+                proj_obj.world_atmosphere = str(data.get("world_atmosphere", ""))[:2000]
+                proj_obj.world_rules = str(data.get("world_rules", ""))[:2000]
+                await db.commit()
+                await tracker.complete(message="世界观核心设定已生成")
             else:
-                await tracker.fail("AI 未返回有效世界观")
+                await tracker.fail("项目不存在")
+        else:
+            await tracker.fail("AI 未返回有效世界观")
 
     task_id = await submit_async_task(
         user_id=user.id,
@@ -596,107 +595,106 @@ async def generate_organization_async(
 
     from app.services.async_ai_service import submit_async_task
 
-    async def _run(task_id: int, payload: dict):
+    async def _run(task_id: int, payload: dict, db: AsyncSession):
         from app.services import background_task_service as bgs
 
-        tracker = bgs.TaskProgressTracker(task_id)
+        tracker = bgs.TaskProgressTracker(task_id, db=db)
         try:
-            async with async_session() as task_db:
-                count = payload.get("count", 1)
-                user_input = payload.get("user_input", "")
-                user_id = payload["user_id"]
-                pid = payload["project_id"]
+            count = payload.get("count", 1)
+            user_input = payload.get("user_input", "")
+            user_id = payload["user_id"]
+            pid = payload["project_id"]
 
-                for i in range(count):
-                    await tracker.update(
-                        stage="generating",
-                        message=f"正在生成第 {i + 1}/{count} 个组织…",
-                        progress=int((i / max(count, 1)) * 100),
-                    )
-                    proj = await task_db.get(Project, pid)
-                    orgs = (
-                        (
-                            await task_db.execute(
-                                select(Organization).where(Organization.project_id == pid)
-                            )
+            for i in range(count):
+                await tracker.update(
+                    stage="generating",
+                    message=f"正在生成第 {i + 1}/{count} 个组织…",
+                    progress=int((i / max(count, 1)) * 100),
+                )
+                proj = await db.get(Project, pid)
+                orgs = (
+                    (
+                        await db.execute(
+                            select(Organization).where(Organization.project_id == pid)
                         )
-                        .scalars()
-                        .all()
                     )
-                    chars = (
-                        (
-                            await task_db.execute(
-                                select(Character).where(Character.project_id == pid)
-                            )
+                    .scalars()
+                    .all()
+                )
+                chars = (
+                    (
+                        await db.execute(
+                            select(Character).where(Character.project_id == pid)
                         )
-                        .scalars()
-                        .all()
                     )
-                    worlds_data = (
-                        (
-                            await task_db.execute(
-                                select(WorldSetting).where(WorldSetting.project_id == pid)
-                            )
+                    .scalars()
+                    .all()
+                )
+                worlds_data = (
+                    (
+                        await db.execute(
+                            select(WorldSetting).where(WorldSetting.project_id == pid)
                         )
-                        .scalars()
-                        .all()
                     )
-                    existing_orgs = (
-                        "\n".join(
-                            [f"- {o.name}({o.org_type}): {o.description[:150]}" for o in orgs]
-                        )
-                        or "暂无"
+                    .scalars()
+                    .all()
+                )
+                existing_orgs = (
+                    "\n".join(
+                        [f"- {o.name}({o.org_type}): {o.description[:150]}" for o in orgs]
                     )
-                    characters_info = "\n".join([f"- {c.name}({c.role})" for c in chars]) or "暂无"
-                    world_info = (
-                        "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds_data]) or "暂无"
-                    )
+                    or "暂无"
+                )
+                characters_info = "\n".join([f"- {c.name}({c.role})" for c in chars]) or "暂无"
+                world_info = (
+                    "\n".join([f"- {w.name}: {w.content[:200]}" for w in worlds_data]) or "暂无"
+                )
 
-                    engine, ai_client = await make_engine_and_client(task_db, user_id)
-                    result = await engine.execute_skill(
-                        "auto_organization_generation",
-                        ai_client,
-                        {
-                            "existing_organizations": existing_orgs,
-                            "existing_characters": characters_info,
-                            "plot_context": world_info,
-                            "organization_specification": user_input or "",
-                            "user_prompt": f"请为这部{proj.genre or '网文'}生成一个组织/势力。{user_input}",
-                        },
-                    )
-                    if result.get("error"):
-                        await tracker.fail(f"第{i + 1}个失败: {result['error']}")
-                        return
-                    org_data = result.get("json") or {}
-                    if not isinstance(org_data, dict):
-                        continue
-                    pv = org_data.get("power_value", org_data.get("power_level", 50))
-                    try:
-                        pv = int(pv)
-                    except Exception:
-                        pv = 50
-                    org = Organization(
-                        project_id=pid,
-                        name=str(org_data.get("name", ""))[:100],
-                        org_type=str(
-                            org_data.get(
-                                "org_type",
-                                org_data.get("organization_type", org_data.get("type", "")),
-                            )
-                        )[:50],
-                        description=str(
-                            org_data.get("description", org_data.get("background", ""))
-                        )[:2000],
-                        power_value=pv,
-                        location=str(org_data.get("location", ""))[:200],
-                        motto=str(org_data.get("motto", org_data.get("organization_purpose", "")))[
-                            :200
-                        ],
-                        color=str(org_data.get("color", ""))[:20],
-                    )
-                    task_db.add(org)
-                    await task_db.commit()
-                await tracker.complete(message=f"生成完成（{count} 个组织）")
+                engine, ai_client = await make_engine_and_client(db, user_id)
+                result = await engine.execute_skill(
+                    "auto_organization_generation",
+                    ai_client,
+                    {
+                        "existing_organizations": existing_orgs,
+                        "existing_characters": characters_info,
+                        "plot_context": world_info,
+                        "organization_specification": user_input or "",
+                        "user_prompt": f"请为这部{proj.genre or '网文'}生成一个组织/势力。{user_input}",
+                    },
+                )
+                if result.get("error"):
+                    await tracker.fail(f"第{i + 1}个失败: {result['error']}")
+                    return
+                org_data = result.get("json") or {}
+                if not isinstance(org_data, dict):
+                    continue
+                pv = org_data.get("power_value", org_data.get("power_level", 50))
+                try:
+                    pv = int(pv)
+                except Exception:
+                    pv = 50
+                org = Organization(
+                    project_id=pid,
+                    name=str(org_data.get("name", ""))[:100],
+                    org_type=str(
+                        org_data.get(
+                            "org_type",
+                            org_data.get("organization_type", org_data.get("type", "")),
+                        )
+                    )[:50],
+                    description=str(
+                        org_data.get("description", org_data.get("background", ""))
+                    )[:2000],
+                    power_value=pv,
+                    location=str(org_data.get("location", ""))[:200],
+                    motto=str(org_data.get("motto", org_data.get("organization_purpose", "")))[
+                        :200
+                    ],
+                    color=str(org_data.get("color", ""))[:20],
+                )
+                db.add(org)
+                await db.commit()
+            await tracker.complete(message=f"生成完成（{count} 个组织）")
         except Exception as e:
             try:
                 await tracker.fail(str(e))

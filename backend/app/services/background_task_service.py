@@ -45,11 +45,18 @@ STAGE_PROGRESS = {
 class TaskProgressTracker:
     """进度追踪器：在执行协程内更新任务状态。
 
-    每次更新写库（独立 session），确保前端轮询能拿到最新进度。
+    每次更新写库，确保前端轮询能拿到最新进度。
+    传入 db 参数时复用已有 session（避免 SQLite 写锁冲突），否则自行创建。
     """
 
-    def __init__(self, task_id: int):
+    def __init__(self, task_id: int, db: AsyncSession | None = None):
         self.task_id = task_id
+        self._db = db
+
+    async def _get_db(self):
+        if self._db is not None:
+            return self._db
+        return async_session()
 
     async def update(
         self,
@@ -62,7 +69,7 @@ class TaskProgressTracker:
         if progress is None and stage:
             progress = STAGE_PROGRESS.get(stage, 50)
         task_data = None
-        async with async_session() as db:
+        async with await self._get_db() as db:
             values = {
                 "status": "running",
                 "updated_at": datetime.utcnow(),
@@ -93,7 +100,7 @@ class TaskProgressTracker:
     async def complete(self, result: dict = None, message: str = "完成"):
         """标记任务完成。"""
         task_data = None
-        async with async_session() as db:
+        async with await self._get_db() as db:
             await db.execute(
                 update(BackgroundTask)
                 .where(BackgroundTask.id == self.task_id)
@@ -120,7 +127,7 @@ class TaskProgressTracker:
     async def fail(self, error: str):
         """标记任务失败。"""
         task_data = None
-        async with async_session() as db:
+        async with await self._get_db() as db:
             await db.execute(
                 update(BackgroundTask)
                 .where(BackgroundTask.id == self.task_id)
@@ -154,7 +161,7 @@ class TaskProgressTracker:
 
     async def is_cancelled(self) -> bool:
         """检查任务是否被取消（执行协程内调用，优雅退出）。"""
-        async with async_session() as db:
+        async with await self._get_db() as db:
             row = (
                 await db.execute(
                     select(BackgroundTask.cancel_requested, BackgroundTask.status).where(
@@ -309,8 +316,21 @@ async def cleanup_old_tasks(days: int = 7) -> int:
         return result.rowcount
 
 
-async def mark_started(task_id: int):
+async def mark_started(task_id: int, db: AsyncSession | None = None):
     """任务开始执行时调用（pending → running）。"""
+    if db is not None:
+        await db.execute(
+            update(BackgroundTask)
+            .where(BackgroundTask.id == task_id)
+            .values(
+                status="running",
+                stage="init",
+                started_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+        )
+        await db.commit()
+        return
     async with async_session() as db:
         await db.execute(
             update(BackgroundTask)

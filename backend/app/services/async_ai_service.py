@@ -148,10 +148,15 @@ async def retry_task(task_id: int, user_id: int) -> int:
 
 
 async def _wrap_runner(task_id: int, runner: Callable, payload: dict):
-    """包装 runner：标记开始、执行、标记完成/失败。"""
-    await bg_service.mark_started(task_id)
-    try:
-        await runner(task_id, payload)
-    except Exception as e:
-        tracker = bg_service.TaskProgressTracker(task_id)
-        await tracker.fail(str(e)[:5000])
+    """包装 runner：标记开始、执行、标记完成/失败。
+
+    创建共享 session 贯穿整个任务生命周期，避免 TaskProgressTracker 与 runner
+    各自独立 session 并发写 SQLite 导致的 database is locked 错误。
+    """
+    async with async_session() as db:
+        await bg_service.mark_started(task_id, db=db)
+        try:
+            await runner(task_id, payload, db)
+        except Exception as e:
+            tracker = bg_service.TaskProgressTracker(task_id, db=db)
+            await tracker.fail(str(e)[:5000])
