@@ -21,6 +21,7 @@ from app.api.routes.tasks import router as tasks_router
 from app.api.routes.writing_styles import router as writing_styles_router
 from app.api.routes.ws_tasks import router as ws_tasks_router
 from app.core.auth import get_password_hash
+from app.core.config import settings
 from app.core.database import Base, async_session, engine, init_db
 from app.models.skill import Skill
 from app.models.user import User
@@ -88,6 +89,7 @@ async def _auto_migrate():
 
     幂等：列已存在时 ALTER 会报错，捕获忽略。
     新增列时在此登记：(表名, 列定义SQL)
+    仅对 SQLite 执行（PostgreSQL 应使用 Alembic）。
     """
     from sqlalchemy import text
 
@@ -202,8 +204,9 @@ async def _auto_migrate():
 async def lifespan(app: FastAPI):
     # 启动时创建表 + 自动补列（新增 Column 不再需要手动写 ALTER TABLE）
     await init_db()
-    # 轻量迁移：为已有表补列（包括 DROP COLUMN 等无法自动检测的操作）
-    await _auto_migrate()
+    # 轻量迁移：为已有表补列（仅 SQLite；PostgreSQL 应使用 Alembic）
+    if settings.DATABASE_URL.startswith("sqlite"):
+        await _auto_migrate()
     # 清理僵尸任务（进程崩溃后残留的 running/pending 任务）
     await _cleanup_zombie_tasks()
     # 初始化默认用户

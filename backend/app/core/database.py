@@ -9,7 +9,7 @@ from app.core.config import settings
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
-    connect_args={"timeout": 30},  # SQLite busy_timeout：写锁冲突时等待最多30秒
+    connect_args={"timeout": 30} if settings.DATABASE_URL.startswith("sqlite") else {},
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -49,11 +49,11 @@ async def init_db():
 def _auto_add_missing_columns(connection):
     """检测已有表是否缺少模型定义的列，缺少则 ALTER TABLE ADD COLUMN。
 
-    这不是完整的 migration（不处理列改名/删除），只做加列兜底，
-    确保新增的 Column（如 is_hidden）不会导致查询崩溃。
+    兼容 SQLite 和 PostgreSQL 方言。非完整 migration（不处理列改名/删除）。
     """
     from sqlalchemy import inspect, text
 
+    dialect = connection.dialect.name
     inspector = inspect(connection)
     for table_name, table_obj in Base.metadata.tables.items():
         if not inspector.has_table(table_name):
@@ -61,18 +61,33 @@ def _auto_add_missing_columns(connection):
         existing_cols = {col["name"] for col in inspector.get_columns(table_name)}
         for col in table_obj.columns:
             if col.name not in existing_cols:
-                # 构造 ALTER TABLE ADD COLUMN
                 col_type = col.type.compile(connection.dialect)
                 nullable = "" if col.nullable else " NOT NULL"
-                default = ""
+                default_clause = ""
                 if col.server_default is not None:
-                    default = f" DEFAULT {col.server_default.arg}"
+                    default_clause = f" DEFAULT {col.server_default.arg}"
                 elif not col.nullable:
-                    # NOT NULL 列需要默认值，否则旧行会报错
-                    default = " DEFAULT ''"
-                sql = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {col_type}{nullable}{default}"
+                    # 为 NOT NULL 列提供一个安全的默认值
+                    default_clause = _safe_default_for(col.type)
+                # PostgreSQL 支持 IF NOT EXISTS，SQLite 不支持但会忽略未知 SQL 关键字吗？不，
+                # SQLite < 3.24 不支持 IF NOT EXISTS。但对已有列会报错，所以只在 PG 时加。
+                if_not_exists = " IF NOT EXISTS" if dialect == "postgresql" else ""
+                sql = (
+                    f"ALTER TABLE {table_name}"
+                    f" ADD COLUMN{if_not_exists} {col.name} {col_type}{nullable}{default_clause}"
+                )
                 try:
                     connection.execute(text(sql))
                     print(f"[DB] 自动补列：{table_name}.{col.name} ({col_type})")
                 except Exception as e:
                     print(f"[DB] 补列失败 {table_name}.{col.name}: {e}")
+
+
+def _safe_default_for(col_type) -> str:
+    """根据列类型返回一个安全的默认值，避免 PostgreSQL 的类型转换错误。"""
+    type_name = str(col_type).upper()
+    if any(t in type_name for t in ("INTEGER", "BIGINT", "SMALLINT", "FLOAT", "REAL", "NUMERIC", "BOOLEAN")):
+        return " DEFAULT 0"
+    if any(t in type_name for t in ("DATE", "TIME", "TIMESTAMP")):
+        return " DEFAULT '1970-01-01'"
+    return " DEFAULT ''"
