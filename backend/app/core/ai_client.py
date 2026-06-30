@@ -2,9 +2,12 @@
 
 import asyncio
 import json
+import logging
 import re
 import time
 from collections.abc import AsyncGenerator
+
+logger = logging.getLogger(__name__)
 
 
 def _try_parse_inline_tool_calls(content: str) -> list | None:
@@ -508,9 +511,6 @@ class AIClient:
         presence_penalty: float = None,
     ) -> dict:
         """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
-        import logging
-
-        logger = logging.getLogger(__name__)
         result = await self.chat_stream_collect(
             messages=messages,
             model=model,
@@ -603,9 +603,6 @@ class AIClient:
         - 仅对「JSON 解析失败」重试；AI 调用本身报错（如 401/网络）不重试。
         - 每次重试在 messages 末尾追加格式强化提示，并把上次失败内容反馈给 AI。
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
         if max_retries is None:
             max_retries = settings.AI_MAX_RETRIES
         hint_messages = list(messages)
@@ -706,9 +703,6 @@ class AIClient:
             max_rounds: 最大工具调用轮数（默认3，含最后一轮强制输出）
         """
         import json
-        import logging
-
-        logger = logging.getLogger(__name__)
 
         # 注入工具调用预算提示，让 AI 合理规划查询
         tool_rounds = max_rounds - 1
