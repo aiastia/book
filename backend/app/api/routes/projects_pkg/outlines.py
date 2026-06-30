@@ -1733,6 +1733,14 @@ async def continue_outlines_async(
         foreshadow_context = _format_foreshadows_for_outline(
             foreshadows_list, start_chapter, end_chapter
         )
+        # 计算每章目标字数
+        total_target = proj.target_word_count or 0
+        req_chapter_count = payload["chapter_count"]
+        if total_target and req_chapter_count:
+            per_chapter = max(3000, min(8000, total_target // req_chapter_count))
+        else:
+            per_chapter = 4000
+        per_chapter_word_count = str(per_chapter)
         # 叙事视角：前端留空 = 按小说设定
         effective_pov = payload.get("narrative_pov") or proj.narrative_pov or "第三人称"
         engine, ai_client = await make_engine_and_client(

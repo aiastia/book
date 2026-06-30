@@ -7,12 +7,25 @@ useHead({ title: '故事大纲 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
-const { data: project, refresh: refreshProject } = await useFetch<Project>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}`)
+const route = useRoute()
+const router = useRouter()
 
-// 大纲分页
-const pageSize = ref(10)
-const currentPage = ref(1)
+// 从 URL 读取分页参数
+const pageSize = ref(Number(route.query.pageSize || 10))
+const currentPage = ref(Number(route.query.page || 1))
 const outlineTotal = ref(0)
+
+// 同步分页参数到 URL
+watch([currentPage, pageSize], () => {
+  router.replace({
+    query: {
+      ...route.query,
+      page: currentPage.value,
+      pageSize: pageSize.value,
+    }
+  })
+})
+
 const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineListResponse>(() => {
   const query = `limit=${pageSize.value}&offset=${(currentPage.value - 1) * pageSize.value}`
   return `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}/outlines?${query}`
