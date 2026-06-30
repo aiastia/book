@@ -23,6 +23,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 
+from app.core.database import async_session
 from app.services import background_task_service as bg_service
 
 logger = logging.getLogger(__name__)
