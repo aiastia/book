@@ -414,6 +414,45 @@ def _fix_unescaped_quotes_by_error(text: str, max_fixes: int = 50) -> str:
     return text
 
 
+def _fix_missing_commas(text: str) -> str:
+    """
+    补全对象/数组中属性之间缺失的逗号。
+
+    AI 常见错误：两行字符串值之间少了逗号，如：
+        "key1": "value1"
+        "key2": "value2"
+    修复为：
+        "key1": "value1",
+        "key2": "value2"
+    """
+    if not text or "," in text:
+        # 有逗号大概率没问题，快速跳过
+        # 但还是要检查：逗号可能在数组/对象外部，所以做个简单扫描
+        pass
+
+    lines = text.split("\n")
+    result = []
+    for i, line in enumerate(lines):
+        stripped = line.rstrip()
+        # 匹配一行 JSON 值（key: "value" 或 "value"）
+        # 如果此行以字符串值结尾（引号闭合），且下一行以 key（"xxx":）或数组项（"xxx"）开头
+        if (i + 1 < len(lines)
+            and stripped.endswith('"')
+            and not stripped.endswith('\\"')
+            and not stripped.endswith(',')
+        ):
+            next_stripped = lines[i + 1].lstrip()
+            # 下一行以引号开头 → 大概率是另一个 key 或数组项
+            if next_stripped.startswith('"'):
+                result.append(stripped + ",")
+                continue
+        result.append(stripped)
+        # 保留原换行
+        if i < len(lines) - 1:
+            result.append("\n")
+    return "".join(result)
+
+
 def _fix_multiple_objects_as_value(text: str) -> str:
     """
     修复AI生成的JSON中，多个对象作为属性值但未合并的问题。
@@ -709,6 +748,16 @@ def clean_json_response(text: str) -> str:
             logger.debug("✅ 清洗后JSON验证成功")
         except Exception as e:
             logger.warning(f"⚠️ 清洗后JSON仍然无效: {e}，尝试修复结构性问题...")
+
+            # 修复0：补缺失逗号（AI 常见：两行属性之间少了逗号）
+            result = _fix_missing_commas(result)
+            try:
+                _try_loads(result)
+                logger.info("✅ 补缺失逗号后JSON验证成功")
+            except Exception:
+                pass
+            else:
+                return result
 
             # 修复1：合并多对象属性值（AI可能输出 "key": {a:1}, {b:2} ）
             result = _fix_multiple_objects_as_value(result)
