@@ -438,7 +438,41 @@ class AIClient:
 
             content = "".join(content_parts)
             # 推理模型（如 step-3.7-flash / Kimi K2）可能把正文输出到 reasoning_content 而非 content
-            if not content and reasoning_parts:
+            # 策略（优先级递减，保证正文干净且不丢内容）：
+            #   1) content 非空 → 直接用（最干净）
+            #   2) content 空 + 无 tool_calls → 非流式重试一次（非流式 API 能正确分配 reasoning/content 配额，
+            #      往往能拿到干净的 content，避免把思考过程当正文）
+            #   3) 重试仍空 + 有 reasoning_parts → 回退用 reasoning_content（兜底，可能含元叙述，但保证有内容）
+            if not content and not tool_call_buf:
+                # 步骤2：非流式重试拿干净 content
+                try:
+                    logger.info(
+                        f"[AI] 模型 {model_name} 流式返回空 content，"
+                        f"尝试非流式重试以获取干净正文"
+                    )
+                    nonstream = await self.client.chat.completions.create(**{**kwargs, "stream": False})
+                    ns_msg = nonstream.choices[0].message
+                    ns_content = (ns_msg.content or "").strip()
+                    if ns_content:
+                        logger.info(
+                            f"[AI] 非流式重试成功，拿到干净 content（{len(ns_content)}字），"
+                            f"completion_tokens={nonstream.usage.completion_tokens if nonstream.usage else 0}"
+                        )
+                        content = ns_content
+                        # 更新 usage（非流式结果更准确）
+                        if nonstream.usage:
+                            usage_info = nonstream.usage
+                except Exception as ns_e:
+                    logger.warning(f"[AI] 非流式重试失败（将回退到 reasoning_content）: {ns_e}")
+                # 步骤3：重试仍空 → 回退 reasoning_content
+                if not content and reasoning_parts:
+                    content = "".join(reasoning_parts)
+                    logger.warning(
+                        f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
+                        f"非流式重试仍空，已合并 {len(reasoning_parts)} 段 reasoning_content 作为正文（兜底）"
+                    )
+            elif not content and reasoning_parts:
+                # 有 tool_calls 的情况不重试（工具调用流程由上层处理），直接回退
                 content = "".join(reasoning_parts)
                 logger.warning(
                     f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"

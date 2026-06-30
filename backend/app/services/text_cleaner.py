@@ -397,6 +397,78 @@ def _text_similarity(a: str, b: str) -> float:
     return len(ga & gb) / len(ga | gb)
 
 
+# 句子切分：按句末标点或换行
+_SENT_SPLIT_RE = re.compile(r"(?<=[。！？\n])")
+
+
+def _dedupe_repeated_clauses(text: str) -> tuple[str, dict]:
+    """检测并删除句级/分句级重复（AI 卡顿式复述）。
+
+    抓两类典型 AI 重复：
+    1) 分句完全或高度重复：「南边天空暗了下来，南边天空暗了下来」→ 删第二个
+    2) 首尾相接的短语复述：「像沙漠里的人看见绿洲。绿洲，像溺水的人……」→ 删第二个
+       （前句结尾词 == 后句开头词，且后句是对前句的复述/扩展）
+
+    策略：按句号/换行拆成最小单位，比对相邻两个单位。
+    """
+    units = [u for u in _SENT_SPLIT_RE.split(text) if u.strip()]
+    if len(units) < 2:
+        return text, {}
+    kept: list[str] = []
+    removed = 0
+    for u in units:
+        u_clean = u.strip()
+        if not u_clean:
+            kept.append(u)
+            continue
+        is_dup = False
+        if kept:
+            prev = kept[-1].strip()
+            # 同时比对前一句；再比对前前一句（抓隔一句的重复）
+            candidates = [prev]
+            if len(kept) >= 2:
+                candidates.append(kept[-2].strip())
+            for cand in candidates:
+                if not cand or len(cand) < 4:
+                    continue
+                # 按标点（，；）拆成更小的分句再比对，去掉分句内部重复
+                cand_parts = [p for p in re.split(r"[，；]", cand) if p.strip()]
+                u_parts = [p for p in re.split(r"[，；]", u_clean) if p.strip()]
+                all_parts = cand_parts + u_parts
+                # 类型1：相邻分句完全相同或高度相似
+                seen_parts: list[str] = []
+                for p in all_parts:
+                    p_s = p.strip()
+                    if not p_s or len(p_s) < 4:
+                        seen_parts.append(p)
+                        continue
+                    for sp in seen_parts:
+                        sp_s = sp.strip()
+                        if len(sp_s) < 4:
+                            continue
+                        if p_s == sp_s:
+                            is_dup = True
+                            break
+                        # 高度相似（短分句 3-gram 重叠 >0.8）
+                        if len(p_s) <= 15 and len(sp_s) <= 15:
+                            if _text_similarity(p_s, sp_s) > 0.8:
+                                is_dup = True
+                                break
+                    if is_dup:
+                        break
+                    seen_parts.append(p)
+                if is_dup:
+                    break
+        if is_dup:
+            removed += 1
+        else:
+            kept.append(u)
+    if removed == 0:
+        return text, {}
+    result = "".join(kept)
+    return result, {"删除重复分句": removed}
+
+
 def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
     """对 AI 生成的正文执行多层清理管道。
 
