@@ -206,6 +206,7 @@ const FIELD_LABELS: Record<string, string> = {
   chapter_breath: '叙事节奏',
   foreshadow_plant: '伏笔埋设',
   foreshadow_advance: '伏笔推进',
+  chapter_advance: '本章推进目标',
   plot_summary: '剧情摘要',
   emotional_tone: '情感基调',
   emotional_arc: '情绪弧线',
