@@ -11,6 +11,8 @@ useHead({ title: '故事章节 — 墨语' })
 const { currentProjectId } = useProject()
 if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
+const route = useRoute()
+const router = useRouter()
 
 // 默认模型名（用于 placeholder 显示）
 const defaultModelName: any = ref('')
@@ -215,9 +217,20 @@ const modifyStatus = ref('draft')
 
 // ===== 搜索与分页 =====
 const searchKeyword = ref('')
-const pageSize = ref(20)
-const currentPage = ref(1)
+const pageSize = ref(Number(route.query.pageSize || 20))
+const currentPage = ref(Number(route.query.page || 1))
 const pageSizeOptions = ['20', '50', '100']
+
+// 同步分页参数到 URL
+watch([currentPage, pageSize, searchKeyword], () => {
+  router.replace({
+    query: {
+      ...route.query,
+      page: currentPage.value,
+      pageSize: pageSize.value,
+    }
+  })
+})
 
 // ===== 生成门槛逻辑 =====
 // 规则：前一章有内容但未分析时，禁止后续生成

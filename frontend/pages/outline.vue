@@ -36,6 +36,10 @@ const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineLi
   }
 })
 const outlines = computed<Outline[]>(() => outlineData.value?.items || [])
+// total 从响应数据直接派生，避免 onResponse 初始化时机问题导致刷新后丢失分页
+watchEffect(() => {
+  if (outlineData.value?.total != null) outlineTotal.value = outlineData.value.total
+})
 
 const generating = ref(false)
 const genCount = ref(10)
@@ -669,7 +673,6 @@ async function deleteExpansion() {
         show-size-changer
         show-total
         size="small"
-        @change="() => {}"
       />
     </div>
     <a-empty v-else-if="!outlines || !outlines.length" description="暂无大纲，点击 AI 生成" />
@@ -928,6 +931,7 @@ async function deleteExpansion() {
 
 <style scoped>
 .outline-page { display: flex; flex-direction: column; gap: 16px; }
+.outline-pagination { display: flex; justify-content: center; padding: 12px 0 4px; }
 .page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .outline-list { display: flex; flex-direction: column; gap: 10px; }
 .outline-item { background: #fff; border: 1px solid #E8E4DC; border-radius: 8px; overflow: hidden; transition: border-color .2s, box-shadow .2s; }
