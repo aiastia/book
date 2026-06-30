@@ -1,0 +1,13 @@
+{
+  "name": "_shared_ai_trace_prevention",
+  "display_name": "共享：AI痕迹预防",
+  "description": "共享模块 — 被章节生成 Skill 通过 @include 引用。生成阶段主动规避AI高频表达、重复、过度解释和套路句式，从源头降低AI痕迹。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_ai_trace_prevention.md"
+}

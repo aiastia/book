@@ -1,0 +1,13 @@
+{
+  "name": "_shared_common_rules",
+  "display_name": "共享：通用规则",
+  "description": "共享模块 — 被章节生成等 Skill 通过 @include 引用。通用写作规则：环境描写管控、剧情优先、结尾三模式、情绪脉冲、重场戏、角色互动。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_common_rules.md"
+}

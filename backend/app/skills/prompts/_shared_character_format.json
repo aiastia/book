@@ -1,0 +1,13 @@
+{
+  "name": "_shared_character_format",
+  "display_name": "共享：单角色输出格式",
+  "description": "共享模块 — 被角色生成 Skill 通过 @include 引用。单角色生成的 JSON 输出 schema，定义角色名、职业、外貌、性格、背景等字段。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_character_format.md"
+}

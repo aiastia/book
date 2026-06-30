@@ -1,0 +1,13 @@
+{
+  "name": "_shared_characters_batch_format",
+  "display_name": "共享：批量角色输出格式",
+  "description": "共享模块 — 被角色批量生成 Skill 通过 @include 引用。批量角色生成的 JSON 输出 schema，比单角色格式多了境界字段。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_characters_batch_format.md"
+}

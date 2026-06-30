@@ -1,0 +1,13 @@
+{
+  "name": "_shared_quality_target",
+  "display_name": "共享：质量目标",
+  "description": "共享模块 — 被章节生成 Skill 通过 @include 引用。9分标杆与P0硬线：比喻政策、信息分层、场景跳切上限、情绪不贴标签、对话人味。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_quality_target.md"
+}

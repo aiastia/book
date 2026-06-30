@@ -1,0 +1,13 @@
+{
+  "name": "_shared_narrative_techniques",
+  "display_name": "共享：叙事技巧",
+  "description": "共享模块 — 被章节生成 Skill 通过 @include 引用。叙事技巧：情感锚点、反杀节奏、信息分层、语言温度。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_narrative_techniques.md"
+}

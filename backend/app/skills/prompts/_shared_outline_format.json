@@ -1,0 +1,13 @@
+{
+  "name": "_shared_outline_format",
+  "display_name": "共享：大纲输出格式(1→1)",
+  "description": "共享模块 — 被大纲生成 Skill 通过 @include 引用。1→1 大纲模式的 JSON 输出 schema，定义章节结构、场景、角色、关键节点等字段。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_outline_format.md"
+}

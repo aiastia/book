@@ -1,0 +1,13 @@
+{
+  "name": "_shared_book_import_outline_format",
+  "display_name": "共享：大纲输出格式(逆向)",
+  "description": "共享模块 — 被 book_import 相关 Skill 通过 @include 引用。逆向大纲模式的 JSON 输出 schema，字段较精简。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_book_import_outline_format.md"
+}

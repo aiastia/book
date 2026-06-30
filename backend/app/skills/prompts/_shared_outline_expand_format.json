@@ -1,0 +1,13 @@
+{
+  "name": "_shared_outline_expand_format",
+  "display_name": "共享：大纲展开格式(1→N)",
+  "description": "共享模块 — 被大纲展开 Skill 通过 @include 引用。展开模式（1→N）下的 JSON 输出 schema，与基础大纲格式不同，含剧情摘要、情感弧线、爽点设计等字段。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_outline_expand_format.md"
+}

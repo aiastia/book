@@ -1,0 +1,13 @@
+{
+  "name": "_shared_first_chapter_rules",
+  "display_name": "共享：首章规则",
+  "description": "共享模块 — 被首章生成 Skill 通过 @include 引用。首章专属铁律：前500字无术语、前1000字建立私人化心疼、必须有反杀、开篇规则、结尾铁律。",
+  "category": "shared",
+  "skill_type": "builtin",
+  "config": {},
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_first_chapter_rules.md"
+}
