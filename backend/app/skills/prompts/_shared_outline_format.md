@@ -6,7 +6,7 @@
   outline_create.md                → 本格式
   outline_continue.md              → 本格式
   book_import_reverse_outlines.md  → 本格式
-  outline_expand_single.md         → 本格式（sub_index 字段仅展开模式使用）
+  outline_expand_single.md         → 本格式（以下标有「展开独有」的字段仅展开模式使用）
 -->
 
 请以 JSON 数组格式返回，数组长度严格等于要求生成的章数：
@@ -34,6 +34,9 @@
     "character_intents": [{"character": "角色名", "this_chapter_goal": "本章目标", "immediate_want": "此刻最想要的"}],
     "new_items": [{"name": "新物品名", "category": "装备/消耗品/材料/关键道具/杂物", "description": "一句话描述"}],
     "new_locations": [{"name": "新地点名", "location_type": "建筑/自然景观/秘境/城市/室内", "description": "一句话描述"}],
-    "estimated_words": 3000
+    "estimated_words": 3000,
+    "conflict_type": "（展开独有）冲突类型（如：内心挣扎、人际冲突、信息不对等对抗）",
+    "hook": "（展开独有）本章结尾钩子（必须是一个具体的中断：写到哪个动作即将完成时停住、哪句话说到一半时打断、哪个信息正要确认时切断。禁止写总结句）",
+    "rhythm_tag": "（展开独有）起/承/小高潮（该大纲节点拆分的最后一章必须填'小高潮'）"
   }
 ]

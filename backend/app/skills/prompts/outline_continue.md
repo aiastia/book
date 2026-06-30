@@ -71,3 +71,6 @@
 ## 六、输出格式
 
 @include:_shared_outline_format.md
+
+【额外字段建议】
+除共享格式中的字段外，还可按需填充：shuang_design（爽点设计）、reader_hook（读者追读理由）、decision_basis（决策依据）、obstacle_type（障碍类型）、hook_type（钩子类型）、chapter_breath（节奏）、estimated_words（预估字数）。
