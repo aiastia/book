@@ -11,14 +11,9 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
     """尝试从文本内容中解析内联工具调用（兼容不同模型的返回格式）。
 
     支持格式：
-    - Kimi: <|tool_calls_section_begin|>...<|tool_calls_section_end|>
-    - DSML: <｜DSML｜tool_calls>...<invoke name="x">...</invoke>...</｜DSML｜tool_calls>
-    - 通用: 任何包含 function name + arguments 的结构化文本
-    返回标准 tool_calls 列表或 None。
-    """
-    if not content:
-        return None
-    # Kimi 原生格式
+    - Kimi: <|tool_call_begin|>...<|tool_call_argument_begin|>...<|tool_call_end|>
+    - DSML: <｜DSML｜tool_calls>...<invoke name="x">...<parameter ...>...</invoke>...</｜DSML｜tool_calls>
+    - 通用 XML: <function:name>...<parameter:name>value
     if "<|tool_call_begin|>" in content:
         tool_calls = []
         for match in re.finditer(
@@ -87,6 +82,32 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
     # 兜底：检测任意 <|...|> 格式的 tool_call 标记（防止未来新格式泄漏）
     if re.search(r"<\|[^>]+\|tool_call", content):
         return []  # 返回空列表触发 content="" 清理
+
+    # 通用 XML 格式：<function:name><parameter:name>value</parameter:name></function:name>
+    if "<function:" in content:
+        tool_calls = []
+        for match in re.finditer(r"<function:([^>]+)>(.*?)</function:\1>", content, re.DOTALL):
+            name = match.group(1).strip()
+            body = match.group(2)
+            args = {}
+            for pm in re.finditer(r"<parameter:([^>]+)>(.*?)</parameter:\1>", body, re.DOTALL):
+                pname = pm.group(1).strip()
+                pval = pm.group(2).strip()
+                try:
+                    pval = json.loads(pval)
+                except Exception:
+                    pass
+                args[pname] = pval
+            clean_name = name.replace("functions.", "").split(":")[0]
+            tool_calls.append({
+                "id": f"xml_{clean_name}",
+                "type": "function",
+                "function": {
+                    "name": clean_name,
+                    "arguments": json.dumps(args, ensure_ascii=False),
+                },
+            })
+        return tool_calls if tool_calls else None
 
     return None
 
