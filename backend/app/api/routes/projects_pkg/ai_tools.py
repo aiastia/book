@@ -570,6 +570,41 @@ async def _cleanup_organization_references(task_db, project_id: int, org_id: int
         await task_db.delete(m)
 
 
+def _fallback_project_info(bk, chapters: list) -> dict:
+    """项目分析超时/失败时的兜底方案：用原始书信息生成最小可用项目配置。"""
+    title = (bk.title or "").strip()
+    if not title:
+        title = "未命名项目"
+    # 从文件名提取扩展名并去掉
+    if "." in title:
+        title = title.rsplit(".", 1)[0]
+    # 估算总字数
+    total_chars = sum(len(ch.get("text", "")) for ch in chapters) if chapters else 0
+    genre = ""
+    # 简单启发式：根据内容关键词猜测题材
+    sample = " ".join(ch.get("text", "")[:500] for ch in chapters[:3])
+    genre_keywords = {
+        "玄幻": ["灵气", "武魂", "斗气", "元婴", "筑基", "经脉", "灵根"],
+        "都市": ["职场", "公司", "总裁", "办公室", "创业", "商圈"],
+        "科幻": ["星际", "机甲", "基因", "纳米", "量子", "飞船"],
+        "历史": ["王朝", "皇帝", "将军", "朝廷", "王朝", "诸侯"],
+        "悬疑": ["谋杀", "侦探", "线索", "凶手", "密室", "推理"],
+    }
+    for g, kws in genre_keywords.items():
+        if any(kw in sample for kw in kws):
+            genre = g
+            break
+    return {
+        "title": f"《{title}》改编版",
+        "genre": genre or "网文",
+        "description": f"根据《{title}》自动拆解生成的项目",
+        "synopsis": f"根据《{title}》自动拆解生成的项目",
+        "target_words": max(total_chars // 10, 100000),
+        "narrative_perspective": "第三人称",
+        "theme": "",
+    }
+
+
 async def _apply_consistency_fixes(task_db, project_id: int, check_json: dict) -> int:
     """应用一致性自查给出的修复指令，返回已修复数量。
 
@@ -934,24 +969,41 @@ async def book_import_deconstruct(
         await tracker.update(stage="analyzing", message="AI 分析项目信息...")
         sample_count = max(1, payload["sample_count"])
         sampled_text = _sample_chapters_evenly(chapters, min(sample_count, len(chapters) or 1))
-        sug_result = await engine.execute_skill(
-            "book_import_reverse_project_suggestion",
-            ai_client,
-            {
-                "title": bk.title or "未知书名",
-                "sampled_text": sampled_text,
-                "target_platform": payload.get("target_platform", ""),
-                "user_prompt": (
-                    f"参考小说《{bk.title}》的正文，策划一本**全新的**小说立项。"
-                    f"新书名绝对不能是「{bk.title}」，也不能是它的变体（加后缀/改字）。"
-                    f"请取一个完全不同的新书名。"
+        import asyncio as _asyncio
+
+        sug_result = None
+        try:
+            sug_result = await _asyncio.wait_for(
+                engine.execute_skill(
+                    "book_import_reverse_project_suggestion",
+                    ai_client,
+                    {
+                        "title": bk.title or "未知书名",
+                        "sampled_text": sampled_text,
+                        "target_platform": payload.get("target_platform", ""),
+                        "user_prompt": (
+                            f"参考小说《{bk.title}》的正文，策划一本**全新的**小说立项。"
+                            f"新书名绝对不能是「{bk.title}」，也不能是它的变体（加后缀/改字）。"
+                            f"请取一个完全不同的新书名。"
+                        ),
+                    },
                 ),
-            },
-        )
-        if sug_result.get("error"):
-            await tracker.fail(f"项目分析失败: {sug_result['error']}")
-            return
-        project_info = sug_result.get("json") or {}
+                timeout=660,  # 单步超时11分钟（略大于AI_TIMEOUT的10分钟，让httpx先超时）
+            )
+        except asyncio.TimeoutError:
+            logger.warning("拆书项目分析超时（660s），使用兜底方案继续")
+        except Exception as e:
+            logger.warning("拆书项目分析异常：%s，使用兜底方案继续", e)
+
+        if sug_result and sug_result.get("error"):
+            logger.warning("拆书项目分析返回错误：%s，使用兜底方案继续", sug_result["error"])
+            sug_result = None  # 触发兜底
+
+        project_info = (sug_result or {}).get("json") or {}
+        if not project_info:
+            # 兜底：AI 分析失败时用原始书信息生成最小可用项目
+            project_info = _fallback_project_info(bk, chapters)
+            logger.info("拆书项目分析使用兜底方案（书名=%s）", project_info.get("title", "?"))
 
         # 3. 建项目
         genre = project_info.get("genre") or ""
@@ -1210,16 +1262,19 @@ async def book_import_deconstruct(
         await tracker.update(stage="generating", message="提取世界观设定...", progress=80)
         try:
             world_sample = _sample_chapters_evenly(chapters, 12)
-            world_result = await engine.execute_skill(
-                "book_import_reverse_world",
-                ai_client,
-                {
-                    "title": new_proj.title,
-                    "genre": genre or "网文",
-                    "synopsis": synopsis or "",
-                    "chapters_text": world_sample,
-                    "user_prompt": "请从以下正文中提取世界观设定。",
-                },
+            world_result = await _asyncio.wait_for(
+                engine.execute_skill(
+                    "book_import_reverse_world",
+                    ai_client,
+                    {
+                        "title": new_proj.title,
+                        "genre": genre or "网文",
+                        "synopsis": synopsis or "",
+                        "chapters_text": world_sample,
+                        "user_prompt": "请从以下正文中提取世界观设定。",
+                    },
+                ),
+                timeout=660,  # 单步超时11分钟
             )
             if world_result.get("error"):
                 logger.warning("拆书世界观提取失败：%s", world_result["error"])
@@ -1372,18 +1427,21 @@ async def book_import_deconstruct(
         try:
             from app.services.chapter_tools import get_chapter_tools, make_tool_executor
 
-            check_result = await engine.execute_skill(
-                "book_import_consistency_check",
-                ai_client,
-                {
-                    "title": new_proj.title,
-                    "genre": genre or "网文",
-                    "synopsis": synopsis or "",
-                    "world_info": _build_world_info_for_proj(new_proj),
-                    "user_prompt": "请用工具自查项目设定一致性，找出矛盾并给出修复指令。",
-                },
-                tools=get_chapter_tools(),
-                tool_executor=make_tool_executor(db, new_proj.id),
+            check_result = await _asyncio.wait_for(
+                engine.execute_skill(
+                    "book_import_consistency_check",
+                    ai_client,
+                    {
+                        "title": new_proj.title,
+                        "genre": genre or "网文",
+                        "synopsis": synopsis or "",
+                        "world_info": _build_world_info_for_proj(new_proj),
+                        "user_prompt": "请用工具自查项目设定一致性，找出矛盾并给出修复指令。",
+                    },
+                    tools=get_chapter_tools(),
+                    tool_executor=make_tool_executor(db, new_proj.id),
+                ),
+                timeout=660,  # 单步超时11分钟
             )
             if check_result.get("error"):
                 logger.warning("拆书一致性自查失败：%s", check_result["error"])

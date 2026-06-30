@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     AI_MAX_RETRIES: int = 1  # 应用层 JSON 解析重试次数（仅重试 1 次，减少 token 浪费）
     AI_RETRY_DELAY: float = 3.0  # 重试基础间隔（秒），指数退避
     AI_RETRY_MAX_DELAY: float = 30.0  # 重试最大间隔（秒）
+    AI_TASK_TIMEOUT: int = 1800  # 后台任务总超时（秒），默认30分钟（拆书等多步任务用）
 
     # 章节生成参数
     CHAPTER_DEFAULT_WORDS: int = 4000
