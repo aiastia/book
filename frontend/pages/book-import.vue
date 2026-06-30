@@ -14,6 +14,7 @@ const parseTarget = ref<any>(null)
 const parseLoading = ref(false)
 const sampleCount = ref(10)                         // 立项均匀采样章数
 const outlineChapters = ref(20)                     // 大纲拆解章数
+const targetPlatform = ref('')                       // 目标平台
 const deconstructResult = ref<any>(null)            // 拆解结果
 
 async function handleUpload(options: any) {
@@ -86,6 +87,7 @@ async function onDeconstruct() {
     const res = await API.bookImport.deconstruct(parseTarget.value.id, {
       sample_count: sampleCount.value,
       outline_chapters: outlineChapters.value,
+      target_platform: targetPlatform.value,
     })
     // 异步任务：提交后关闭弹窗，进度由右下角浮窗显示
     const { trackTask } = useBackgroundTasks()
@@ -327,6 +329,17 @@ function onDirectUpload(file: any) {
           <a-radio-button :value="99999">拆全书（{{ parseTarget?.total_chapters || parseTarget?.chapters || '?' }} 章）</a-radio-button>
         </a-radio-group>
         <div style="font-size:12px;color:#909399;margin-top:6px;">章数越多 token 消耗越大、耗时越长（每5章一批AI调用）。全书拆解可能需要较长时间。</div>
+      </div>
+
+      <div style="margin-bottom:16px">
+        <div style="font-weight:500;margin-bottom:8px;">③ 目标平台（影响书名/大纲/正文的创作调性）</div>
+        <a-radio-group v-model:value="targetPlatform" button-style="solid">
+          <a-radio-button value="">通用</a-radio-button>
+          <a-radio-button value="番茄">番茄</a-radio-button>
+          <a-radio-button value="起点">起点</a-radio-button>
+          <a-radio-button value="晋江">晋江</a-radio-button>
+          <a-radio-button value="微信读书">微信读书</a-radio-button>
+        </a-radio-group>
       </div>
 
       <div style="display:flex;justify-content:flex-end;gap:8px;">

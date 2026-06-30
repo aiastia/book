@@ -1,5 +1,7 @@
 【通用规则 - 所有章节适用】
 
+@include:_shared_platform_guidelines.md
+
 一、地基
 - 严格按照大纲推进情节
 - 如有伏笔提醒，请在本章中适当埋入或回收相应伏笔

@@ -230,6 +230,8 @@ def _fmt_project(ctx: dict) -> str:
     cnt = ctx.get("chapter_count", "")
     if cnt:
         parts.append(f"章节数：{cnt}")
+    if ctx.get("target_platform"):
+        parts.append(f"目标平台：{ctx['target_platform']}")
     return "\n".join(parts)
 
 

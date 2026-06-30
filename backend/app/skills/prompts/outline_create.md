@@ -28,6 +28,8 @@
 地点：
 {locations_info}
 
+@include:_shared_platform_guidelines.md
+
 ## 一、基础字段（每章必填）
 - chapter_number: 章节序号
 - title: 章节标题

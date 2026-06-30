@@ -102,6 +102,7 @@ class ProjectCreate(BaseModel):
     writing_style: dict = {}
     outline_mode: str = "one_to_one"  # one_to_one / one_to_many
     pen_name: str = ""  # 笔名/作者名
+    target_platform: str = ""  # 目标发布平台（番茄/起点/晋江/微信读书/通用）
 
     @field_validator("title", "genre", "synopsis", "narrative_pov", mode="before")
     @classmethod
@@ -308,10 +309,11 @@ class BookImportUploadRequest(BaseModel):
 
 
 class BookImportDeconstructRequest(BaseModel):
-    """一键拆解：采样章数 + 大纲拆解章数。"""
+    """一键拆解：采样章数 + 大纲拆解章数 + 目标平台。"""
 
     sample_count: int = 10  # 立项均匀采样章数（全书前中后）
     outline_chapters: int = 20  # 大纲拆解章数（连续前N章，按5章/批）
+    target_platform: str = ""  # 目标发布平台（番茄/起点/晋江/微信读书/通用）
 
 
 class McpToolTestRequest(BaseModel):

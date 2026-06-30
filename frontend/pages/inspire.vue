@@ -61,6 +61,7 @@ const creating = ref(false)
 const genStep = ref('')
 // 大纲模式（1→1 传统模式 / 1→N 细化模式）
 const outlineMode = ref<'one_to_one' | 'one_to_many'>('one_to_many')  // 自动生成进度
+const targetPlatform = ref('')  // 目标发布平台
 
 // 兜底：旧的全局灵感
 const legacyResult = ref<any>(null)
@@ -156,6 +157,7 @@ async function onQuickComplete() {
       target_word_count: data.target_word_count,
       narrative_pov: data.narrative_pov,
       outline_mode: outlineMode.value,
+      target_platform: targetPlatform.value,
     })
     const pid = created.id
 
@@ -325,6 +327,18 @@ const stepLabels: Record<number, string> = { 0: '输入灵感', 1: '选择书名
               <div class="mode-card-desc">一条大纲展开为多章</div>
             </div>
           </div>
+        </div>
+        <!-- 目标平台选择 -->
+        <div class="result-section">
+          <h4>目标平台</h4>
+          <a-radio-group v-model:value="targetPlatform" button-style="solid" size="small" style="margin-top:4px;">
+            <a-radio-button value="">通用</a-radio-button>
+            <a-radio-button value="番茄">番茄</a-radio-button>
+            <a-radio-button value="起点">起点</a-radio-button>
+            <a-radio-button value="晋江">晋江</a-radio-button>
+            <a-radio-button value="微信读书">微信读书</a-radio-button>
+          </a-radio-group>
+          <div style="font-size:12px;color:#909399;margin-top:4px;">不同平台的读者口味差异大，会影响书名风格、节奏和爽点设计。</div>
         </div>
         <a-alert v-if="creating && genStep" :message="genStep + '...'" type="info" show-icon style="margin-top:16px;" />
         <div style="margin-top:20px;display:flex;gap:8px;">

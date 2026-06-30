@@ -1210,6 +1210,8 @@ class ChapterService:
                 context["target_word_count"] = str(_ov.get("target_word_count", 4000))
             if "narrative_perspective" not in context:
                 context["narrative_perspective"] = project.narrative_pov or "第三人称"
+            if "target_platform" not in context:
+                context["target_platform"] = project.target_platform or "通用"
             # 从 expansion_plan 提取（1→N 模式的核心数据源）
             plan = (
                 (chapter.expansion_plan or {}) if isinstance(chapter.expansion_plan, dict) else {}

@@ -1,0 +1,12 @@
+{
+  "name": "_shared_platform_guidelines",
+  "display_name": "目标平台调性（共享）",
+  "description": "各发布平台（番茄/起点/晋江/微信读书）的调性要求，影响立项/大纲/章节生成的风格。用户可在 skill 管理页面自定义各平台规则。",
+  "category": "platform",
+  "skill_type": "builtin",
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "system_prompt_file": "_shared_platform_guidelines.md"
+}

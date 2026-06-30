@@ -87,6 +87,8 @@
 </output>
 
 <constraints>
+@include:_shared_platform_guidelines.md
+
 @include:_shared_book_import_genre_lock.md
 @include:_shared_book_import_naming.md
 

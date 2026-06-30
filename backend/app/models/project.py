@@ -30,6 +30,7 @@ class Project(Base):
     world_rules = Column(Text, default="")  # 世界规则（力量体系/社会法则）
     cover_prompt = Column(Text, default="")  # 封面提示词
     pen_name = Column(String(100), default="")  # 笔名/作者名（用于封面和导出）
+    target_platform = Column(String(50), default="")  # 目标发布平台（番茄/起点/晋江/微信读书/通用），影响生成调性
     # ---- 大纲章节模式（对标 MuMuAINovel，创建后不可更改）----
     # one_to_one: 传统模式，1大纲→1章节（生成大纲时自动建章）
     # one_to_many: 细化模式，1大纲→N章节（大纲是"卷"，需手动展开为多章）

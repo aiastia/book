@@ -1637,6 +1637,7 @@ async def _step_outline(db, task, pid, proj, engine, ai_client):
             "genre": proj.genre or "网文",
             "theme": proj.genre or "网文",
             "narrative_perspective": proj.narrative_pov or "第三人称",
+            "target_platform": proj.target_platform or "",
             "time_period": proj.world_time_period or "",
             "location": proj.world_location or "",
             "atmosphere": proj.world_atmosphere or "",

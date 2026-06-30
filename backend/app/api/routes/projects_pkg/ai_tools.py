@@ -935,6 +935,7 @@ async def book_import_deconstruct(
                 {
                     "title": bk.title or "未知书名",
                     "sampled_text": sampled_text,
+                    "target_platform": payload.get("target_platform", ""),
                     "user_prompt": (
                         f"参考小说《{bk.title}》的正文，策划一本**全新的**小说立项。"
                         f"新书名绝对不能是「{bk.title}」，也不能是它的变体（加后缀/改字）。"
@@ -964,6 +965,7 @@ async def book_import_deconstruct(
                 current_word_count=0,
                 target_word_count=project_info.get("target_words") or 0,
                 narrative_pov=project_info.get("narrative_perspective") or "第三人称",
+                target_platform=payload.get("target_platform", ""),
                 status="active",
             )
             task_db.add(new_proj)
@@ -1081,6 +1083,7 @@ async def book_import_deconstruct(
                             "genre": genre or "网文",
                             "theme": theme,
                             "narrative_perspective": narrative_pov,
+                            "target_platform": payload.get("target_platform", ""),
                             "start_chapter": str(start_no),
                             "end_chapter": str(end_no),
                             "expected_count": str(end_no - start_no + 1),
@@ -1398,6 +1401,7 @@ async def book_import_deconstruct(
             "user_id": user.id,
             "sample_count": req.sample_count,
             "outline_chapters": outline_chapters,
+            "target_platform": req.target_platform,
         },
         runner=_run_deconstruct,
     )
