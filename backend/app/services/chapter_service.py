@@ -209,6 +209,12 @@ def _check_content_degradation(content: str) -> str | None:
         if marker.lower() in lower:
             return f"检测到模型元评论（{marker}）"
 
+    # 3b. 系统提示词回显检测：AI 把写作风格/角色设定等系统指令 echoed 到正文
+    if _re.search(r'【写作风格】', content) or _re.search(r'<writing_style>', content):
+        return "检测到系统提示词回显（写作风格块）"
+    if _re.search(r'<style_traits>', content) or _re.search(r'<style_custom>', content):
+        return "检测到系统提示词回显（风格特征块）"
+
     # 4. 碎片对话检测：连续短行对话（<10字）且无旁白动作
     short_dialogue = sum(
         1 for line in lines if line.strip() and len(line.strip()) < 15 and ('"' in line or '"' in line or '"' in line)
@@ -217,6 +223,40 @@ def _check_content_degradation(content: str) -> str | None:
         return "检测到碎片化对话堆砌（无旁白动作）"
 
     return None
+
+
+def _strip_echoed_system_blocks(content: str) -> str:
+    """清理 AI  echoed 的系统提示词块（写作风格、角色设定等回显到正文的情况）。"""
+    import re as _re
+
+    # 匹配被 echoed 的写作风格块：【写作风格】xxx ... </style_traits> 或 </writing_style>
+    # 这些通常出现在正文开头，是系统提示词的回显
+    patterns = [
+        # XML 标签块：<writing_style>...</writing_style>
+        r'<writing_style>\s*.*?\s*</writing_style>',
+        # XML 标签块：<style_traits>...</style_traits>
+        r'<style_traits>\s*.*?\s*</style_traits>',
+        # XML 标签块：<style_custom>...</style_custom>
+        r'<style_custom>\s*.*?\s*</style_custom>',
+        # XML 标签块：<style_reference>...</style_reference>
+        r'<style_reference>\s*.*?\s*</style_reference>',
+        # 【写作风格】标题行 + 后续的属性描述行
+        r'^【写作风格】[^\n]+\n(?:\s*[^\n]+\n)*',
+        # 写作风格要求段落（从"写作风格要求："到空行或下一个标题）
+        r'写作风格要求[：:]\s*\n(?:[^\n]+\n)*',
+        # 风格维度描述块（节奏/语气/句式/描写侧重/对话占比/用词 + 值）
+        r'(?:节奏|语气|句式|描写侧重|对话占比|用词)[:：]\s*[^\n]+\n',
+        # 写作风格提示词常见开头
+        r'^写作风格[^\n]*\n(?:[^\n]*\n){0,10}',
+    ]
+
+    result = content
+    for pattern in patterns:
+        result = _re.sub(pattern, '', result, flags=_re.DOTALL | _re.MULTILINE)
+
+    # 清理多余空行
+    result = _re.sub(r'\n{3,}', '\n\n', result)
+    return result.strip()
 
 
 def generate_analysis_summary(analysis_data: dict) -> str:
@@ -1546,6 +1586,11 @@ class ChapterService:
                 chapter.status = "draft"
                 await self.db.commit()
                 return {"error": "AI 生成内容为空"}
+
+            # 过滤 AI  echoed 的系统提示词（写作风格块等）
+            content = _strip_echoed_system_blocks(content)
+            if not content.strip():
+                return {"error": "AI 生成内容均为系统提示词回显，已过滤"}
 
             # 文本后处理：机械规则清理 AI 口癖
             from app.services.text_cleaner import _strip_xml_like_tags, clean_generated_text

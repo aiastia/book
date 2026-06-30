@@ -401,6 +401,7 @@ class AIClient:
         try:
             stream = await self.client.chat.completions.create(**kwargs)
             content_parts = []
+            reasoning_parts = []
             tool_call_buf: dict[int, dict] = {}  # index -> {id, name, arguments}
             model_name = model or self.model
             usage_info = None
@@ -411,6 +412,10 @@ class AIClient:
                     delta = chunk.choices[0].delta
                     if delta.content:
                         content_parts.append(delta.content)
+                    # 推理模型可能把正文输出到 reasoning_content
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc:
+                        reasoning_parts.append(rc)
                     if delta.tool_calls:
                         for tc in delta.tool_calls:
                             idx = tc.index
@@ -429,6 +434,13 @@ class AIClient:
                                     tool_call_buf[idx]["arguments"] += tc.function.arguments
 
             content = "".join(content_parts)
+            # 推理模型（如 step-3.7-flash / Kimi K2）可能把正文输出到 reasoning_content 而非 content
+            if not content and reasoning_parts:
+                content = "".join(reasoning_parts)
+                logger.warning(
+                    f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
+                    f"已合并 {len(reasoning_parts)} 段 reasoning_content"
+                )
             tool_calls = []
             for idx in sorted(tool_call_buf.keys()):
                 tc = tool_call_buf[idx]
