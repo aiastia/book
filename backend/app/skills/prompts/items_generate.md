@@ -27,7 +27,7 @@ is_key_item=1 的物品必须与主角和反派的跨位面互动直接相关。
 - 分布原则：common/uncommon 占多数，mythic 最多 1 件。
 
 【输出格式】
-只返回纯JSON数组：
-[{"name":"物品名（中文。多位面题材冠以位面标签）","category":"装备/消耗/关键道具/材料/货币","rarity":"common/uncommon/rare/epic/legendary/mythic","item_type":"类型（中文。多位面题材注明跨位面或位面专属）","description":"100-200字","attributes":{},"is_key_item":0}]
+只返回纯JSON数组，attributes 用字符串数组（不要用对象，避免嵌套引号导致JSON损坏）：
+[{"name":"物品名（中文。多位面题材冠以位面标签）","category":"装备/消耗/关键道具/材料/货币","rarity":"common/uncommon/rare/epic/legendary/mythic","item_type":"类型（中文。多位面题材注明跨位面或位面专属）","description":"100-200字","attributes":["属性1","属性2"],"is_key_item":0}]
 
 生成 5-8 个物品，至少 1 个 is_key_item=1。

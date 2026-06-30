@@ -209,7 +209,7 @@ async def generate_items(
                 description=str(it.get("description", ""))[:2000],
                 attributes=it.get("attributes", {})
                 if isinstance(it.get("attributes"), dict)
-                else {},
+                else ({"items": it.get("attributes")} if isinstance(it.get("attributes"), list) else {}),
                 is_key_item=1 if it.get("is_key_item") else 0,
                 status="stored",
                 source="ai",
