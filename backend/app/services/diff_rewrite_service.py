@@ -144,8 +144,8 @@ def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
         if len(sentence) >= 6:
             matches.append({"start": start, "end": end, "sentence": sentence})
 
-    # 只有超过阈值时才标记
-    threshold = 1  # 提示词已禁止，残留即标记改写
+    # 提示词已明确禁止「不是A是B」句式，残留一处就改一处——threshold=0，全标记，一个不留
+    threshold = 0
     if len(matches) <= threshold:
         return []
 
@@ -320,31 +320,45 @@ async def _call_rewrite_api(
 # ====================================================================
 # 四道闸校验
 # ====================================================================
-def _validate_rewrite(original: str, rewritten: str) -> bool:
-    """四道闸：空值/长度变化>50%/专名丢失/无变化 → False（不通过）。"""
+def _validate_rewrite(original: str, rewritten: str, kind: str = "normal") -> bool:
+    """四道闸：空值/长度变化>50%/专名丢失/无变化 → False（不通过）。
+
+    kind:
+      - "normal"（默认）：普通指纹句改写，严格校验。
+      - "rewrite"：句式重写类（如"不是A是B"），改写本身就会改变长度和用词，
+        放宽长度限制到 0.3-2.5，并跳过专名检测（重写后通常没有原句的词）。
+    """
     if not rewritten or not rewritten.strip():
         return False
     # 无变化
     if rewritten.strip() == original.strip():
         return False
-    # 长度变化超过 50%
+    # 长度变化
     orig_len = len(original.strip())
     new_len = len(rewritten.strip())
     if orig_len > 0:
         ratio = new_len / orig_len
-        if ratio < 0.5 or ratio > 1.5:
-            return False
+        if kind == "rewrite":
+            # 句式重写会改变长度，放宽到 0.3-2.5
+            if ratio < 0.3 or ratio > 2.5:
+                return False
+        else:
+            # 普通改写：长度变化不超过 50%
+            if ratio < 0.5 or ratio > 1.5:
+                return False
     # 专名检测：原句中的 2~4 字连续中文词（粗略），改写后不应全丢
-    # 只检查"人名/地名"——简化为：原句里出现 2 次以上的 2 字词
-    _NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,4}")
-    orig_names = set(_NAME_RE.findall(original))
-    # 过滤掉太常见的词
-    orig_names = {n for n in orig_names if len(n) >= 2 and original.count(n) >= 1}
-    if orig_names:
-        lost = [n for n in orig_names if n not in rewritten]
-        # 如果超过一半的专名丢了，不通过
-        if len(lost) > len(orig_names) / 2:
-            return False
+    # 句式重写类（rewrite）跳过此项——重写后通常不再保留原句的字面用词，
+    # 专名检测会把合理的改写误判为"丢信息"。
+    if kind != "rewrite":
+        _NAME_RE = re.compile(r"[\u4e00-\u9fff]{2,4}")
+        orig_names = set(_NAME_RE.findall(original))
+        # 过滤掉太常见的词
+        orig_names = {n for n in orig_names if len(n) >= 2 and original.count(n) >= 1}
+        if orig_names:
+            lost = [n for n in orig_names if n not in rewritten]
+            # 如果超过一半的专名丢了，不通过
+            if len(lost) > len(orig_names) / 2:
+                return False
     return True
 
 
