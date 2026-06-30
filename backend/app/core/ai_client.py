@@ -94,7 +94,14 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
             name = match.group(1).strip()
             body = match.group(2)
             args = {}
-            for pm in re.finditer(r"<parameter:([^>]+)>(.*?)(?:</parameter:\1>|
+            for pm in re.finditer(r"<parameter:([^>]+)>(.*?)(?:</parameter:\1>|$)", body, re.DOTALL):
+                pname = pm.group(1).strip()
+                pval = pm.group(2).strip()
+                try:
+                    pval = json.loads(pval)
+                except Exception:
+                    pass
+                args[pname] = pval
             clean_name = name.replace("functions.", "").split(":")[0]
             tool_calls.append({
                 "id": f"xml_{clean_name}",
