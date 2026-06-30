@@ -2060,20 +2060,30 @@ class ChapterService:
             self.db.add(analysis)
             await _report(62, "正在更新章节质量评分...")
 
+            # 质量评分转换辅助函数（AI 可能返回字符串，需强制转 float）
+            def _score_float(key, default):
+                """评分字段 AI 可能返回字符串（如 "8.2" 或 "整体质量（8.0）：xxx"），强制转 float 防止类型错误。"""
+                v = quality_scores_data.get(key, default)
+                if isinstance(v, str):
+                    import re
+                    m = re.search(r'[\d]\.?\d*', v)
+                    if m:
+                        try:
+                            return float(m.group())
+                        except (ValueError, TypeError):
+                            return default
+                    return default
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    return default
+
             # 更新章节质量评分
             chapter.quality_score = _score_float("overall", None)
             chapter.quality_detail = quality_scores_data
 
             # 质量告警检测
             alert_parts = []
-
-            def _score_float(key, default):
-                """评分字段 AI 可能返回字符串（如 "8.2"），强制转 float 防止比较类型错误。"""
-                v = quality_scores_data.get(key, default)
-                try:
-                    return float(v)
-                except (ValueError, TypeError):
-                    return default
 
             overall = _score_float("overall", 10)
             coherence = _score_float("coherence", 10)
