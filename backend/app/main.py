@@ -21,7 +21,7 @@ from app.api.routes.tasks import router as tasks_router
 from app.api.routes.writing_styles import router as writing_styles_router
 from app.api.routes.ws_tasks import router as ws_tasks_router
 from app.core.auth import get_password_hash
-from app.core.database import Base, async_session, engine
+from app.core.database import Base, async_session, engine, init_db
 from app.models.skill import Skill
 from app.models.user import User
 from app.skills.builtin import init_builtin_skills
@@ -200,10 +200,9 @@ async def _auto_migrate():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时创建表
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    # 轻量迁移：为已有表补列
+    # 启动时创建表 + 自动补列（新增 Column 不再需要手动写 ALTER TABLE）
+    await init_db()
+    # 轻量迁移：为已有表补列（包括 DROP COLUMN 等无法自动检测的操作）
     await _auto_migrate()
     # 清理僵尸任务（进程崩溃后残留的 running/pending 任务）
     await _cleanup_zombie_tasks()

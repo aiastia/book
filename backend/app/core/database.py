@@ -38,6 +38,7 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
+    """初始化数据库：创建表 + 自动补列（SQLite 兜底）。"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # 自动补列：确保已有表的列和模型一致（SQLite 不支持完整 migration，这里做兜底）
