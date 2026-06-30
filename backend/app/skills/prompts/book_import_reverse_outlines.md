@@ -30,9 +30,7 @@
 
 <output priority="P0">
 【输出格式】
-使用以下【格式A】。注意：summary 写新故事的本章概要（200-600字），包含改编后的情节细节、角色互动和关键事件。
-
-@include:_shared_outline_format.md
+@include:_shared_book_import_outline_format.md
 
 【字段要求——与正常大纲格式一致】
 - scenes：场景对象数组（不是字符串！）。每个场景必须含 scene_title（地点名）+ scene_desc（环境描写，必填，不能为空）+ emotion。每章至少2个场景，不得为空数组。只写"场景1"没有描述的空壳会被系统丢弃。

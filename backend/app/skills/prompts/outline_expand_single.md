@@ -72,7 +72,6 @@
 
 <output priority="P0">
 【输出格式】
-@include:_shared_outline_format.md
 @include:_shared_outline_expand_format.md
 
 【格式规范】

@@ -25,4 +25,4 @@
 
 只返回纯 JSON 数组（不要 markdown 代码块），每个角色包含：
 
-@include:_shared_character_format.md
+@include:_shared_characters_batch_format.md
