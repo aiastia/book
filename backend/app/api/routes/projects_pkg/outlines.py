@@ -1347,7 +1347,7 @@ async def continue_outlines(
         .scalars()
         .all()
     )
-    ctx = await _project_context(db, project_id, proj, use_tools=True)
+    ctx = await _project_context(db, project_id, proj, use_tools=False)
 
     # ===== 大纲上下文截断优化 =====
     full_limit = settings.OUTLINE_CONTEXT_CHAPTERS  # 默认 20
@@ -1468,10 +1468,8 @@ async def continue_outlines(
             "requirements": req.other_requirements or "",
             "mcp_references": "",
             "outline_mode": proj.outline_mode or "one_to_one",
-            "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
+            "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
         },
-        tools=get_chapter_tools(),
-        tool_executor=make_tool_executor(db, project_id, start_chapter),
     )
     check_skill_error(result)
     outlines_data = result.get("json") or []
@@ -1751,10 +1749,8 @@ async def continue_outlines_async(
                 "requirements": payload.get("other_requirements") or "",
                 "mcp_references": "",
                 "outline_mode": proj.outline_mode or "one_to_one",
-                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。如需查询前几章、角色关系、伏笔状态等，可使用工具。\n{extra_req_text}",
+                "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
             },
-            tools=get_chapter_tools(),
-            tool_executor=make_tool_executor(db, payload["project_id"], start_chapter),
         )
         if result.get("error"):
             await tracker.fail(result["error"])
@@ -1973,7 +1969,7 @@ async def _expand_outline_core(
             "新章节必须承接已有内容的剧情走向，不得与上述关键事件重复。"
         )
 
-    ctx = await _project_context(db, project_id, proj, use_tools=True)
+    ctx = await _project_context(db, project_id, proj, use_tools=False)
 
     # ===== 构建完整的 outline_content（卷概览）=====
     outline_parts = []
