@@ -314,6 +314,9 @@ async def generate_chapter_async(
         from app.services import background_task_service as bgs
 
         tracker = bgs.TaskProgressTracker(task_id, db=db)
+        if await tracker.is_cancelled():
+            await tracker.cancel("用户取消")
+            return
         await tracker.update(
             stage="preparing", message=f"准备生成第{payload['chapter_number']}章..."
         )

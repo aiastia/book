@@ -30,6 +30,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import async_session
 from app.models.background_task import BackgroundTask
 
+
+class _NoOpAsyncCM:
+    """No-op async context manager：包装已有 session，进入时返回自身，退出时不关闭。"""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass  # 不关闭共享 session
+
+
 # 进度阶段机（参照 MuMu TaskProgressTracker）
 STAGE_PROGRESS = {
     "init": 0,
@@ -53,9 +67,14 @@ class TaskProgressTracker:
         self.task_id = task_id
         self._db = db
 
-    async def _get_db(self):
+    async def _get_db_cm(self):
+        """返回一个 async context manager，用于写操作。
+
+        传入 db 时使用 no-op context manager（不关闭共享 session），
+        否则创建新的 async_session()。
+        """
         if self._db is not None:
-            return self._db
+            return _NoOpAsyncCM(self._db)
         return async_session()
 
     async def update(
@@ -69,7 +88,7 @@ class TaskProgressTracker:
         if progress is None and stage:
             progress = STAGE_PROGRESS.get(stage, 50)
         task_data = None
-        async with await self._get_db() as db:
+        async with await self._get_db_cm() as db:
             values = {
                 "status": "running",
                 "updated_at": datetime.utcnow(),
@@ -100,7 +119,7 @@ class TaskProgressTracker:
     async def complete(self, result: dict = None, message: str = "完成"):
         """标记任务完成。"""
         task_data = None
-        async with await self._get_db() as db:
+        async with await self._get_db_cm() as db:
             await db.execute(
                 update(BackgroundTask)
                 .where(BackgroundTask.id == self.task_id)
@@ -127,7 +146,7 @@ class TaskProgressTracker:
     async def fail(self, error: str):
         """标记任务失败。"""
         task_data = None
-        async with await self._get_db() as db:
+        async with await self._get_db_cm() as db:
             await db.execute(
                 update(BackgroundTask)
                 .where(BackgroundTask.id == self.task_id)
@@ -159,9 +178,34 @@ class TaskProgressTracker:
         except Exception:
             pass  # WebSocket 推送失败不影响主流程
 
+    async def cancel(self, message: str = "用户取消"):
+        """标记任务被取消（runner 检测到 cancel_requested 后调用）。"""
+        task_data = None
+        async with await self._get_db_cm() as db:
+            await db.execute(
+                update(BackgroundTask)
+                .where(BackgroundTask.id == self.task_id)
+                .values(
+                    status="cancelled",
+                    cancel_requested=True,
+                    status_message=message[:500],
+                    completed_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                )
+            )
+            await db.commit()
+            task = (
+                await db.execute(select(BackgroundTask).where(BackgroundTask.id == self.task_id))
+            ).scalar_one_or_none()
+            if task:
+                task_data = task.to_dict()
+
+        if task_data:
+            await self._ws_broadcast(task_data)
+
     async def is_cancelled(self) -> bool:
         """检查任务是否被取消（执行协程内调用，优雅退出）。"""
-        async with await self._get_db() as db:
+        async with await self._get_db_cm() as db:
             row = (
                 await db.execute(
                     select(BackgroundTask.cancel_requested, BackgroundTask.status).where(
@@ -171,7 +215,7 @@ class TaskProgressTracker:
             ).first()
             if not row:
                 return True
-            return bool(row[0]) or row[1] == "cancelled"
+            return bool(row[0]) or row[1] in ("cancelled", "cancelling")
 
 
 async def create_task(
@@ -275,6 +319,10 @@ async def cancel_task(task_id: int, user_id: int) -> bool:
             if task.status == "pending":
                 task.status = "cancelled"
                 task.completed_at = datetime.utcnow()
+            else:
+                # running 任务标记为 cancelling，让前端立即显示"正在取消"
+                task.status = "cancelling"
+                task.status_message = "正在取消..."
             task.updated_at = datetime.utcnow()
             await db.commit()
         return True

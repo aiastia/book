@@ -890,6 +890,9 @@ async def book_import_deconstruct(
 
         logger = logging.getLogger(__name__)
         tracker = bgs.TaskProgressTracker(task_id, db=db)
+        if await tracker.is_cancelled():
+            await tracker.cancel("用户取消")
+            return
 
         # 1. 取书
         bk = (
@@ -925,6 +928,9 @@ async def book_import_deconstruct(
         engine, ai_client = await make_engine_and_client(db, payload["user_id"])
 
         # 2. 立项采样（均匀采样全书前中后，和角色/世界观统一策略）
+        if await tracker.is_cancelled():
+            await tracker.cancel("用户取消")
+            return
         await tracker.update(stage="analyzing", message="AI 分析项目信息...")
         sample_count = max(1, payload["sample_count"])
         sampled_text = _sample_chapters_evenly(chapters, min(sample_count, len(chapters) or 1))
@@ -974,6 +980,9 @@ async def book_import_deconstruct(
         # 4. 提取角色档案（均匀采样全书，避免只看开头漏掉后文出场的角色）
         #    先于大纲生成，让大纲能复用已提取的角色名，避免大纲与角色各编一套名字
         #    导致 validate_outline 补建第二套角色（总数膨胀）。
+        if await tracker.is_cancelled():
+            await tracker.cancel("用户取消")
+            return
         await tracker.update(stage="generating", message="提取角色档案...", progress=20)
         from app.models.character import Character
         try:
@@ -1039,6 +1048,9 @@ async def book_import_deconstruct(
 
         for start_no in range(1, available + 1, batch_size):
             # 检查取消
+            if await tracker.is_cancelled():
+                await tracker.cancel("用户取消")
+                return
             bk2 = (
                 await db.execute(
                     select(ImportedBook).where(ImportedBook.id == payload["book_id"])
@@ -1192,6 +1204,9 @@ async def book_import_deconstruct(
                 continue
 
         # 5. 提取世界观设定（均匀采样全书，覆盖中后期才展开的世界观）
+        if await tracker.is_cancelled():
+            await tracker.cancel("用户取消")
+            return
         await tracker.update(stage="generating", message="提取世界观设定...", progress=80)
         try:
             world_sample = _sample_chapters_evenly(chapters, 12)
@@ -1349,8 +1364,11 @@ async def book_import_deconstruct(
         except Exception as e:
             logger.warning("拆书兜底补建章节异常：%s", e)
 
-        # 8. 一致性自查（轻量 agent）：用工具查实体，发现矛盾并自动修复
-        await tracker.update(stage="generating", message="设定一致性自查...", progress=95)
+            # 8. 一致性自查（轻量 agent）：用工具查实体，发现矛盾并自动修复
+            if await tracker.is_cancelled():
+                await tracker.cancel("用户取消")
+                return
+            await tracker.update(stage="generating", message="设定一致性自查...", progress=95)
         try:
             from app.services.chapter_tools import get_chapter_tools, make_tool_executor
 

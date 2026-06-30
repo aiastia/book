@@ -153,11 +153,20 @@ async def _wrap_runner(task_id: int, runner: Callable, payload: dict):
 
     创建共享 session 贯穿整个任务生命周期，避免 TaskProgressTracker 与 runner
     各自独立 session 并发写 SQLite 导致的 database is locked 错误。
+    外层 try/except 兜底 session 创建/mark_started 失败，确保不会静默丢失。
     """
-    async with async_session() as db:
-        await bg_service.mark_started(task_id, db=db)
+    try:
+        async with async_session() as db:
+            await bg_service.mark_started(task_id, db=db)
+            try:
+                await runner(task_id, payload, db)
+            except Exception as e:
+                tracker = bg_service.TaskProgressTracker(task_id, db=db)
+                await tracker.fail(str(e)[:5000])
+    except Exception as outer_e:
+        # 兜底：session 创建或 mark_started 失败，用独立 session 标记失败
         try:
-            await runner(task_id, payload, db)
-        except Exception as e:
-            tracker = bg_service.TaskProgressTracker(task_id, db=db)
-            await tracker.fail(str(e)[:5000])
+            tracker = bg_service.TaskProgressTracker(task_id)
+            await tracker.fail(f"任务启动失败: {str(outer_e)[:500]}")
+        except Exception:
+            pass  # 连标记失败都失败，只能靠日志

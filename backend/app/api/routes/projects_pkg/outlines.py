@@ -2439,7 +2439,7 @@ async def batch_expand_outlines_async(
         total_chapters = 0
         for item in items:
             if await tracker.is_cancelled():
-                await tracker.fail("用户已取消")
+                await tracker.cancel("用户取消")
                 return
             await tracker.update(
                 stage="generating",
