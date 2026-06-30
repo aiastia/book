@@ -1,6 +1,6 @@
 {
   "name": "_shared_writing_rules",
-  "display_name": "共享：writing rules",
+  "display_name": "共享：写作规则",
   "description": "共享模块 — 被其他 Skill 通过 @include 引用，修改将影响所有引用者",
   "category": "shared",
   "skill_type": "builtin",

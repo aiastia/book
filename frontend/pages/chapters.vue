@@ -71,8 +71,8 @@ function onEditorMouseup(e: MouseEvent) {
     return
   }
   const rect = ta.getBoundingClientRect()
-  selPopup.top = rect.top + window.scrollY - 50
-  selPopup.left = rect.left + window.scrollX + rect.width / 2 - 90
+  selPopup.top = rect.top + rect.height / 2 - 18
+  selPopup.left = rect.left + rect.width / 2 - 100
   selPopup.text = text
   selPopup.start = start
   selPopup.end = end
@@ -1211,6 +1211,18 @@ async function onPlanSaved() {
             <a-button size="small" @click.stop="hideSelPopup">取消</a-button>
           </div>
         </Teleport>
+
+        <!-- 选中文字对比弹窗 -->
+        <ContentComparisonModal
+          v-model:visible="selCompareOpen"
+          :title="selAction === 'rewrite' ? '局部重写对比' : '去AI味对比'"
+          :original-content="selCompareOriginal"
+          :new-content="selCompareNew"
+          show-actions
+          @apply="onApplySelCompare"
+          @discard="onDiscardSelCompare"
+        />
+
         <div class="editor-foot">
           <span>字数：{{ editingContent.length.toLocaleString() }}</span>
         </div>
@@ -1514,4 +1526,26 @@ async function onPlanSaved() {
 .reader-ann-title { font-size: 12px; font-weight: 600; color: #2B2B2B; margin-bottom: 3px; }
 .reader-ann-content { font-size: 12px; color: #595959; line-height: 1.5; }
 .reader-no-annot { font-size: 13px; color: #8C8C8C; text-align: center; padding: 24px 0; }
+
+/* 选中文字浮动工具栏 */
+.sel-popup {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #2B2B2B;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  transform: translateX(-50%);
+}
+.sel-popup::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #2B2B2B;
+}
 </style>
