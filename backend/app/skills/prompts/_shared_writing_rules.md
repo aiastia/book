@@ -6,6 +6,5 @@
 @include:rules/_shared_information_control.md
 @include:rules/_shared_density_control.md
 @include:rules/_shared_narrative_rhythm.md
-@include:rules/_shared_ai_trace_prevention.md
 
 </tone_rules>
