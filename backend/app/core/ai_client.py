@@ -461,6 +461,88 @@ class AIClient:
             if usage_info and hasattr(usage_info, 'prompt_tokens_details') and usage_info.prompt_tokens_details:
                 cached = getattr(usage_info.prompt_tokens_details, 'cached_tokens', 0) or 0
 
+            completion_tokens = usage_info.completion_tokens if usage_info else 0
+
+            # === Gateway 缓存命中空响应的检测与绕行重试 ===
+            # 现象：HTTP 200，但 content 空、无 tool_calls、completion_tokens=0。
+            # 多见于 Cloudflare AI Gateway 把一次空结果缓存后反复返回。
+            # 处理：往 messages 注入对模型无意义、但能改变请求体 hash 的扰动，强制绕过缓存重试一次。
+            if not content and not tool_calls and completion_tokens == 0:
+                logger.warning(
+                    f"[AI] 模型 {model_name} 返回空响应"
+                    f"（completion_tokens=0，疑似 Gateway 缓存命中空结果，cached_tokens={cached}），"
+                    f"注入扰动绕过缓存重试一次"
+                )
+                import random as _random
+                bypass_kwargs = dict(kwargs)
+                # 复制 messages 并往最后一条 user/system 末尾追加一个不可见扰动
+                bypass_msgs = [dict(m) for m in messages]
+                nonce = _random.randint(0, 1_000_000)
+                for m in reversed(bypass_msgs):
+                    if m.get("role") in ("user", "system") and isinstance(m.get("content"), str):
+                        m["content"] = m["content"] + f"\n<!--nonce:{nonce}-->"
+                        break
+                bypass_kwargs["messages"] = bypass_msgs
+                try:
+                    stream2 = await self.client.chat.completions.create(**bypass_kwargs)
+                    content_parts2 = []
+                    reasoning_parts2 = []
+                    tool_call_buf2: dict[int, dict] = {}
+                    usage_info2 = None
+                    async for chunk in stream2:
+                        if chunk.usage:
+                            usage_info2 = chunk.usage
+                        if chunk.choices:
+                            delta = chunk.choices[0].delta
+                            if delta.content:
+                                content_parts2.append(delta.content)
+                            rc = getattr(delta, "reasoning_content", None)
+                            if rc:
+                                reasoning_parts2.append(rc)
+                            if delta.tool_calls:
+                                for tc in delta.tool_calls:
+                                    idx = tc.index
+                                    if idx not in tool_call_buf2:
+                                        tool_call_buf2[idx] = {"id": tc.id or "", "name": "", "arguments": ""}
+                                    if tc.id:
+                                        tool_call_buf2[idx]["id"] = tc.id
+                                    if tc.function:
+                                        if tc.function.name:
+                                            tool_call_buf2[idx]["name"] += tc.function.name
+                                        if tc.function.arguments:
+                                            tool_call_buf2[idx]["arguments"] += tc.function.arguments
+                    content2 = "".join(content_parts2)
+                    if not content2 and reasoning_parts2:
+                        content2 = "".join(reasoning_parts2)
+                    tool_calls2 = []
+                    for idx in sorted(tool_call_buf2.keys()):
+                        tc = tool_call_buf2[idx]
+                        if tc["name"]:
+                            tool_calls2.append({
+                                "index": idx, "id": tc["id"], "type": "function",
+                                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+                            })
+                    # 重试拿到有效内容 → 采用重试结果
+                    if content2 or tool_calls2:
+                        logger.warning(
+                            f"[AI] 绕缓存重试成功，拿到内容（content={len(content2)}字，"
+                            f"tool_calls={len(tool_calls2)}，completion_tokens="
+                            f"{usage_info2.completion_tokens if usage_info2 else 0}）"
+                        )
+                        content, tool_calls = content2, tool_calls2
+                        usage_info = usage_info2 or usage_info
+                        cached = 0
+                        if usage_info and hasattr(usage_info, 'prompt_tokens_details') and usage_info.prompt_tokens_details:
+                            cached = getattr(usage_info.prompt_tokens_details, 'cached_tokens', 0) or 0
+                    else:
+                        logger.warning(
+                            f"[AI] 绕缓存重试仍为空（completion_tokens="
+                            f"{usage_info2.completion_tokens if usage_info2 else 0}），"
+                            f"返回空内容交由上层处理"
+                        )
+                except Exception as e2:
+                    logger.warning(f"[AI] 绕缓存重试异常（不影响主流程，返回原空结果）: {e2}")
+
             return {
                 "content": content,
                 "model": model_name,
