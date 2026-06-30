@@ -121,6 +121,14 @@ _COND_FN = {
     "has_style_traits": lambda ctx: (
         bool(ctx.get("style_traits")) and ctx.get("style_enable_traits", True)
     ),
+    # 未设置目标平台（空字符串或"通用"）时，跳过整个平台调性规则块。
+    "no_target_platform": lambda ctx: not ctx.get("target_platform") or ctx.get("target_platform") in ("", "通用"),
+    # 各平台独立注入：仅当目标平台匹配时保留该平台段落，其余平台段落全部跳过。
+    "target_is_not_番茄": lambda ctx: ctx.get("target_platform") != "番茄",
+    "target_is_not_起点": lambda ctx: ctx.get("target_platform") != "起点",
+    "target_is_not_晋江": lambda ctx: ctx.get("target_platform") != "晋江",
+    "target_is_not_微信读书": lambda ctx: ctx.get("target_platform") != "微信读书",
+    "target_is_not_通用": lambda ctx: ctx.get("target_platform") != "通用",
 }
 
 
