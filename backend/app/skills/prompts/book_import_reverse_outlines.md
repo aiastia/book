@@ -34,20 +34,6 @@
 
 @include:_shared_outline_format.md
 
-【扩展字段要求——除基础字段外，建议按需填充以下字段】
-- organizations：本章出现的组织名（从已有组织列表选或创建新的组织名字，没有则留空）
-- shuang_design：爽点设计（描述本章的核心爽点/燃点/泪点/甜点）
-- reader_hook：读者追读理由（50-100字）
-- decision_basis：决策依据（角色做出关键选择的理由）
-- obstacle_type：障碍类型（本章的主要障碍是什么）
-- hook_type：钩子类型（本章结尾使用的钩子类型）
-- chapter_breath：节奏（本章的叙事节奏特征）
-- foreshadow_plant：伏笔埋设（本章埋下的伏笔）
-- scene_anchor：场景锚点，50-80字感官细节
-- character_intents：角色意图数组，每个角色包含本章目标和此刻最想要的
-- new_items / new_locations：新引入的物品和地点
-- estimated_words：预估字数
-
 【字段要求——与正常大纲格式一致】
 - scenes：场景对象数组（不是字符串！）。每个场景必须含 scene_title（地点名）+ scene_desc（环境描写，必填，不能为空）+ emotion。每章至少2个场景，不得为空数组。只写"场景1"没有描述的空壳会被系统丢弃。
 - characters：本章出场角色名数组（字符串数组，不是对象）。必须使用已有角色名，不要用泛称（如"男孩""路人"）。
