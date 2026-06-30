@@ -9,6 +9,7 @@ if (!currentProjectId.value) await navigateTo('/books')
 const msg = useMessage()
 const route = useRoute()
 const router = useRouter()
+const { data: project, refresh: refreshProject } = await useFetch<Project>(() => `${useRuntimeConfig().public.apiBase}/api/projects/${currentProjectId.value}`)
 
 // 从 URL 读取分页参数
 const pageSize = ref(Number(route.query.pageSize || 10))
