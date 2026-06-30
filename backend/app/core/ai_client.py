@@ -14,10 +14,11 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
     - Kimi: <|tool_call_begin|>...<|tool_call_argument_begin|>...<|tool_call_end|>
     - DSML: <｜DSML｜tool_calls>...<invoke name="x">...<parameter ...>...</invoke>...</｜DSML｜tool_calls>
     - 通用 XML: <function:name>...<parameter:name>value
+    """
     if "<|tool_call_begin|>" in content:
         tool_calls = []
         for match in re.finditer(
-            r"<\|tool_call_begin\|>(.+?)<\|tool_call_argument_begin\|>(.+?)<\|tool_call_end\|>",
+            r"<[|]tool_call_begin[|]>(.+?)<[|]tool_call_argument_begin[|]>(.+?)<[|]tool_call_end[|]>",
             content,
             re.DOTALL,
         ):
@@ -80,7 +81,7 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
         return tool_calls if tool_calls else None
 
     # 兜底：检测任意 <|...|> 格式的 tool_call 标记（防止未来新格式泄漏）
-    if re.search(r"<\|[^>]+\|tool_call", content):
+    if re.search(r"<[|][^>]+[|]tool_call", content):
         return []  # 返回空列表触发 content="" 清理
 
     # 通用 XML 格式：<function:name><parameter:name>value</parameter:name></function:name>
@@ -121,7 +122,7 @@ SUPPORTED_PROVIDERS = ["openai", "anthropic", "gemini"]
 
 
 class AIClient:
-    """统一的 AI 调用客户端，支持自定义 OpenAI 兼容接口。
+    """统一的 AI 调用客户端, 支持自定义 OpenAI 兼容接口。
 
     通过 provider 字段区分厂商：
     - openai（默认）：走 AsyncOpenAI，兼容 deepseek/moonshot/智谱等所有 OpenAI 兼容接口
