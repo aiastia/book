@@ -848,6 +848,15 @@ async def generate_outlines_async(
             db, payload["project_id"], type("U", (), {"id": payload["user_id"]})()
         )
 
+        # 每章目标字数（用于控制大纲密度）
+        total_target = proj.target_word_count or 0
+        chapter_count = payload["chapter_count"]
+        if total_target > 0 and chapter_count > 0:
+            per_chapter = max(3000, min(8000, total_target // chapter_count))
+        else:
+            per_chapter = 4000
+        per_chapter_word_count = str(per_chapter)
+
         # ======== 首次大纲生成：直接全量注入，跳过两阶段（角色少，无前文/伏笔可查）========
         existing_outlines = (
             await db.execute(
@@ -887,6 +896,7 @@ async def generate_outlines_async(
                     "locations_info": ctx_full.get("locations_info", ""),
                     "user_prompt": f"请为《{proj.title}》生成{payload['chapter_count']}章大纲。这是第一卷，没有前文大纲或伏笔需要参考。",
                     "outline_mode": proj.outline_mode or "one_to_one",
+                    "per_chapter_word_count": per_chapter_word_count,
                 },
             )
             if result.get("error"):
@@ -1313,6 +1323,16 @@ async def continue_outlines(
     from app.core.config import settings
 
     proj = await get_user_project(db, project_id, user)
+
+    # 每章目标字数（用于控制大纲密度）
+    total_target = proj.target_word_count or 0
+    req_chapter_count = req.chapter_count
+    if total_target > 0 and req_chapter_count > 0:
+        per_chapter = max(3000, min(8000, total_target // req_chapter_count))
+    else:
+        per_chapter = 4000
+    per_chapter_word_count = str(per_chapter)
+
     outlines = (
         (
             await db.execute(
@@ -1468,8 +1488,11 @@ async def continue_outlines(
             "requirements": req.other_requirements or "",
             "mcp_references": "",
             "outline_mode": proj.outline_mode or "one_to_one",
+            "per_chapter_word_count": per_chapter_word_count,
             "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
         },
+        tools=get_chapter_tools(),
+        tool_executor=make_tool_executor(db, project_id, start_chapter),
     )
     check_skill_error(result)
     outlines_data = result.get("json") or []
@@ -1749,8 +1772,11 @@ async def continue_outlines_async(
                 "requirements": payload.get("other_requirements") or "",
                 "mcp_references": "",
                 "outline_mode": proj.outline_mode or "one_to_one",
+                "per_chapter_word_count": per_chapter_word_count,
                 "user_prompt": f"请在已有大纲（共{current_count}章）基础上，续写第{start_chapter}到{end_chapter}章的大纲。\n{extra_req_text}",
             },
+            tools=get_chapter_tools(),
+            tool_executor=make_tool_executor(db, payload["project_id"], start_chapter),
         )
         if result.get("error"):
             await tracker.fail(result["error"])
