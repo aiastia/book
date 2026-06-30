@@ -15,15 +15,17 @@ const pageSize = ref(Number(route.query.pageSize || 10))
 const currentPage = ref(Number(route.query.page || 1))
 const outlineTotal = ref(0)
 
-// 同步分页参数到 URL
+// 同步分页参数到 URL（仅客户端）
 watch([currentPage, pageSize], () => {
-  router.replace({
-    query: {
-      ...route.query,
-      page: currentPage.value,
-      pageSize: pageSize.value,
-    }
-  })
+  if (process.client) {
+    router.replace({
+      query: {
+        ...route.query,
+        page: currentPage.value,
+        pageSize: pageSize.value,
+      }
+    })
+  }
 })
 
 const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineListResponse>(() => {

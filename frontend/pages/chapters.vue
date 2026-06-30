@@ -221,15 +221,17 @@ const pageSize = ref(Number(route.query.pageSize || 20))
 const currentPage = ref(Number(route.query.page || 1))
 const pageSizeOptions = ['20', '50', '100']
 
-// 同步分页参数到 URL
+// 同步分页参数到 URL（仅客户端）
 watch([currentPage, pageSize, searchKeyword], () => {
-  router.replace({
-    query: {
-      ...route.query,
-      page: currentPage.value,
-      pageSize: pageSize.value,
-    }
-  })
+  if (process.client) {
+    router.replace({
+      query: {
+        ...route.query,
+        page: currentPage.value,
+        pageSize: pageSize.value,
+      }
+    })
+  }
 })
 
 // ===== 生成门槛逻辑 =====
