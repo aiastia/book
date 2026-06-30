@@ -70,6 +70,64 @@ _SCAN_KEYWORDS: list[tuple[str, str]] = [
 # 短句最小长度（太短的不值得改写）
 _MIN_SENTENCE_LEN = 12
 
+# === 动作模板密度控制（套路动作反复出现时，把多余的标出来改）===
+# 这些是 AI 高频套路动作词。单独用一次没问题，但全章反复出现就暴露 AI 味。
+# 策略：全章每个词超过阈值（默认 2 次）时，把第 3 次及以后标记改写。
+# 不进 _SCAN_KEYWORDS（那会无差别标每一句），走密度控制避免过度改写。
+_ACTION_TEMPLATE_WORDS: list[tuple[str, str]] = [
+    ("目光落在", "AI动作模板-目光"),
+    ("目光投向", "AI动作模板-目光"),
+    ("握紧", "AI动作模板-握紧"),
+    ("攥紧", "AI动作模板-握紧"),
+    ("呼吸一滞", "AI动作模板-呼吸"),
+    ("呼吸一紧", "AI动作模板-呼吸"),
+    ("指节发白", "AI动作模板-指节"),
+    ("心跳漏", "AI动作模板-心跳"),
+    ("喉结滚动", "AI动作模板-喉结"),
+    ("瞳孔", "AI动作模板-瞳孔"),
+]
+# 每个动作词全章允许出现的最大次数（超过则多余部分标记改写）
+_ACTION_TEMPLATE_THRESHOLD = 2
+
+
+def _scan_action_template_density(text: str, existing_hits: list[dict]) -> list[dict]:
+    """扫描高频套路动作词。
+
+    每个词全章出现超过阈值（默认 2 次）时，把第 3 次及以后的所在句子标记改写，
+    交由润色 AI 换成更多样的承载方式（衣摆/脚步/眼神错开/吞咽等，见 system_prompt）。
+    """
+    extra_hits = []
+    seen = {(h["start"], h["end"]) for h in existing_hits}
+    for word, category in _ACTION_TEMPLATE_WORDS:
+        # 统计该词所有出现位置
+        positions = []
+        pos = 0
+        while True:
+            pos = text.find(word, pos)
+            if pos == -1:
+                break
+            positions.append(pos)
+            pos += len(word)
+        # 超过阈值才处理：前 threshold 次保留，多余部分标记
+        if len(positions) <= _ACTION_TEMPLATE_THRESHOLD:
+            continue
+        # 对多余的每一次，提取所在句子
+        for p in positions[_ACTION_TEMPLATE_THRESHOLD:]:
+            start, end, sentence = _extract_sentence(text, p)
+            if len(sentence) < _MIN_SENTENCE_LEN:
+                continue
+            key = (start, end)
+            if key not in seen:
+                seen.add(key)
+                extra_hits.append({
+                    "start": start,
+                    "end": end,
+                    "sentence": sentence,
+                    "reason": category,
+                })
+    extra_hits.sort(key=lambda h: h["start"])
+    return extra_hits
+
 
 def _extract_sentence(text: str, pos: int) -> tuple[int, int, str]:
     """从关键词位置提取所在整句的起止位置和内容。"""
@@ -497,6 +555,12 @@ async def diff_rewrite(
     if neg_parallel_hits:
         logger.warning(f"[rewrite] 否定/祈使短句排比: 标记 {len(neg_parallel_hits)} 处改写")
         hits.extend(neg_parallel_hits)
+        hits.sort(key=lambda h: h["start"])
+    # 1e. 动作模板密度扫描（"目光落在""握紧""呼吸一滞"等套路动作反复出现时，标多余的改写）
+    action_template_hits = _scan_action_template_density(text, hits)
+    if action_template_hits:
+        logger.warning(f"[rewrite] 动作模板密度过高: 标记 {len(action_template_hits)} 句改写")
+        hits.extend(action_template_hits)
         hits.sort(key=lambda h: h["start"])
     if not hits:
         logger.warning("[rewrite] 未命中任何 AI 指纹句，跳过 API 调用（无请求发出）")
