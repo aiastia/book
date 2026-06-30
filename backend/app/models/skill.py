@@ -22,7 +22,6 @@ class Skill(Base):
     post_hooks = Column(JSON, default=list)  # 执行后钩子
     parameters = Column(JSON, default=dict)  # 参数 schema
     is_enabled = Column(Boolean, default=True)
-    is_hidden = Column(Boolean, default=False)  # 隐藏的 skill 不在管理页面显示（如 _shared_* 共享模组）
     config = Column(JSON, default=dict)  # 扩展配置
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
