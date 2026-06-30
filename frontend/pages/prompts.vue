@@ -14,13 +14,13 @@ const creating = ref(false)
 const categoryLabels: Record<string, string> = {
   custom: '自定义', chapter: '章节', outline: '大纲', character: '角色',
   world: '世界观', analysis: '分析', foreshadow: '伏笔', inspire: '灵感',
-  skill: '写作技能', mcp: 'MCP', tool: '工具', other: '其他', import: '导入',
+  skill: '写作技能', mcp: 'MCP', tool: '工具', shared: '共享模块', other: '其他', import: '导入',
 }
 
 // 按分类分组
 const grouped = computed(() => {
   const g: Record<string, any[]> = {}
-  const order = ['chapter', 'outline', 'character', 'world', 'analysis', 'foreshadow', 'inspire', 'skill', 'mcp', 'tool', 'import', 'custom', 'other']
+  const order = ['chapter', 'outline', 'character', 'world', 'analysis', 'foreshadow', 'inspire', 'skill', 'mcp', 'tool', 'shared', 'import', 'custom', 'other']
   for (const s of templates.value || []) {
     const cat = s.category || 'other'
     ;(g[cat] = g[cat] || []).push(s)
