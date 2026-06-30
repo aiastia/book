@@ -18,7 +18,7 @@ async function retryTask(t: any) {
     apiPost(`/api/projects/${t.project_id}/batch-generate/${t.id}/retry`, {})
       .then((r: any) => {
         if (r?.task_id) {
-          trackTask({ id: r.task_id, task_type: 'chapter_batch', title: `重试批量生成（${r.total || '?'}章）` })
+          trackTask({ id: r.bg_task_id || r.task_id, task_type: 'chapter_batch', title: `重试批量生成（${r.total || '?'}章）` })
           msg.success(`已重新提交（清空 ${r.cleared_chapters || 0} 个失败章节）`)
         } else {
           msg.error('重试失败：未返回任务ID')

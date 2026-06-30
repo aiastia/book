@@ -152,7 +152,7 @@ async function onSubmit() {
       enableAnalysis: enableAnalysis.value,
     })
     msg.success(`已提交批量生成任务，从第${startChapterNumber.value}章起共 ${actualCount.value} 章`)
-    trackTask({ id: r.task_id, task_type: 'chapter_batch', title: `批量生成 ${actualCount.value} 章` })
+    trackTask({ id: r.bg_task_id || r.task_id, task_type: 'chapter_batch', title: `批量生成 ${actualCount.value} 章` })
     open.value = false  // 关闭弹窗，进度由悬浮栏显示
     emit('done')
   } catch (e: any) {

@@ -265,4 +265,10 @@ async def retry_batch(
         db=db,
     )
     asyncio.create_task(bgs.run_batch_generation(task.id))
-    return {"task_id": task.id, "total": task.total_chapters, "cleared_chapters": cleared, "status": "pending"}
+    return {
+        "task_id": task.id,
+        "bg_task_id": getattr(task, "bg_task_id", None),
+        "total": task.total_chapters,
+        "cleared_chapters": cleared,
+        "status": "pending",
+    }
