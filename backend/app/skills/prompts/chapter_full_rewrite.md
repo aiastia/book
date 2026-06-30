@@ -30,6 +30,7 @@
 
 @include:_shared_writing_rules.md
 @include:_shared_constraints.md
+@include:_shared_common_rules.md
 
 <output>
 【输出规范】
