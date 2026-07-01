@@ -505,10 +505,11 @@ def _dedupe_repeated_clauses(text: str) -> tuple[str, dict]:
     return result, {"删除重复分句": removed}
 
 
-def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
+def clean_generated_text(text: str, mode: str = "normal", skip_not_a_but_b: bool = False) -> CleanResult:
     """对 AI 生成的正文执行多层清理管道。
 
     mode: safe | normal | aggressive
+    skip_not_a_but_b: True 时跳过「不是A，而是B」正则删除，留给 Diff Rewrite AI 改写
     """
     if not text:
         return CleanResult(cleaned_text=text, stats={})
@@ -540,7 +541,13 @@ def clean_generated_text(text: str, mode: str = "normal") -> CleanResult:
             text = re.sub(pattern, replacement, text)
 
     # ---- 第二层：Pattern ----
-    for pattern, replacement in PATTERNS_SAFE:
+    # 如果配置了润色 API，「不是A，而是B」交给 AI 改写更自然，正则不粗暴删除
+    safe_patterns = PATTERNS_SAFE
+    if skip_not_a_but_b:
+        # 只跳过「不是A，（而）是B」和「并不是A，（而）是B」两条规则
+        _SKIP_PREFIXES = ("不是(", "并不是(")
+        safe_patterns = [(p, r) for p, r in PATTERNS_SAFE if not any(p.startswith(sp) for sp in _SKIP_PREFIXES)]
+    for pattern, replacement in safe_patterns:
         text = re.sub(pattern, replacement, text)
     if mode in ("normal", "aggressive"):
         for pattern, replacement in PATTERNS_NORMAL:
