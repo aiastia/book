@@ -29,6 +29,66 @@ _CONFIG_DIR = os.path.join(settings.DATA_DIR, "tts_config")
 _DEFAULT_CHARACTERS_PATH = os.path.join(_CONFIG_DIR, "characters.yaml")
 _DEFAULT_SCENES_PATH = os.path.join(_CONFIG_DIR, "scenes.yaml")
 
+# ---- 内置默认配置（首次运行或 Docker 环境自动写入）----
+_DEFAULT_CHARACTERS_YAML = """\
+# 角色映射配置 ─ speaker(由 Director 分析产出)→ 语音参数
+# 字段说明: rate/pitch 用百分比, style 是 express-as 的 style
+Narrator:
+  rate: "-2%"
+  pitch: "0%"
+  style: "calm"
+Messenger:
+  rate: "-12%"
+  pitch: "-6%"
+  style: "calm"
+default:
+  rate: "0%"
+  pitch: "0%"
+  style: "calm"
+"""
+
+_DEFAULT_SCENES_YAML = """\
+# 场景预设 ─ 场景名 → 语音参数 + 默认停顿
+calm:
+  rate: "-2%"
+  pitch: "0%"
+  pause: "600ms"
+night:
+  rate: "-5%"
+  pitch: "0%"
+  pause: "600ms"
+suspense:
+  rate: "-3%"
+  pitch: "0%"
+  pause: "700ms"
+battle:
+  rate: "+8%"
+  pitch: "0%"
+  pause: "150ms"
+sad:
+  rate: "-10%"
+  pitch: "-3%"
+  pause: "800ms"
+default:
+  rate: "0%"
+  pitch: "0%"
+  pause: "500ms"
+"""
+
+
+def _ensure_default_configs():
+    """首次运行或 Docker 环境无配置文件时，自动写入内置默认配置。"""
+    os.makedirs(_CONFIG_DIR, exist_ok=True)
+    if not os.path.exists(_DEFAULT_CHARACTERS_PATH):
+        with open(_DEFAULT_CHARACTERS_PATH, "w", encoding="utf-8") as f:
+            f.write(_DEFAULT_CHARACTERS_YAML)
+    if not os.path.exists(_DEFAULT_SCENES_PATH):
+        with open(_DEFAULT_SCENES_PATH, "w", encoding="utf-8") as f:
+            f.write(_DEFAULT_SCENES_YAML)
+
+
+_ensure_default_configs()
+
 
 def _load_yaml_params(path: str) -> Dict[str, VoiceParams]:
     """加载 YAML 配置文件为 {name: VoiceParams} 字典。"""
