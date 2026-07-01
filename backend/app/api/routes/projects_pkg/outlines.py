@@ -1271,10 +1271,24 @@ async def delete_outline(
     ).scalar_one_or_none()
     if not o:
         raise HTTPException(404, "大纲不存在")
-    # 级联删除该大纲展开的所有章节（1→N 模式）及其关联数据
+    # 级联删除该大纲对应的章节及其关联数据
     from app.services.chapter_service import ChapterService
 
+    # 按 outline_id 查（1→N 模式），再按 chapter_number 补查（1→1 模式可能 outline_id 为空）
     chapters = (
+        (
+            await db.execute(
+                select(Chapter).where(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == o.chapter_number,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    ) if False else []  # 占位，下方统一查
+    # 统一查询：outline_id 匹配 或 chapter_number 匹配（1→1 模式）
+    by_outline = (
         (
             await db.execute(
                 select(Chapter).where(
@@ -1285,6 +1299,25 @@ async def delete_outline(
         .scalars()
         .all()
     )
+    by_number = (
+        (
+            await db.execute(
+                select(Chapter).where(
+                    Chapter.project_id == project_id,
+                    Chapter.chapter_number == o.chapter_number,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # 合并去重
+    seen_ids = set()
+    chapters = []
+    for c in by_outline + by_number:
+        if c.id not in seen_ids:
+            seen_ids.add(c.id)
+            chapters.append(c)
     deleted_words = sum(c.word_count or 0 for c in chapters)
     chapter_count = len(chapters)
     if chapters:
