@@ -169,6 +169,43 @@ def _format_style_block(context: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _clean_meta_commentary(content: str) -> tuple[str, bool]:
+    """清理 AI 输出开头的元评论和分隔符。
+
+    返回 (清理后内容, 是否发生了清理)。
+    """
+    if not content:
+        return content, False
+    original = content
+    # 去掉开头的空行
+    content = content.lstrip()
+    # 去掉开头的 --- 分隔符（可能有多行）
+    while content.startswith("---"):
+        content = content.lstrip("-").lstrip()
+    # 去掉开头的英文元评论段落
+    lines = content.split("\n")
+    cleaned_lines = []
+    skip_english_intro = True
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if skip_english_intro:
+                continue
+            cleaned_lines.append(line)
+            continue
+        # 如果遇到非英文开头的行（中文、场景内容），停止跳过
+        if skip_english_intro and not re.match(r"^[a-zA-Z「『【<]", stripped):
+            skip_english_intro = False
+        if skip_english_intro:
+            continue
+        cleaned_lines.append(line)
+    content = "\n".join(cleaned_lines).lstrip()
+    # 如果清理后内容太短（<50字），说明正文本身有问题，返回原文
+    if len(content) < 50:
+        return original, False
+    return content, (content != original)
+
+
 def _check_content_degradation(content: str) -> str | None:
     """检测 AI 生成内容是否退化成垃圾（英文词典/元评论/碎片分隔符堆砌）。
 
@@ -1694,14 +1731,22 @@ class ChapterService:
             # 内容退化检测：防止模型吐出垃圾内容（英文词典/元评论/碎片分隔符）
             degrade_reason = _check_content_degradation(content)
             if degrade_reason:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    f"[chapter] 内容退化检测触发：{degrade_reason}，内容前500字：{content[:500]}"
-                )
-                chapter.status = "draft"
-                await self.db.commit()
-                return {"error": f"AI 生成内容异常（{degrade_reason}），请重试或切换模型"}
+                # 先尝试清理元评论/前缀垃圾，清理后可用就直接用，不重试
+                cleaned, was_cleaned = _clean_meta_commentary(content)
+                if was_cleaned and not _check_content_degradation(cleaned):
+                    import logging
+                    logging.getLogger(__name__).info(
+                        f"[chapter] 内容退化已自动清理（{degrade_reason}），使用清理后内容"
+                    )
+                    content = cleaned
+                else:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"[chapter] 内容退化检测触发：{degrade_reason}，内容前500字：{content[:500]}"
+                    )
+                    chapter.status = "draft"
+                    await self.db.commit()
+                    return {"error": f"AI 生成内容异常（{degrade_reason}），请重试或切换模型"}
 
             # 保存
             chapter.content = content
