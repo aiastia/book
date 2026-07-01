@@ -87,6 +87,34 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
     if re.search(r"<[|][^>]+[|]tool_call", content):
         return []  # 返回空列表触发 content="" 清理
 
+    # GLM/Claude 风格：<tool_call><function=name><parameter=key>value</parameter></function></tool_call>
+    # function 用等号连接（function=name），parameter 也用等号（parameter=key）
+    if "<tool_call>" in content or "<function=" in content:
+        tool_calls = []
+        # 匹配 <function=NAME> ... </function> 或 <function=NAME> ... </tool_call>
+        for match in re.finditer(r"<function=([^>\s]+)>(.*?)(?:</function>|</tool_call>|(?=<function=))", content, re.DOTALL):
+            name = match.group(1).strip()
+            body = match.group(2)
+            args = {}
+            for pm in re.finditer(r"<parameter=([^>\s]+)>(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>|</tool_call>))", body, re.DOTALL):
+                pname = pm.group(1).strip()
+                pval = pm.group(2).strip()
+                try:
+                    pval = json.loads(pval)
+                except Exception:
+                    pass
+                args[pname] = pval
+            clean_name = name.replace("functions.", "").split(":")[0]
+            tool_calls.append({
+                "id": f"glm_{clean_name}",
+                "type": "function",
+                "function": {
+                    "name": clean_name,
+                    "arguments": json.dumps(args, ensure_ascii=False),
+                },
+            })
+        return tool_calls if tool_calls else None
+
     # 通用 XML 格式：<function:name><parameter:name>value</parameter:name></function:name>
     if "<function:" in content:
         tool_calls = []
