@@ -15,7 +15,8 @@ router = make_router()  # noqa: F405  prefix=/api/projects
 class TtsConvertRequest(BaseModel):  # noqa: F405
     """章节转 SSML 请求。"""
     voice: str = "zh-CN-XiaoxiaoNeural"
-    chunk_size: int = 800
+    chunk_size: int = 1500
+    model: str | None = None  # 指定模型(空=用用户默认模型)
     # 可选:自定义角色/场景配置(覆盖默认 YAML)
     characters: dict | None = None
     scenes: dict | None = None
@@ -85,8 +86,8 @@ async def chapter_to_ssml(
     if not chapter.content or not chapter.content.strip():
         raise HTTPException(400, "章节内容为空")  # noqa: F405
 
-    # 取用户配置的 AIClient
-    _, ai_client = await make_engine_and_client(db, user.id)  # noqa: F405
+    # 取用户配置的 AIClient(支持指定模型)
+    _, ai_client = await make_engine_and_client(db, user.id, model_override=req.model or None)  # noqa: F405
 
     # ① Director 分析
     director = Director(ai_client=ai_client, chunk_size=req.chunk_size)

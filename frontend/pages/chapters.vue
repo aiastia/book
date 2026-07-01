@@ -752,7 +752,7 @@ const ttsResultOpen = ref(false)
 const ttsResult = ref<any>(null)
 
 async function onTts() {
-  if (!editing.value || !editing.value.content?.trim()) {
+  if (!editing.value || !editingContent.value.trim()) {
     msg.warning('章节内容为空，请先生成或输入内容')
     return
   }
