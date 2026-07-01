@@ -112,7 +112,8 @@ async def generate_cover_prompt(
     )
     cover_prompt = result.get("content", "").strip()
     if not cover_prompt:
-        raise HTTPException(500, "AI 未返回有效内容")
+        err = result.get("error", "AI 返回内容为空")
+        raise HTTPException(500, f"AI 未返回有效内容：{err}")
     # 保存到项目
     proj.cover_prompt = cover_prompt
     await db.commit()

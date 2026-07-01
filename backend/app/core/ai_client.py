@@ -366,6 +366,16 @@ class AIClient:
                 tc.model_dump() if hasattr(tc, "model_dump") else tc
                 for tc in (message.tool_calls or [])
             ]
+            # 推理模型可能把正文输出到 reasoning_content 而非 content
+            if not content:
+                rc = getattr(message, "reasoning_content", None)
+                if rc:
+                    content = rc
+                    model_name = kwargs.get("model", "")
+                    logger.info(
+                        f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
+                        f"非流式 chat 已回退使用 reasoning_content（长度={len(content)}）"
+                    )
             usage = resp.usage
             cached = 0
             if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
