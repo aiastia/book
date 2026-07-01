@@ -161,6 +161,11 @@ class AIClient:
     - gemini：Google Gemini
     """
 
+    # 已知在 streaming 时把所有内容（含最终答案）输出到 reasoning_content 的模型
+    # GLM-5 系列：streaming 仅输出 delta.reasoning_content，delta.content 始终为空
+    # 非流式 API 则正常分离 content（最终答案）和 reasoning_content（思维过程）
+    _MODEL_STREAMING_RC_ONLY = {"glm-5", "glm-5.2", "glm-4", "glm-4v"}
+
     def __init__(
         self,
         base_url: str = None,
@@ -170,6 +175,8 @@ class AIClient:
         embedding_model: str = None,
         reasoning_model: bool = False,
         reasoning_effort: str = "low",
+        thinking_mode: str = "auto",
+        thinking_params: str = "",
         default_temperature: float = None,
         default_top_p: float = None,
         default_frequency_penalty: float = None,
@@ -183,6 +190,8 @@ class AIClient:
         self.embedding_model = embedding_model or ""
         self.reasoning_model = bool(reasoning_model)
         self.reasoning_effort = reasoning_effort or "low"
+        self.thinking_mode = thinking_mode or "auto"
+        self.thinking_params = thinking_params or ""
         self.default_temperature = default_temperature
         self.default_top_p = default_top_p
         self.default_frequency_penalty = default_frequency_penalty
@@ -190,16 +199,95 @@ class AIClient:
         self.default_max_tokens = default_max_tokens
         self._client = None
 
+    def _model_streaming_rc_only(self) -> bool:
+        """检查当前模型在 streaming 时是否把所有内容输出到 reasoning_content。"""
+        model = (self.model or "").lower()
+        for key in self._MODEL_STREAMING_RC_ONLY:
+            if key in model:
+                return True
+        return False
+
+    def _get_thinking_extra_body(self) -> dict | None:
+        """根据 thinking_mode 返回对应的 thinking 控制参数。
+
+        优先级：
+        1. thinking_params（用户自定义 JSON）→ 直接使用，不再猜测
+        2. thinking_mode=auto → 不发送（用户自己通过 thinking_params 处理）
+        3. thinking_mode=enabled → 标准 reasoning_effort
+        4. thinking_mode=disabled → 不发送（用户自己通过 thinking_params 处理）
+        """
+        # 优先级1：用户自定义参数（直接透传，不做任何格式猜测）
+        if getattr(self, "thinking_params", None):
+            try:
+                import json as _json
+                params = _json.loads(self.thinking_params)
+                if isinstance(params, dict):
+                    return params
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"[AI] thinking_params JSON 解析失败: {self.thinking_params}")
+
+        mode = self.thinking_mode
+        if mode == "auto":
+            # auto 模式：仅 GLM-5 系列需要显式关闭（默认开启 thinking）
+            model = (self.model or "").lower()
+            if any(key in model for key in self._MODEL_STREAMING_RC_ONLY):
+                return {"thinking": {"type": "disabled"}}
+            return None
+
+        provider = self.provider
+        model = (self.model or "").lower()
+
+        if mode == "disabled":
+            if provider == "anthropic":
+                return {"thinking": {"type": "disabled"}}
+            if provider == "ollama":
+                return {"options": {"think": False}}
+            # 阿里云/通义千问/Kimi 混合思考模型
+            if any(k in model for k in ("qwen3", "kimi", "moonshot")):
+                return {"enable_thinking": False}
+            # GLM-5 系列
+            if any(key in model for key in self._MODEL_STREAMING_RC_ONLY):
+                return {"thinking": {"type": "disabled"}}
+            # 默认：OpenAI 兼容推理服务
+            return {"reasoning_effort": "off"}
+
+        if mode == "enabled":
+            effort = self.reasoning_effort
+            if provider == "anthropic":
+                return {"thinking": {"type": "enabled"}}
+            if provider == "ollama":
+                return {"options": {"think": True}}
+            if any(k in model for k in ("qwen3", "kimi", "moonshot")):
+                return {"enable_thinking": True}
+            if any(key in model for key in self._MODEL_STREAMING_RC_ONLY):
+                return {"thinking": {"type": "enabled"}}
+            return {"reasoning_effort": effort}
+
+        return None
+
     def _apply_reasoning(self, kwargs: dict) -> dict:
-        if self.reasoning_model:
+        """推理模型参数处理。
+
+        - thinking_mode="enabled"：开启 thinking（temperature=1 + 厂商对应参数）
+        - thinking_mode="disabled"：关闭 thinking（不修改 temperature/top_p）
+        - thinking_mode="auto"：GLM-5 自动关闭，其他不变（兼容旧行为）
+        """
+        thinking_extra = self._get_thinking_extra_body()
+        if thinking_extra:
+            if "extra_body" not in kwargs:
+                kwargs["extra_body"] = {}
+            kwargs["extra_body"].update(thinking_extra)
+
+        if self.reasoning_model and self.thinking_mode != "disabled":
+            # 推理模式：强制 temperature=1，移除 top_p/penalty
             kwargs["temperature"] = 1
             kwargs.pop("top_p", None)
             kwargs.pop("frequency_penalty", None)
             kwargs.pop("presence_penalty", None)
-            if "extra_body" not in kwargs:
-                kwargs["extra_body"] = {}
-            kwargs["extra_body"].setdefault("reasoning_effort", self.reasoning_effort)
-        return kwargs
+            # 如果 thinking_mode=enabled，用 reasoning_effort（已在 thinking_extra 中处理）
+            # 如果 thinking_mode=auto 且 reasoning_model=True，回退到 reasoning_effort
+            if self.thinking_mode == "auto":
+                kwargs["extra_body"].setdefault("reasoning_effort", self.reasoning_effort)
 
     def _resolve_temperature(self, temperature: float) -> float:
         """temperature 解析：显式传参 > 模型配置 > settings。"""
@@ -282,6 +370,8 @@ class AIClient:
                     embedding_model=cfg.embedding_model or "",
                     reasoning_model=cfg.reasoning_model or False,
                     reasoning_effort=cfg.reasoning_effort or "low",
+                    thinking_mode=getattr(cfg, "thinking_mode", None) or "auto",
+                    thinking_params=getattr(cfg, "thinking_params", None) or "",
                     **cls._defaults_from_cfg(cfg),
                 )
             # 无默认模型，尝试取任意一个
@@ -298,6 +388,8 @@ class AIClient:
                     embedding_model=cfg.embedding_model or "",
                     reasoning_model=cfg.reasoning_model or False,
                     reasoning_effort=cfg.reasoning_effort or "low",
+                    thinking_mode=getattr(cfg, "thinking_mode", None) or "auto",
+                    thinking_params=getattr(cfg, "thinking_params", None) or "",
                     **cls._defaults_from_cfg(cfg),
                 )
         except Exception:
@@ -376,6 +468,25 @@ class AIClient:
                         f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
                         f"非流式 chat 已回退使用 reasoning_content（长度={len(content)}）"
                     )
+                # 没有 reasoning_content 且模型有 token 耗尽风险 → 翻倍重试
+                if not content and self._model_streaming_rc_only():
+                    try:
+                        retry_kwargs = {**kwargs, "max_tokens": (kwargs.get("max_tokens") or self._resolve_max_tokens(None)) * 2}
+                        model_name = kwargs.get("model", "")
+                        logger.info(
+                            f"[AI] 模型 {model_name} 非流式返回空 content，"
+                            f"尝试 max_tokens 翻倍重试"
+                        )
+                        resp2 = await self.client.chat.completions.create(**retry_kwargs)
+                        msg2 = resp2.choices[0].message
+                        content = (msg2.content or "").strip()
+                        if content:
+                            logger.info(f"[AI] 翻倍重试成功（{len(content)}字）")
+                            resp = resp2
+                            message = msg2
+                            usage = resp2.usage
+                    except Exception as retry_e:
+                        logger.warning(f"[AI] 非流式翻倍重试失败: {retry_e}")
             usage = resp.usage
             cached = 0
             if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
@@ -475,20 +586,23 @@ class AIClient:
                                     tool_call_buf[idx]["arguments"] += tc.function.arguments
 
             content = "".join(content_parts)
-            # 推理模型（如 step-3.7-flash / Kimi K2）可能把正文输出到 reasoning_content 而非 content
-            # 策略（优先级递减，保证正文干净且不丢内容）：
+            # 推理模型可能把正文输出到 reasoning_content 而非 content
+            # 策略（优先级递减）：
             #   1) content 非空 → 直接用（最干净）
-            #   2) content 空 + 无 tool_calls → 非流式重试一次（非流式 API 能正确分配 reasoning/content 配额，
-            #      往往能拿到干净的 content，避免把思考过程当正文）
-            #   3) 重试仍空 + 有 reasoning_parts → 回退用 reasoning_content（兜底，可能含元叙述，但保证有内容）
+            #   2) content 空 + 无 tool_calls → 非流式重试一次
+            #      对 GLM-5 等 streaming 仅输出 reasoning_content 的模型，重试时翻倍 max_tokens
+            #   3) 重试仍空 + 有 reasoning_parts → 回退用 reasoning_content（兜底）
             if not content and not tool_call_buf:
-                # 步骤2：非流式重试拿干净 content
                 try:
+                    retry_kwargs = {**kwargs, "stream": False}
+                    if self._model_streaming_rc_only():
+                        retry_kwargs["max_tokens"] = (kwargs.get("max_tokens") or self._resolve_max_tokens(None)) * 2
                     logger.info(
                         f"[AI] 模型 {model_name} 流式返回空 content，"
                         f"尝试非流式重试以获取干净正文"
+                        + (f"（max_tokens 翻倍={retry_kwargs['max_tokens']}）" if self._model_streaming_rc_only() else "")
                     )
-                    nonstream = await self.client.chat.completions.create(**{**kwargs, "stream": False})
+                    nonstream = await self.client.chat.completions.create(**retry_kwargs)
                     ns_msg = nonstream.choices[0].message
                     ns_content = (ns_msg.content or "").strip()
                     if ns_content:
@@ -497,25 +611,50 @@ class AIClient:
                             f"completion_tokens={nonstream.usage.completion_tokens if nonstream.usage else 0}"
                         )
                         content = ns_content
-                        # 更新 usage（非流式结果更准确）
                         if nonstream.usage:
                             usage_info = nonstream.usage
                 except Exception as ns_e:
                     logger.warning(f"[AI] 非流式重试失败（将回退到 reasoning_content）: {ns_e}")
-                # 步骤3：重试仍空 → 回退 reasoning_content
                 if not content and reasoning_parts:
                     content = "".join(reasoning_parts)
                     logger.warning(
-                        f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
-                        f"非流式重试仍空，已合并 {len(reasoning_parts)} 段 reasoning_content 作为正文（兜底）"
+                        f"[AI] 模型 {model_name} content 为空，已合并 {len(reasoning_parts)} 段 reasoning_content 兜底，"
+                        f"可能因 token 预算耗尽，内容可能只含思维过程不含最终答案"
                     )
             elif not content and reasoning_parts:
-                # 有 tool_calls 的情况不重试（工具调用流程由上层处理），直接回退
-                content = "".join(reasoning_parts)
-                logger.warning(
-                    f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
-                    f"已合并 {len(reasoning_parts)} 段 reasoning_content"
-                )
+                # 有 tool_calls 时同样尝试非流式重试（非流式 API 能正确分配 content/tool_calls）
+                if self._model_streaming_rc_only():
+                    try:
+                        retry_kwargs = {**kwargs, "stream": False}
+                        retry_kwargs["max_tokens"] = (kwargs.get("max_tokens") or self._resolve_max_tokens(None)) * 2
+                        logger.info(
+                            f"[AI] 模型 {model_name} 有 tool_calls 但 content 为空，"
+                            f"尝试非流式重试获取干净 content+tool_calls（max_tokens 翻倍={retry_kwargs['max_tokens']}）"
+                        )
+                        ns = await self.client.chat.completions.create(**retry_kwargs)
+                        ns_msg = ns.choices[0].message
+                        ns_content = (ns_msg.content or "").strip()
+                        if ns_content:
+                            content = ns_content
+                            logger.info(f"[AI] 非流式重试成功（{len(content)}字）")
+                            tool_call_buf.clear()
+                            for tc in (ns_msg.tool_calls or []):
+                                idx = tc.index or 0
+                                tool_call_buf[idx] = {
+                                    "id": tc.id or "",
+                                    "name": tc.function.name if tc.function else "",
+                                    "arguments": tc.function.arguments if tc.function else "",
+                                }
+                            if ns.usage:
+                                usage_info = ns.usage
+                    except Exception as ns_e:
+                        logger.warning(f"[AI] 非流式重试失败，回退 reasoning_content: {ns_e}")
+                if not content:
+                    content = "".join(reasoning_parts)
+                    logger.warning(
+                        f"[AI] 模型 {model_name} content 为空，已合并 {len(reasoning_parts)} 段 reasoning_content 兜底，"
+                        f"可能因 token 预算耗尽，内容可能只含思维过程不含最终答案"
+                    )
             tool_calls = []
             for idx in sorted(tool_call_buf.keys()):
                 tc = tool_call_buf[idx]
@@ -651,9 +790,16 @@ class AIClient:
         # 推理模型：强制 temperature=1，移除 top_p/penalty
         self._apply_reasoning(kwargs)
         stream = await self.client.chat.completions.create(**kwargs)
+        rc_stream = self._model_streaming_rc_only()
         async for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield delta.content
+                if rc_stream:
+                    rc = getattr(delta, "reasoning_content", None)
+                    if rc:
+                        yield rc
 
     async def chat_json(
         self,

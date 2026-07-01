@@ -173,7 +173,10 @@ async def _auto_migrate():
         ("ai_model_configs", "ADD COLUMN reasoning_model BOOLEAN DEFAULT 0"),
         # 第18批：推理深度选择
         ("ai_model_configs", "ADD COLUMN reasoning_effort VARCHAR(10) DEFAULT 'low'"),
-        # 第19批：移除冗余的文本职业字段，统一使用职业体系（main_career_id + main_career_stage_desc）
+        # 第19批：Thinking 模式控制（auto/enabled/disabled）
+        ("ai_model_configs", "ADD COLUMN thinking_mode VARCHAR(20) DEFAULT 'auto'"),
+        ("ai_model_configs", "ADD COLUMN thinking_params VARCHAR(500) DEFAULT ''"),
+        # 第20批：移除冗余的文本职业字段，统一使用职业体系（main_career_id + main_career_stage_desc）
         ("characters", "DROP COLUMN occupation"),
         ("characters", "DROP COLUMN sub_occupations"),
         # 第17批：灵感模式独立参数（NULL=跟随全局模型配置）

@@ -483,7 +483,10 @@ _SKILL_TO_THINKING_MODE = {
 
 
 def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict) -> dict:
-    """返回需要覆盖的参数 dict（temperature / reasoning），供 execute_skill 合并。"""
+    """Per-task 思考模式覆盖（优先级高于模型级 thinking_mode）。
+
+    返回需要覆盖的参数 dict（temperature / reasoning），供 execute_skill 合并。
+    """
     result = {}
     modes = context.get("_thinking_modes")
     if not modes or not isinstance(modes, dict):
@@ -499,16 +502,19 @@ def _apply_thinking_mode_override(ai_client, skill_name: str, context: dict) -> 
     cfg = modes[mode_key]
     if not isinstance(cfg, dict):
         return result
-    # enabled=False → 明确关闭推理模式（即使模型默认是推理模型也强制关）
+    # enabled=False → 明确关闭 thinking（覆盖模型级设置）
     if not cfg.get("enabled"):
+        ai_client.thinking_mode = "disabled"
         ai_client.reasoning_model = False
         return result
-    # enabled=True → 按用户配置的 effort 设置
+    # enabled=True → 按 effort 设置
     effort = cfg.get("reasoning_effort")
     if effort and effort != "none":
+        ai_client.thinking_mode = "enabled"
         ai_client.reasoning_effort = effort
         ai_client.reasoning_model = True
     elif effort == "none":
+        ai_client.thinking_mode = "disabled"
         ai_client.reasoning_model = False
     t = cfg.get("temperature")
     if t is not None:
@@ -640,10 +646,12 @@ class SkillEngine:
         stream: bool = False,
         tools: list[dict] = None,
         tool_executor=None,
+        max_tokens_override: int = None,
     ) -> dict:
         """执行 Skill
 
         context: 包含执行 Skill 所需的所有上下文数据
+        max_tokens_override: 重试时临时提升 token 预算（覆盖 skill 配置）
         """
         skill = await self.get_skill(skill_name)
         if not skill:
@@ -802,6 +810,9 @@ class SkillEngine:
         max_tokens = merged_config.get("max_tokens")
         if max_tokens is not None:
             max_tokens = min(max_tokens, settings.AI_MAX_TOKENS)
+        # 重试时临时提升 token 预算
+        if max_tokens_override is not None:
+            max_tokens = min(max_tokens_override, settings.AI_MAX_TOKENS)
         # skill 没配 max_tokens → 留 None，让 ai_client 走模型配置默认值
         frequency_penalty = merged_config.get("frequency_penalty")
         presence_penalty = merged_config.get("presence_penalty")

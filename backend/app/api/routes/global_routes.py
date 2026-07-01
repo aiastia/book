@@ -46,6 +46,8 @@ class AIModelCreate(BaseModel):
     is_default: bool = False
     reasoning_model: bool = False  # 推理模型：强制 temperature=1，不发 top_p/penalty
     reasoning_effort: str = "low"  # low/medium/high，仅 reasoning_model=True 时生效
+    thinking_mode: str = "auto"  # auto/enabled/disabled
+    thinking_params: str = ""  # 自定义 thinking 参数（JSON），优先级最高
     backend_type: str = "openai"
     provider: str = "openai"
     embedding_model: str = ""
@@ -78,6 +80,8 @@ class AIModelUpdate(BaseModel):
     is_default: bool | None = None
     reasoning_model: bool | None = None
     reasoning_effort: str | None = None  # low/medium/high
+    thinking_mode: str | None = None  # auto/enabled/disabled
+    thinking_params: str | None = None  # 自定义 thinking 参数（JSON）
     backend_type: str | None = None
     provider: str | None = None
     embedding_model: str | None = None
@@ -112,6 +116,8 @@ async def list_ai_models(db: AsyncSession = Depends(get_db), user=Depends(get_cu
             "is_default": m.is_default,
             "reasoning_model": m.reasoning_model or False,
             "reasoning_effort": m.reasoning_effort or "low",
+            "thinking_mode": getattr(m, "thinking_mode", None) or "auto",
+            "thinking_params": getattr(m, "thinking_params", None) or "",
             "inspiration_temperature": m.inspiration_temperature,
             "inspiration_top_p": m.inspiration_top_p,
             "inspiration_custom": m.inspiration_custom or False,
@@ -227,14 +233,18 @@ async def test_ai_model(
     m = result.scalar_one_or_none()
     if not m:
         raise HTTPException(404, "模型配置不存在")
-    # 测试连接：用该条配置构造客户端，必须带上 reasoning_model 标记，
-    # 否则推理模型（Kimi/R1）测试时仍会发 temperature/top_p 导致 400。
+    # 测试连接：用该条配置构造客户端，必须带上 reasoning_model 和 thinking_mode 标记，
+    # 否则推理模型（Kimi/R1）测试时仍会发 temperature/top_p 导致 400，
+    # GLM-5 系列不传 thinking_mode 会默认开启 thinking 消耗全部 token。
     client = AIClient(
         base_url=m.base_url,
         api_key=m.api_key,
         model=m.model,
+        provider=m.provider or m.backend_type or "openai",
         reasoning_model=m.reasoning_model or False,
         reasoning_effort=m.reasoning_effort or "low",
+        thinking_mode=getattr(m, "thinking_mode", None) or "auto",
+        thinking_params=getattr(m, "thinking_params", None) or "",
         **AIClient._defaults_from_cfg(m),
     )
     resp = await client.chat(

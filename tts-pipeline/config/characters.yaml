@@ -1,0 +1,39 @@
+# 角色映射配置 ─ speaker(由 Director 分析产出)→ 语音参数
+#
+# 改这里就能调整角色声音,不用改代码。
+# 所有值由配置决定,Builder 不接受任意字符串,杜绝 +1dB 这类非法值。
+#
+# 字段说明:
+#   rate/pitch: prosody 属性值,统一用百分比(避免 dB 坑)
+#   style:      express-as 的 style,如 calm/gentle/sad
+#   voice:      预留,多角色配音时指定不同 voice。当前全书统一,留空即可。
+
+Narrator:                # 旁白(默认叙述者)
+  rate: "-2%"
+  pitch: "0%"
+  style: "calm"
+
+Messenger:               # 信使/路人对话
+  rate: "-12%"
+  pitch: "-6%"
+  style: "calm"
+
+KailanWeak:              # 凯兰 - 病弱态(第一卷)
+  rate: "-15%"
+  pitch: "-5%"
+  style: "calm"
+
+KailanCalm:              # 凯兰 - 冷静/伪装态
+  rate: "-8%"
+  pitch: "-3%"
+  style: "calm"
+
+Servant:                 # 仆人/老仆
+  rate: "-5%"
+  pitch: "-2%"
+  style: "gentle"
+
+default:                 # 未识别的 speaker 兜底
+  rate: "0%"
+  pitch: "0%"
+  style: "calm"

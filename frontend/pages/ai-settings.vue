@@ -13,6 +13,8 @@ const form = reactive({
   temperature: 85, top_p: 90, max_tokens: 8192, is_default: false,
   reasoning_model: false,
   reasoning_effort: 'low',
+  thinking_mode: 'auto',
+  thinking_params: '',
   frequency_penalty: null as number | null, presence_penalty: null as number | null,
   // 灵感模式独立参数（null=跟随全局/不发送）
   inspiration_temperature: null as number | null,
@@ -95,6 +97,8 @@ function openEdit(m: any) {
     embedding_model: m.embedding_model || '',
     reasoning_model: m.reasoning_model ?? false,
     reasoning_effort: m.reasoning_effort || 'low',
+    thinking_mode: m.thinking_mode || 'auto',
+    thinking_params: m.thinking_params || '',
     inspiration_temperature: m.inspiration_temperature ?? null,
     inspiration_top_p: m.inspiration_top_p ?? null,
     inspiration_frequency_penalty: m.inspiration_frequency_penalty ?? null,
@@ -736,6 +740,30 @@ function selectRewriteModel(id: string) {
             <a-select-option value="medium">中（平衡）</a-select-option>
             <a-select-option value="high">高（深度思考）</a-select-option>
           </a-select>
+        </div>
+      </a-form-item>
+
+      <a-form-item>
+        <span style="font-size:14px;color:#333;">Thinking 模式</span>
+        <div style="font-size:12px;color:#999;margin-top:4px;">
+          控制模型是否进行深度思考。GLM-5 系列默认开启，不关闭会消耗全部 token 导致无输出。
+        </div>
+        <a-select v-model:value="form.thinking_mode" size="small" style="width:200px;margin-top:8px">
+          <a-select-option value="auto">自动（GLM-5 自动关闭，其他不变）</a-select-option>
+          <a-select-option value="enabled">开启（强制启用 thinking）</a-select-option>
+          <a-select-option value="disabled">关闭（强制关闭 thinking）</a-select-option>
+        </a-select>
+        <div v-if="form.thinking_mode === 'disabled'" style="font-size:11px;color:#ff4d4f;margin-top:4px;">
+          关闭 thinking 后模型响应更快、token 消耗更低。不同厂商参数不同，建议点击「测试连接」验证。
+        </div>
+        <div v-if="form.thinking_mode !== 'auto'" style="margin-top:8px;">
+          <span style="font-size:12px;color:#595959;">自定义参数（JSON）：</span>
+          <a-textarea v-model:value="form.thinking_params" :rows="3" size="small"
+            placeholder='{"thinking": {"type": "disabled"}}&#10;或留空使用默认映射'
+            style="font-family:monospace;font-size:12px;margin-top:4px;width:100%;" />
+          <div style="font-size:11px;color:#999;margin-top:2px;">
+            留空 = 按模型/厂商自动映射。填入后优先使用你提供的 JSON 参数。
+          </div>
         </div>
       </a-form-item>
 

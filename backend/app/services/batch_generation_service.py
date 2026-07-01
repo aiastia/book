@@ -112,6 +112,9 @@ async def _build_client_with_model(db: AsyncSession, user_id: int, model: str) -
                 provider=cfg.provider or cfg.backend_type or "openai",
                 embedding_model=cfg.embedding_model or "",
                 reasoning_model=cfg.reasoning_model or False,
+                reasoning_effort=cfg.reasoning_effort or "low",
+                thinking_mode=getattr(cfg, "thinking_mode", None) or "auto",
+                thinking_params=getattr(cfg, "thinking_params", None) or "",
                 **AIClient._defaults_from_cfg(cfg),
             )
     except Exception as e:
@@ -328,7 +331,16 @@ async def run_batch_generation(task_id: int):
 
                     # 调章节服务生成（传入覆盖项）
                     svc = ChapterService(chap_db, project_id, user_id)
-                    result = await svc.generate_chapter(chapter_id, ai_client, overrides=overrides)
+                    # 重试时逐步提升 token 预算：首次正常，退化重试时翻倍
+                    retry_overrides = dict(overrides or {})
+                    if attempt > 0 and last_err and "退化" in last_err:
+                        base_max = retry_overrides.get("max_tokens_override") or 16384
+                        retry_overrides["max_tokens_override"] = base_max * 2
+                        logger.info(
+                            f"[batch] 第{ch_num}章退化重试（尝试{attempt+1}），"
+                            f"max_tokens_override 提升至 {retry_overrides['max_tokens_override']}"
+                        )
+                    result = await svc.generate_chapter(chapter_id, ai_client, overrides=retry_overrides)
                     if result.get("error"):
                         last_err = result["error"]
                         logger.warning(

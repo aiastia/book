@@ -494,6 +494,9 @@ class ChapterService:
                     provider=config.provider or config.backend_type or "openai",
                     embedding_model=config.embedding_model or "",
                     reasoning_model=config.reasoning_model or False,
+                    reasoning_effort=config.reasoning_effort or "low",
+                    thinking_mode=getattr(config, "thinking_mode", None) or "auto",
+                    thinking_params=getattr(config, "thinking_params", None) or "",
                     **AIClient._defaults_from_cfg(config),
                 )
         return AIClient()
@@ -1061,10 +1064,10 @@ class ChapterService:
 
         overrides: 批量生成等场景的可选覆盖项，支持键：
             - narrative_pov / narrative_perspective: 叙事视角
-            - target_word_count: 目标字数（int）
+            - target_word_count: 目标字数（int，仅注入 prompt）
             - style_config: 写作风格配置 dict（从 WritingStyle.config 取）
             - style_name: 风格名（展示用）
-            - style_name: 风格名（展示用）
+            - max_tokens_override: 重试时临时提升 token 预算（int）
         """
         chapter, project = await self._get_chapter_and_project(chapter_id)
         await self._validate_generation(chapter)
@@ -1597,6 +1600,7 @@ class ChapterService:
                 context,
                 tools=chapter_tools,
                 tool_executor=tool_exec,
+                max_tokens_override=_ov_all.get("max_tokens_override"),
             )
 
             if result.get("error"):
@@ -1746,7 +1750,10 @@ class ChapterService:
                     )
                     chapter.status = "draft"
                     await self.db.commit()
-                    return {"error": f"AI 生成内容异常（{degrade_reason}），请重试或切换模型"}
+                    return {
+                        "error": f"AI 生成内容异常（{degrade_reason}），"
+                                 f"请重试或切换模型（当前模型可能在 reasoning 模式下 token 耗尽）"
+                    }
 
             # 保存
             chapter.content = content

@@ -131,7 +131,7 @@ export interface AIModelConfig {
   is_default: boolean; provider?: string; base_url?: string
   api_key?: string; temperature?: number; top_p?: number; max_tokens?: number
   frequency_penalty?: number; presence_penalty?: number
-  reasoning_model?: boolean; reasoning_effort?: string
+  reasoning_model?: boolean; reasoning_effort?: string; thinking_mode?: string; thinking_params?: string
   rewrite_model?: string; rewrite_base_url?: string; rewrite_api_key?: string
   image_model?: string; image_base_url?: string; image_api_key?: string
   backend_type?: string

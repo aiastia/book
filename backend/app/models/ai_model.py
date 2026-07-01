@@ -38,6 +38,11 @@ class AIModelConfig(Base):
     reasoning_model = Column(Boolean, default=False)
     # 推理深度：low/medium/high。low=思考少速度快，high=深度推理但慢。仅 reasoning_model=True 时生效
     reasoning_effort = Column(String(10), default="low")
+    # Thinking 模式：auto=自动（GLM-5 自动关闭），enabled=强制开启，disabled=强制关闭
+    thinking_mode = Column(String(20), default="auto")
+    # Thinking 自定义参数（JSON 字符串）：用户直接输入厂商特定的 thinking 控制参数
+    # 当 thinking_mode=disabled/enabled 且有值时，优先于自动映射使用
+    thinking_params = Column(String(500), default="")
     backend_type = Column(String(20), default="openai")  # openai, claude_code（兼容字段）
     # AI 厂商：openai(openai兼容，含 deepseek/moonshot/自定义)、anthropic、gemini
     provider = Column(String(20), default="openai")

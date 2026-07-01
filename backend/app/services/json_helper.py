@@ -160,6 +160,12 @@ def _fix_json_string_values(text: str) -> str:
 
         # === 非字符串内（结构位置）===
         if not in_string:
+            # 结构位置的反斜杠：\" 是 AI 错误转义的结构引号，直接解转为 "
+            if c == "\\" and i + 1 < len(text) and text[i + 1] == '"':
+                result.append('"')
+                fixed_count += 1
+                i += 2
+                continue
             # 结构位置的中文标点 → ASCII
             if c == "\uff0c":  # ，→ ,
                 result.append(",")
@@ -793,6 +799,15 @@ def clean_json_response(text: str) -> str:
                         logger.error(f"❌ 所有修复后JSON仍然无效: {e4}")
                         logger.warning(f"   清洗后结果预览(前800字): {result[:800]}")
                         logger.warning(f"   清洗后结果结尾(后300字): ...{result[-300:]}")
+                        # 最后兜底：通过括号匹配提取最长 JSON 子串
+                        extracted = _extract_json_by_brackets(result)
+                        if extracted:
+                            try:
+                                _try_loads(extracted)
+                                logger.info(f"✅ 括号匹配提取成功（长度={len(extracted)}）")
+                                result = extracted
+                            except Exception:
+                                pass
                         # 输出错误位置附近的片段，便于排查
                         try:
                             import re as _re
@@ -818,6 +833,52 @@ def clean_json_response(text: str) -> str:
         logger.error(f"   文本长度: {len(text) if text else 0}")
         logger.error(f"   文本预览: {safe_preview(text, 200)}")
         raise
+
+
+def _extract_json_by_brackets(text: str) -> str | None:
+    """兜底提取：通过括号匹配找到最长的合法 JSON 子串。"""
+    if not text:
+        return None
+
+    candidates = []
+    stack = []
+    start = -1
+
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c == '{' and not stack:
+            stack.append('{')
+            start = i
+        elif c == '[' and not stack:
+            stack.append('[')
+            start = i
+        elif c == '{' and stack:
+            stack.append('{')
+        elif c == '[' and stack:
+            stack.append('[')
+        elif c == '}' and stack and stack[-1] == '{':
+            stack.pop()
+        elif c == ']' and stack and stack[-1] == '[':
+            stack.pop()
+        elif c in ('}', ']') and stack:
+            # 不匹配的括号，清空栈重新开始
+            stack = []
+            start = -1
+
+        if not stack and start >= 0:
+            candidate = text[start:i + 1]
+            candidates.append(candidate)
+            start = -1
+
+        i += 1
+
+    if not candidates:
+        return None
+
+    # 返回最长的候选
+    best = max(candidates, key=len)
+    return best if len(best) > 10 else None
 
 
 def parse_json(text: str) -> dict | list:
