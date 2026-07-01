@@ -1335,6 +1335,54 @@ async def delete_outline(
     return {"ok": True, "deleted_chapters": chapter_count, "deleted_words": deleted_words}
 
 
+@router.delete("/{project_id}/outlines")
+async def delete_all_outlines(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """清空项目所有大纲，同时级联删除所有章节及关联数据。"""
+    proj = await get_user_project(db, project_id, user)
+    from app.services.chapter_service import ChapterService
+
+    # 查所有大纲
+    all_outlines = (
+        (await db.execute(select(Outline).where(Outline.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    # 查所有章节
+    all_chapters = (
+        (await db.execute(select(Chapter).where(Chapter.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    deleted_words = sum(c.word_count or 0 for c in all_chapters)
+    chapter_count = len(all_chapters)
+    outline_count = len(all_outlines)
+
+    # 清理章节关联数据（分析/记忆/向量/伏笔）
+    if all_chapters:
+        chapter_service = ChapterService(db, project_id, user.id)
+        await chapter_service.cleanup_chapters_data([c.id for c in all_chapters])
+        for c in all_chapters:
+            await db.delete(c)
+
+    # 删除所有大纲
+    for o in all_outlines:
+        await db.delete(o)
+
+    # 回收项目字数
+    proj.current_word_count = 0
+    await db.commit()
+    return {
+        "ok": True,
+        "deleted_outlines": outline_count,
+        "deleted_chapters": chapter_count,
+        "deleted_words": deleted_words,
+    }
+
+
 @router.post("/{project_id}/outlines/continue")
 async def continue_outlines(
     project_id: int,

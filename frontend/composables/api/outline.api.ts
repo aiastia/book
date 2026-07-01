@@ -7,6 +7,7 @@ export const outlineApi = {
   create: (body: any, id?: number) => post(`/projects/${P(id)}/outlines`, body),
   update: (outlineId: number, body: any, id?: number) => put(`/projects/${P(id)}/outlines/${outlineId}`, body),
   delete: (outlineId: number, id?: number) => del(`/projects/${P(id)}/outlines/${outlineId}`),
+  deleteAll: (id?: number) => del(`/projects/${P(id)}/outlines`),
   generate: (id: number, opts: { chapterCount?: number; narrativePov?: string; aiModel?: string } = {}) =>
     post(`/projects/${id}/outlines/generate-async`, { chapter_count: opts.chapterCount || 10, narrative_pov: opts.narrativePov || '', ai_model: opts.aiModel || '' }),
   continue: (id: number, body: any = {}) => post(`/projects/${id}/outlines/continue-async`, body),

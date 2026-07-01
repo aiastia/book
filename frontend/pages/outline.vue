@@ -511,6 +511,19 @@ async function onDelete(id: number) {
   catch (e: any) { msg.error('删除失败：' + formatError(e)) }
 }
 
+async function onClearAll() {
+  const count = (outlines.value || []).length
+  if (!await msg.confirm(
+    `将清空全部 ${count} 条大纲，同时删除所有章节正文、分析数据、记忆和伏笔。\n项目字数归零。\n\n此操作不可撤销，确认？`,
+    '清空全部大纲'
+  )) return
+  try {
+    const res = await API.outline.deleteAll()
+    await refreshOutlines()
+    msg.success(`已清空 ${res.deleted_outlines} 条大纲、${res.deleted_chapters} 章正文`)
+  } catch (e: any) { msg.error('清空失败：' + formatError(e)) }
+}
+
 function openExpand(o: any) {
   // 已展开 → 直接预览
   if (o.has_chapters) { viewExpansion(o); return }
@@ -614,6 +627,7 @@ async function deleteExpansion() {
         批量展开
       </a-button>
       <a-button @click="onManualCreate">手动创建</a-button>
+      <a-button v-if="outlines && outlines.length" danger @click="onClearAll">🗑️ 清空全部</a-button>
       <a-button type="primary" :loading="generating" @click="openContinue">
         {{ outlines && outlines.length ? '续写大纲' : 'AI 生成大纲' }}
       </a-button>
