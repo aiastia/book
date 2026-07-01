@@ -30,5 +30,6 @@ class Chapter(Base):
     raw_output = Column(Text, default="")  # 清理/改写前的原始 AI 输出
     generation_history = Column(JSON, default=list)  # 生成历史记录
     style_config = Column(JSON, default=dict)  # 本章写作风格覆盖
+    ssml_result = Column(JSON, nullable=True)  # TTS 转换结果 {ssml_parts, stats, created_at}
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
