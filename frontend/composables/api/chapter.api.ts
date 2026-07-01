@@ -80,6 +80,6 @@ export const chapterApi = {
   getAnalysis: (chapterNumber: number, id?: number) =>
     get(`/projects/${P(id)}/analyses/${chapterNumber}`),
 
-  // 去AI味
-  aiDenoising: (body: { text: string }) => post(`/projects/${P()}/ai-denoising`, body),
+  // 去AI味（SSE 流式，防网关超时）
+  aiDenoising: (body: { text: string }) => postSSE(`/projects/${P()}/ai-denoising/stream`, body),
 }

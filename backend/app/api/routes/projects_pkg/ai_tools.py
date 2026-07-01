@@ -38,7 +38,7 @@ async def ai_denoising(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """让文本更自然，去除 AI 味"""
+    """让文本更自然，去除 AI 味（同步，适合短文本）"""
     await get_user_project(db, project_id, user)
     engine, ai_client = await make_engine_and_client(db, user.id)
     result = await engine.execute_skill(
@@ -52,6 +52,33 @@ async def ai_denoising(
     check_skill_error(result)
     processed = (result.get("json") or {}).get("processed_text", "") or result.get("content", "")
     return {"processed_text": processed}
+
+
+@router.post("/{project_id}/ai-denoising/stream")
+async def ai_denoising_stream(
+    project_id: int,
+    req: AiDenoisingRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """去AI味 —— SSE 流式版（防网关超时）"""
+
+    async def _do():
+        await get_user_project(db, project_id, user)
+        engine, ai_client = await make_engine_and_client(db, user.id)
+        result = await engine.execute_skill(
+            "ai_denoising",
+            ai_client,
+            {
+                "original_text": req.text,
+                "user_prompt": f"请对以下文本进行去AI味润色，让文字更加自然：\n\n{req.text}",
+            },
+        )
+        check_skill_error(result)
+        processed = (result.get("json") or {}).get("processed_text", "") or result.get("content", "")
+        return {"processed_text": processed}
+
+    return await sse_wrap(_do())
 
 
 # ============ 封面提示词 ============
