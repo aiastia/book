@@ -800,6 +800,23 @@ onTaskCompleted('chapter_tts', async () => {
   }
 })
 
+// 查看当前章节的最近一次 TTS 结果
+async function onTtsView() {
+  if (!editing.value) return
+  try {
+    const tasks = await API.task.list({ taskType: 'chapter_tts', status: 'completed', limit: 20 }) as any[]
+    const matched = (tasks || []).find((t: any) => t.payload?.chapter_id === editing.value.id)
+    if (matched?.result?.success) {
+      ttsResult.value = matched.result
+      ttsResultOpen.value = true
+    } else {
+      msg.info('当前章节暂无已完成的语音转换结果')
+    }
+  } catch (e: any) {
+    msg.error('查询失败：' + formatError(e))
+  }
+}
+
 function openDenoise() {
   const ta = document.querySelector('.ch-editor textarea') as any
   denoiseText.value = (ta && ta.selectionStart !== ta.selectionEnd)
@@ -1232,6 +1249,7 @@ async function onPlanSaved() {
           </ClientOnly>
           <a-button :loading="denoising" @click="openDenoise">去AI味</a-button>
           <a-button :loading="ttsLoading" @click="onTts" title="将本章转成语音合成 SSML">🔊 转语音</a-button>
+          <a-button @click="onTtsView" title="查看本章最近一次语音转换结果">📋 查看SSML</a-button>
           <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
           <a-button @click="clearContent">清空本章</a-button>
           <a-button danger @click="clearChapterAndAfter">🧹 清空本章及后续</a-button>
