@@ -2,12 +2,17 @@
 
 挂在项目路由下,路径为 /api/projects/{project_id}/chapters/{chapter_id}/tts。
 复用墨语 AIClient(用户配置的模型/base_url/key),不另起 LLM 客户端。
+
+采用后台任务模式:立即返回 task_id,后台跑 Director + Builder,
+完成后结果存在 task.result 里,前端轮询拿。
 """
 
 from app.api.routes.projects_pkg.base import *  # noqa: F401,F403
 from app.services.tts_pipeline.director import Director
 from app.services.tts_pipeline.builder import SSMLBuilder
 from app.services.tts_pipeline.models import DirectorLine, SceneChange
+from app.services.async_ai_service import submit_async_task
+from app.services import background_task_service as bg_service
 
 router = make_router()  # noqa: F405  prefix=/api/projects
 
@@ -45,23 +50,6 @@ def _instructions_to_json(instructions) -> list:
     return result
 
 
-def _parse_instructions(raw_list: list):
-    instructions = []
-    for item in raw_list:
-        if not isinstance(item, dict):
-            continue
-        if "scene_change" in item:
-            instructions.append(SceneChange(scene_change=str(item["scene_change"])))
-        elif "text" in item:
-            instructions.append(DirectorLine(
-                speaker=str(item.get("speaker", "Narrator")),
-                text=str(item["text"]),
-                emotion=item.get("emotion"),
-                pause_after=item.get("pause_after"),
-            ))
-    return instructions
-
-
 @router.post("/{project_id}/chapters/{chapter_id}/tts")
 async def chapter_to_ssml(
     project_id: int,
@@ -70,7 +58,7 @@ async def chapter_to_ssml(
     db: AsyncSession = Depends(get_db),  # noqa: F405
     user=Depends(get_current_user),  # noqa: F405
 ):
-    """把指定章节的正文转成 SSML(调 LLM 做导演分析)。"""
+    """把指定章节的正文转成 SSML(后台任务,立即返回 task_id)。"""
     # 权限校验 + 取章节
     await get_user_project(db, project_id, user)  # noqa: F405
     result = await db.execute(
@@ -86,36 +74,82 @@ async def chapter_to_ssml(
     if not chapter.content or not chapter.content.strip():
         raise HTTPException(400, "章节内容为空")  # noqa: F405
 
-    # 取用户配置的 AIClient(支持指定模型)
-    _, ai_client = await make_engine_and_client(db, user.id, model_override=req.model or None)  # noqa: F405
+    ch_title = chapter.title or f"第{chapter.chapter_number}章"
+    ch_content = chapter.content  # 快照,避免后续 session 变化
 
-    # ① Director 分析
-    director = Director(ai_client=ai_client, chunk_size=req.chunk_size)
-    instructions, err = await director.analyze(chapter.content)
-    if err:
-        return {"success": False, "error": err}
+    async def _run_tts(task_id: int, payload: dict, db: AsyncSession):
+        tracker = bg_service.TaskProgressTracker(task_id, db=db)
+        if await tracker.is_cancelled():
+            await tracker.cancel("用户取消")
+            return
 
-    # ② Builder 拼 SSML
-    try:
-        builder = SSMLBuilder(characters_override=req.characters, scenes_override=req.scenes)
-        ssml_parts = builder.build(instructions, voice=req.voice)
-    except ValueError as e:
-        return {"success": False, "error": f"配置错误: {str(e)}"}
+        await tracker.update(stage="preparing", message="正在初始化 AI 客户端...")
 
-    line_count = sum(1 for i in instructions if isinstance(i, DirectorLine))
-    scene_count = sum(1 for i in instructions if isinstance(i, SceneChange))
+        _, ai_client = await make_engine_and_client(  # noqa: F405
+            db, payload["user_id"], model_override=payload.get("model") or None
+        )
 
-    return {
-        "success": True,
-        "ssml_parts": ssml_parts,
-        "director_json": _instructions_to_json(instructions),
-        "stats": {
-            "lines": line_count,
-            "scenes": scene_count,
-            "chars": len(chapter.content),
-            "ssml_parts": len(ssml_parts),
+        await tracker.update(
+            stage="analyzing",
+            message=f"导演分析中({len(payload['content'])} 字,可能需要 1-2 分钟)...",
+        )
+
+        # ① Director 分析
+        director = Director(ai_client=ai_client, chunk_size=payload.get("chunk_size", 1500))
+        instructions, err = await director.analyze(payload["content"])
+        if err:
+            await tracker.fail(f"导演分析失败: {err}")
+            return
+
+        await tracker.update(stage="building", message="正在拼接 SSML...")
+
+        # ② Builder 拼 SSML
+        try:
+            builder = SSMLBuilder(
+                characters_override=payload.get("characters"),
+                scenes_override=payload.get("scenes"),
+            )
+            ssml_parts = builder.build(instructions, voice=payload.get("voice", "zh-CN-XiaoxiaoNeural"))
+        except ValueError as e:
+            await tracker.fail(f"SSML 构建失败(配置错误): {str(e)}")
+            return
+
+        line_count = sum(1 for i in instructions if isinstance(i, DirectorLine))
+        scene_count = sum(1 for i in instructions if isinstance(i, SceneChange))
+
+        await tracker.complete(
+            result={
+                "success": True,
+                "ssml_parts": ssml_parts,
+                "director_json": _instructions_to_json(instructions),
+                "stats": {
+                    "lines": line_count,
+                    "scenes": scene_count,
+                    "chars": len(payload["content"]),
+                    "ssml_parts": len(ssml_parts),
+                },
+            },
+            message=f"语音转换完成({line_count} 句,{len(ssml_parts)} 段 SSML)",
+        )
+
+    task_id = await submit_async_task(
+        user_id=user.id,
+        project_id=project_id,
+        task_type="chapter_tts",
+        title=f"转语音: {ch_title}",
+        payload={
+            "chapter_id": chapter_id,
+            "user_id": user.id,
+            "content": ch_content,
+            "voice": req.voice,
+            "model": req.model,
+            "chunk_size": req.chunk_size,
+            "characters": req.characters,
+            "scenes": req.scenes,
         },
-    }
+        runner=_run_tts,
+    )
+    return {"task_id": task_id, "chapter_id": chapter_id}
 
 
 @router.post("/{project_id}/chapters/{chapter_id}/tts/build")
@@ -126,7 +160,7 @@ async def chapter_ssml_build_only(
     db: AsyncSession = Depends(get_db),  # noqa: F405
     user=Depends(get_current_user),  # noqa: F405
 ):
-    """用已有 Director JSON 直接拼 SSML(不调 LLM)。用于微调后重建。"""
+    """用已有 Director JSON 直接拼 SSML(不调 LLM,同步)。用于微调后重建。"""
     await get_user_project(db, project_id, user)  # noqa: F405
 
     instructions = _parse_instructions(req.director_json)
@@ -140,3 +174,20 @@ async def chapter_ssml_build_only(
         return {"success": False, "error": f"配置错误: {str(e)}"}
 
     return {"success": True, "ssml_parts": ssml_parts, "stats": {"ssml_parts": len(ssml_parts)}}
+
+
+def _parse_instructions(raw_list: list):
+    instructions = []
+    for item in raw_list:
+        if not isinstance(item, dict):
+            continue
+        if "scene_change" in item:
+            instructions.append(SceneChange(scene_change=str(item["scene_change"])))
+        elif "text" in item:
+            instructions.append(DirectorLine(
+                speaker=str(item.get("speaker", "Narrator")),
+                text=str(item["text"]),
+                emotion=item.get("emotion"),
+                pause_after=item.get("pause_after"),
+            ))
+    return instructions

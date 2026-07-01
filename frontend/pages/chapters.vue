@@ -746,10 +746,12 @@ const denoiseResult = ref('')
 const denoising = ref(false)
 const denoiseCompareOpen = ref(false)
 
-// 章节转语音
+// 章节转语音(后台任务模式)
 const ttsLoading = ref(false)
 const ttsResultOpen = ref(false)
 const ttsResult = ref<any>(null)
+// 记录当前等待结果的 task_id,避免其他 chapter_tts 任务串扰
+let _pendingTtsTaskId: number | null = null
 
 async function onTts() {
   if (!editing.value || !editingContent.value.trim()) {
@@ -757,17 +759,21 @@ async function onTts() {
     return
   }
   ttsLoading.value = true
-  ttsResult.value = null
   try {
     const r = await API.chapter.tts(editing.value.id, {
       chunk_size: 1500,
       model: selectedModel.value || undefined,
     })
-    if (r.success) {
-      ttsResult.value = r
-      ttsResultOpen.value = true
+    if (r.task_id) {
+      _pendingTtsTaskId = r.task_id
+      trackBgTask({
+        id: r.task_id,
+        task_type: 'chapter_tts',
+        title: `转语音: 第${editing.value.chapter_number}章`,
+      })
+      msg.success('语音转换任务已提交，可在右下角查看进度')
     } else {
-      msg.error(r.error || '语音转换失败')
+      msg.error(r.error || '提交失败')
     }
   } catch (e: any) {
     msg.error(e?.message || '语音转换失败，请检查后端服务和 AI 配置')
@@ -775,6 +781,24 @@ async function onTts() {
     ttsLoading.value = false
   }
 }
+
+// chapter_tts 任务完成后,拉取结果并弹窗
+onTaskCompleted('chapter_tts', async () => {
+  if (!_pendingTtsTaskId) return
+  const taskId = _pendingTtsTaskId
+  _pendingTtsTaskId = null
+  try {
+    const task = await API.task.getStatus(taskId)
+    if (task.status === 'completed' && task.result?.success) {
+      ttsResult.value = task.result
+      ttsResultOpen.value = true
+    } else if (task.status === 'failed') {
+      msg.error(task.status_message || task.result?.error || '语音转换失败')
+    }
+  } catch (e: any) {
+    msg.error('获取语音转换结果失败: ' + formatError(e))
+  }
+})
 
 function openDenoise() {
   const ta = document.querySelector('.ch-editor textarea') as any
