@@ -580,6 +580,8 @@ def clean_generated_text(text: str, mode: str = "normal", skip_not_a_but_b: bool
     # ---- 残留清理 ----
     text = re.sub(r"，{2,}", "，", text)
     text = re.sub(r"。{2,}", "。", text)
+    # 连续混合标点：取最后一个（句子结束符优先）
+    text = re.sub(r"[，。！？]{2,}", lambda m: m.group()[-1], text)
     text = re.sub(r" {2,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"——{2,}", "——", text)
