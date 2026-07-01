@@ -117,18 +117,28 @@ async def chapter_to_ssml(
         line_count = sum(1 for i in instructions if isinstance(i, DirectorLine))
         scene_count = sum(1 for i in instructions if isinstance(i, SceneChange))
 
-        await tracker.complete(
-            result={
-                "success": True,
-                "ssml_parts": ssml_parts,
-                "director_json": _instructions_to_json(instructions),
-                "stats": {
-                    "lines": line_count,
-                    "scenes": scene_count,
-                    "chars": len(payload["content"]),
-                    "ssml_parts": len(ssml_parts),
-                },
+        # 持久化到章节表（任务记录被清理也不丢）
+        tts_data = {
+            "success": True,
+            "ssml_parts": ssml_parts,
+            "director_json": _instructions_to_json(instructions),
+            "stats": {
+                "lines": line_count,
+                "scenes": scene_count,
+                "chars": len(payload["content"]),
+                "ssml_parts": len(ssml_parts),
             },
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        ch = await db.execute(
+            select(Chapter).where(Chapter.id == payload["chapter_id"])  # noqa: F405
+        )
+        ch_obj = ch.scalar_one_or_none()
+        if ch_obj:
+            ch_obj.ssml_result = tts_data
+
+        await tracker.complete(
+            result=tts_data,
             message=f"语音转换完成({line_count} 句,{len(ssml_parts)} 段 SSML)",
         )
 
