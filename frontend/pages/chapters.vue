@@ -800,17 +800,16 @@ onTaskCompleted('chapter_tts', async () => {
   }
 })
 
-// 查看当前章节的最近一次 TTS 结果
+// 查看当前章节的 TTS 结果（从章节表读取，不依赖任务记录）
 async function onTtsView() {
   if (!editing.value) return
   try {
-    const tasks = await API.task.list({ taskType: 'chapter_tts', status: 'completed', limit: 20 }) as any[]
-    const matched = (tasks || []).find((t: any) => t.payload?.chapter_id === editing.value.id)
-    if (matched?.result?.success) {
-      ttsResult.value = matched.result
+    const ch = await API.chapter.get(editing.value.id)
+    if (ch?.ssml_result?.success) {
+      ttsResult.value = ch.ssml_result
       ttsResultOpen.value = true
     } else {
-      msg.info('当前章节暂无已完成的语音转换结果')
+      msg.info('当前章节暂无语音转换结果，请先点击「🔊 转语音」')
     }
   } catch (e: any) {
     msg.error('查询失败：' + formatError(e))
