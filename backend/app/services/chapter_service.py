@@ -200,8 +200,8 @@ def _clean_meta_commentary(content: str) -> tuple[str, bool]:
             continue
         cleaned_lines.append(line)
     content = "\n".join(cleaned_lines).lstrip()
-    # 如果清理后内容太短（<50字），说明正文本身有问题，返回原文
-    if len(content) < 50:
+    # 如果清理后内容不到原内容的 50%，说明清理过头了，返回原文
+    if len(content) < len(original) * 0.5:
         return original, False
     return content, (content != original)
 
