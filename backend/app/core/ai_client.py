@@ -268,7 +268,7 @@ class AIClient:
     def _apply_reasoning(self, kwargs: dict) -> dict:
         """推理模型参数处理。
 
-        - thinking_mode="enabled"：开启 thinking（temperature=1 + 厂商对应参数）
+        - thinking_mode="enabled"：开启 thinking（temperature=1 + 厂商对应参数 + max_tokens 翻倍）
         - thinking_mode="disabled"：关闭 thinking（不修改 temperature/top_p）
         - thinking_mode="auto"：GLM-5 自动关闭，其他不变（兼容旧行为）
         """
@@ -278,14 +278,19 @@ class AIClient:
                 kwargs["extra_body"] = {}
             kwargs["extra_body"].update(thinking_extra)
 
-        if self.reasoning_model and self.thinking_mode != "disabled":
-            # 推理模式：强制 temperature=1，移除 top_p/penalty
+        # 判断 thinking 是否真正开启
+        thinking_on = (
+            self.thinking_mode == "enabled"
+            or (self.thinking_mode == "auto" and self.reasoning_model)
+        )
+        if thinking_on:
+            # 开启 thinking 时翻倍 token 预算，避免 reasoning 耗尽后 content 为空
+            if "max_tokens" in kwargs and kwargs["max_tokens"]:
+                kwargs["max_tokens"] = kwargs["max_tokens"] * 2
             kwargs["temperature"] = 1
             kwargs.pop("top_p", None)
             kwargs.pop("frequency_penalty", None)
             kwargs.pop("presence_penalty", None)
-            # 如果 thinking_mode=enabled，用 reasoning_effort（已在 thinking_extra 中处理）
-            # 如果 thinking_mode=auto 且 reasoning_model=True，回退到 reasoning_effort
             if self.thinking_mode == "auto":
                 kwargs["extra_body"].setdefault("reasoning_effort", self.reasoning_effort)
 
