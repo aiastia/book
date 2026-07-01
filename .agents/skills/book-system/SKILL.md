@@ -14,8 +14,10 @@ description: 墨鱼写作系统。创建小说、大纲、章节。
 | 分类 | 工具 |
 |------|------|
 | 创建 | `create_book` `generate_outline` `expand_outline` |
-| 生成 | `generate_chapter` `regenerate_chapter` `continue_outline` |
-| 查看 | `list_books` `list_chapters` `get_chapter` `list_outlines` `get_active_task` |
+| 生成 | `generate_chapter` `sync_generate_chapter` `regenerate_chapter` `partial_regenerate` `continue_outline` `continue_outline_sync` |
+| 分析 | `analyze_chapter` |
+| 润色 | `ai_denoising` |
+| 查看 | `list_books` `get_project` `list_chapters` `get_chapter` `list_outlines` `get_active_task` |
 | 管理 | `clear_chapter` `cancel_task` |
 
 ## 默认流程
@@ -42,11 +44,17 @@ description: 墨鱼写作系统。创建小说、大纲、章节。
 |---------|------|-----|
 | 创建/开新书 | 直接问书名等信息 | `create_book` |
 | 生成/写章节 | `list_chapters` 确认状态 | `generate_chapter` |
+| 立即生成单章 | `list_chapters` 确认状态 | `sync_generate_chapter` |
 | 看/查看章节 | `get_chapter` | — |
 | 生成大纲 | `list_outlines` 确认状态 | `generate_outline` |
+| 续写大纲 | `list_outlines` 确认状态 | `continue_outline` |
+| 立即续写大纲 | `list_outlines` 确认状态 | `continue_outline_sync` |
+| 分析/检查伏笔 | `get_chapter` 先看到内容 | `analyze_chapter` |
+| 润色/去噪 | `get_chapter` 先看到内容 | `ai_denoising` |
+| 重写/改写全文 | `get_chapter` 先看到内容 | `regenerate_chapter` |
+| 局部重写 | `get_chapter` 先看到内容 | `partial_regenerate` |
 | 进度/状态 | `list_chapters` + `get_active_task` | — |
-| 重写/润色 | `get_chapter` 先看到内容 | `regenerate_chapter` |
-| 角色/设定 | 调用对应查询工具 | 基于结果分析 |
+| 项目信息 | `get_project` | — |
 | 取消/停止 | `cancel_task` | — |
 
 **禁止凭记忆回答。** 角色怎么样、写了多少字、大纲什么状态——必须先查再回答。
@@ -101,6 +109,12 @@ description: 墨鱼写作系统。创建小说、大纲、章节。
 | `expand_outline` | POST | `/projects/{id}/outlines/{oid}/expand-async` | — |
 | `get_active_task` | GET | `/projects/{id}/batch-generate/active` | — |
 | `cancel_task` | POST | `/projects/{id}/batch-generate/{tid}/cancel` | — |
+| `sync_generate_chapter` | POST | `/projects/{id}/chapters/{cid}/generate` | `{target_word_count, model_override}` |
+| `continue_outline_sync` | POST | `/projects/{id}/outlines/continue` | — |
+| `analyze_chapter` | POST | `/projects/{id}/chapters/{cid}/analyze` | — |
+| `partial_regenerate` | POST | `/projects/{id}/chapters/{cid}/partial-regenerate` | `{instructions}` |
+| `ai_denoising` | POST | `/projects/{id}/ai-denoising` | `{instructions}` |
+| `get_project` | GET | `/projects/{id}` | — |
 
 异步操作（generate/expand）返回 `{task_id}` 后，每 5 秒轮询 `GET /projects/{id}/batch-generate/{task_id}/status`，直到 `status` 为 `completed/failed/cancelled`。
 
