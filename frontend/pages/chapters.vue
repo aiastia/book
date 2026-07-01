@@ -743,8 +743,8 @@ async function onRewriteApplied() {
 const showDenoise = ref(false)
 const denoiseText = ref('')
 const denoiseResult = ref('')
-const denoisePreview = ref(false)
 const denoising = ref(false)
+const denoiseCompareOpen = ref(false)
 
 function openDenoise() {
   const ta = document.querySelector('.ch-editor textarea') as any
@@ -752,7 +752,6 @@ function openDenoise() {
     ? ta.value.substring(ta.selectionStart, ta.selectionEnd)
     : editingContent.value
   denoiseResult.value = ''
-  denoisePreview.value = false
   showDenoise.value = true
 }
 
@@ -762,7 +761,8 @@ async function onDenoise() {
   try {
     const r = await API.chapter.aiDenoising({ text: denoiseText.value })
     denoiseResult.value = r.processed_text || ''
-    denoisePreview.value = true
+    denoiseCompareOpen.value = true
+    showDenoise.value = false
   } catch (e: any) {
     msg.error('失败：' + formatError(e))
   } finally {
@@ -771,8 +771,19 @@ async function onDenoise() {
 }
 
 function applyDenoise() {
-  editingContent.value = denoiseResult.value
-  showDenoise.value = false
+  denoiseCompareOpen.value = false
+  // 在原文中定位替换
+  if (denoiseText.value === editingContent.value) {
+    editingContent.value = denoiseResult.value
+  } else {
+    // 选中文字替换
+    const ta = document.querySelector('.ch-editor textarea') as any
+    if (ta && ta.selectionStart !== ta.selectionEnd) {
+      const start = ta.selectionStart
+      const end = ta.selectionEnd
+      editingContent.value = editingContent.value.substring(0, start) + denoiseResult.value + editingContent.value.substring(end)
+    }
+  }
   msg.success('已应用')
 }
 
@@ -1329,19 +1340,23 @@ async function onPlanSaved() {
 
     <!-- ===== 去AI味弹窗 ===== -->
     <a-modal v-model:open="showDenoise" title="去AI味" width="600px">
-      <div v-if="!denoisePreview">
-        <a-textarea v-model:value="denoiseText" :rows="6" />
-      </div>
-      <div v-else>
-        <strong style="color: #4D8088">结果</strong>
-        <div style="background: #F0F5F5; padding: 8px; border-radius: 6px; margin-top: 4px; white-space: pre-wrap">{{ denoiseResult }}</div>
-      </div>
+      <a-textarea v-model:value="denoiseText" :rows="6" placeholder="输入需要去AI味的文本，或选中正文后点击去AI味" />
       <template #footer>
-        <a-button @click="showDenoise = false">{{ denoisePreview ? '关闭' : '取消' }}</a-button>
-        <a-button v-if="denoisePreview" type="primary" @click="applyDenoise">应用</a-button>
-        <a-button v-else type="primary" :loading="denoising" @click="onDenoise">润色</a-button>
+        <a-button @click="showDenoise = false">取消</a-button>
+        <a-button type="primary" :loading="denoising" @click="onDenoise">润色</a-button>
       </template>
     </a-modal>
+
+    <!-- ===== 去AI味对比弹窗 ===== -->
+    <ContentComparisonModal
+      v-model:visible="denoiseCompareOpen"
+      title="去AI味对比"
+      :original-content="denoiseText"
+      :new-content="denoiseResult"
+      show-actions
+      @apply="applyDenoise"
+      @discard="() => { denoiseCompareOpen = false }"
+    />
 
     <!-- ===== 内嵌阅读器（带标注） ===== -->
     <a-modal
