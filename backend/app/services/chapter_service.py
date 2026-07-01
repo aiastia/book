@@ -824,7 +824,7 @@ class ChapterService:
         return await _query_chapter_summary(self.db, self.project_id, chapter_num)
 
     async def _get_quality_trends(self, chapter: Chapter) -> str:
-        """获取前5章评分趋势（tool-calling 模式也注入）。"""
+        """获取前5章评分趋势 + 评分理由（tool-calling 模式也注入）。"""
         try:
             from app.models.plot_analysis import PlotAnalysis
 
@@ -845,13 +845,13 @@ class ChapterService:
             )
             if not analyses:
                 return ""
-            lines = ["前5章质量分项趋势："]
+            lines = ["【前章质量反馈——请针对以下问题改进本章写作】"]
             for pa in reversed(analyses):
                 scores = {}
                 if isinstance(pa.scores, dict):
                     scores = pa.scores
+                parts = [f"第{pa.chapter_number}章"]
                 if scores:
-                    parts = [f"第{pa.chapter_number}章"]
                     for dim in [
                         "pacing",
                         "engagement",
@@ -862,10 +862,29 @@ class ChapterService:
                     ]:
                         if dim in scores:
                             parts.append(f"{dim}={scores[dim]}")
-                    lines.append("  " + " | ".join(parts))
+                reasons = self._extract_analysis_reasons(pa.analysis_report or "")
+                if reasons:
+                    parts.append(f"问题：{reasons}")
+                lines.append("  " + " | ".join(parts))
             return "\n".join(lines) if len(lines) > 1 else ""
         except Exception:
             return ""
+
+    def _extract_analysis_reasons(self, report: str) -> str:
+        """从分析报告中提取评分理由和主要问题。"""
+        if not report:
+            return ""
+        import re
+        match = re.search(r'【评分理由】[：:]?\s*(.*?)(?=\n【|\Z)', report, re.DOTALL)
+        if match:
+            reason_text = match.group(1).strip()
+            reason_text = re.sub(r'\n+', '；', reason_text)
+            return reason_text[:200]
+        score_lines = [l.strip() for l in report.split('\n') if '分' in l or '问题' in l or '建议' in l]
+        if score_lines:
+            return '；'.join(score_lines[:3])[:200]
+        return ""
+
 
     async def _get_previous_ending(self, chapter: Chapter) -> str:
         """获取上一章的结尾内容（用于衔接锚点）。"""
@@ -1604,11 +1623,25 @@ class ChapterService:
             # 获取 AI 响应元信息（在 result 被遮蔽前取出）
             skill_result = result  # 保存 execute_skill 返回的原始 dict
 
+            # 先检查是否有润色 API 配置——有的话「不是A是B」等句式跳过正则删除，交给 AI 改写
+            from app.models.ai_model import AIModelConfig as _Cfg
+            _has_rewrite_cfg = False
+            if self.user_id:
+                _rw_cfg = (
+                    await self.db.execute(
+                        select(_Cfg).where(
+                            _Cfg.user_id == self.user_id,
+                            (_Cfg.rewrite_model != "") | (_Cfg.rewrite_base_url != "") | (_Cfg.rewrite_api_key != ""),
+                        ).limit(1)
+                    )
+                ).scalar_one_or_none()
+                _has_rewrite_cfg = bool(_rw_cfg and (_rw_cfg.rewrite_base_url or _rw_cfg.rewrite_api_key or _rw_cfg.rewrite_model))
+
             # 保存原始输出（清理前），供前端对比
             # 先剥离 DSML/XML 工具调用标签，防止工具调用内容污染 raw_output
             raw_for_save, _dsml_removed = _strip_xml_like_tags(content)
             chapter.raw_output = raw_for_save
-            clean_result = clean_generated_text(content)
+            clean_result = clean_generated_text(content, skip_not_a_but_b=_has_rewrite_cfg)
             content = clean_result.cleaned_text
 
             import logging
@@ -1618,8 +1651,6 @@ class ChapterService:
 
             # Diff Rewrite：用小模型改写 cleaner 改不了的句式（如果用户配置了润色 API）
             try:
-                from app.models.ai_model import AIModelConfig as _Cfg
-
                 cfg = None
                 logger.warning(f"[rewrite] 第{chapter.chapter_number}章 开始检查润色配置 (user_id={self.user_id})")
                 if self.user_id:
