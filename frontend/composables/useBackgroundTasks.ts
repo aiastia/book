@@ -48,93 +48,99 @@ function _parseProgressDone(pd: any): number {
   return details?.generation?.done || 0
 }
 
+// ===== 模块级 WebSocket 单例（所有组件共享同一连接）=====
+// 避免 useBackgroundTasks() 在多个组件中调用时各自创建独立连接
+let ws: WebSocket | null = null
+let wsReconnectTimer: any = null
+let wsHeartbeatTimer: any = null
+const WS_RECONNECT_DELAY = 5000
+let wsVisibilityRegistered = false
+
+function getWsUrl(): string {
+  // 检测当前页面协议和 API host
+  const apiBase = (import.meta as any).client
+    ? useRuntimeConfig().public.apiBase
+    : 'http://localhost:8000'
+  const url = new URL(apiBase)
+  const wsProtocol = url.protocol === 'https:' ? 'wss' : 'ws'
+  const token = localStorage.getItem('moyu_token') || ''
+  return `${wsProtocol}://${url.host}/ws/tasks?token=${encodeURIComponent(token)}`
+}
+
+function connectWs() {
+  if (!import.meta.client) return
+  // 单例守卫：已有开放连接则跳过
+  if (ws && ws.readyState === WebSocket.OPEN) return
+  try {
+    ws = new WebSocket(getWsUrl())
+    ws.onopen = () => {
+      // WebSocket 连接成功，停止 HTTP 轮询
+      if (pollTimer) {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
+    }
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type === 'ping') {
+          ws?.send(JSON.stringify({ type: 'pong' }))
+          return
+        }
+        if (msg.type === 'task_update' && msg.task) {
+          _applyWsUpdate(msg.task)
+        }
+      } catch {}
+    }
+    ws.onclose = () => {
+      ws = null
+      // 断开后回退到 HTTP 轮询
+      if (!pollTimer) startPolling()
+      // 延迟重连
+      if (!wsReconnectTimer) {
+        wsReconnectTimer = setTimeout(() => {
+          wsReconnectTimer = null
+          connectWs()
+        }, WS_RECONNECT_DELAY)
+      }
+    }
+    ws.onerror = () => {
+      ws?.close()
+    }
+  } catch {
+    // ws 连接失败，依赖 HTTP 轮询
+  }
+}
+
+function _applyWsUpdate(taskData: any) {
+  // 通过 WS 推送更新本地任务状态
+  const existing = tasks.value.find(t => t.id === taskData.id)
+  if (existing) {
+    const prevDone = _parseProgressDone(existing.progress_details)
+    const currDone = _parseProgressDone(taskData.progress_details)
+    const wasActive = existing.status === 'pending' || existing.status === 'running'
+    Object.assign(existing, taskData)
+    if (wasActive && (taskData.status === 'completed' || taskData.status === 'failed')) {
+      existing._doneAt = Date.now()
+      _fireCallbacks(taskData)
+      _scheduleAutoDismiss(taskData.id)
+    } else if (wasActive && currDone > prevDone) {
+      // 每完成一章就触发刷新
+      _fireCallbacks(taskData)
+    }
+  } else {
+    tasks.value.push({ ...taskData, _source: 'generic' })
+  }
+}
+
+// ===== 通用任务（新队列）=====
+
 export function useBackgroundTasks() {
   if (import.meta.client && !polling) loadLegacyFromStorage()
 
-  // ===== WebSocket 连接管理 =====
-  let ws: WebSocket | null = null
-  let wsReconnectTimer: any = null
-  let wsHeartbeatTimer: any = null
-  const WS_RECONNECT_DELAY = 5000
-
-  function getWsUrl(): string {
-    // 检测当前页面协议和 API host
-    const apiBase = (import.meta as any).client
-      ? useRuntimeConfig().public.apiBase
-      : 'http://localhost:8000'
-    const url = new URL(apiBase)
-    const wsProtocol = url.protocol === 'https:' ? 'wss' : 'ws'
-    const token = localStorage.getItem('moyu_token') || ''
-    return `${wsProtocol}://${url.host}/ws/tasks?token=${encodeURIComponent(token)}`
-  }
-
-  function connectWs() {
-    if (!import.meta.client) return
-    if (ws && ws.readyState === WebSocket.OPEN) return
-    try {
-      ws = new WebSocket(getWsUrl())
-      ws.onopen = () => {
-        // WebSocket 连接成功，停止 HTTP 轮询
-        if (pollTimer) {
-          clearInterval(pollTimer)
-          pollTimer = null
-        }
-      }
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
-          if (msg.type === 'ping') {
-            ws?.send(JSON.stringify({ type: 'pong' }))
-            return
-          }
-          if (msg.type === 'task_update' && msg.task) {
-            _applyWsUpdate(msg.task)
-          }
-        } catch {}
-      }
-      ws.onclose = () => {
-        ws = null
-        // 断开后回退到 HTTP 轮询
-        if (!pollTimer) startPolling()
-        // 延迟重连
-        if (!wsReconnectTimer) {
-          wsReconnectTimer = setTimeout(() => {
-            wsReconnectTimer = null
-            connectWs()
-          }, WS_RECONNECT_DELAY)
-        }
-      }
-      ws.onerror = () => {
-        ws?.close()
-      }
-    } catch {
-      // ws 连接失败，依赖 HTTP 轮询
-    }
-  }
-
-  function _applyWsUpdate(taskData: any) {
-    // 通过 WS 推送更新本地任务状态
-    const existing = tasks.value.find(t => t.id === taskData.id)
-    if (existing) {
-      const prevDone = _parseProgressDone(existing.progress_details)
-      const currDone = _parseProgressDone(taskData.progress_details)
-      const wasActive = existing.status === 'pending' || existing.status === 'running'
-      Object.assign(existing, taskData)
-      if (wasActive && (taskData.status === 'completed' || taskData.status === 'failed')) {
-        existing._doneAt = Date.now()
-        _fireCallbacks(taskData)
-        _scheduleAutoDismiss(taskData.id)
-      } else if (wasActive && currDone > prevDone) {
-        // 每完成一章就触发刷新
-        _fireCallbacks(taskData)
-      }
-    } else {
-      tasks.value.push({ ...taskData, _source: 'generic' })
-    }
-  }
-
-  // 页面可见性变化时管理 WebSocket
-  if (import.meta.client) {
+  // 页面可见性变化时管理 WebSocket（仅注册一次）
+  if (import.meta.client && !wsVisibilityRegistered) {
+    wsVisibilityRegistered = true
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         connectWs()
@@ -435,10 +441,10 @@ export function useBackgroundTasks() {
       _isLegacy: false,
       _steps: t.progress_details?.steps || null,
     }))
-	    if (legacyTaskId.value || legacyTaskStatus.value) {
-	      const lid = legacyTaskId.value || legacyTaskStatus.value?.id || 0
-	      list.push({
-	        id: `legacy-${lid}`,
+    if (legacyTaskId.value || legacyTaskStatus.value) {
+      const lid = legacyTaskId.value || legacyTaskStatus.value?.id || 0
+      list.push({
+        id: `legacy-${lid}`,
         task_type: 'init',
         title: '项目初始化',
         status: legacyTaskStatus.value?.status || 'pending',
@@ -457,8 +463,8 @@ export function useBackgroundTasks() {
           { label: '大纲', done: legacyTaskStatus.value?.outline_done },
           { label: '验证补全', done: legacyTaskStatus.value?.validate_done },
         ],
-	        _failedStep: legacyTaskStatus.value?.failed_step || '',
-	        _taskId: lid,
+        _failedStep: legacyTaskStatus.value?.failed_step || '',
+        _taskId: lid,
       })
     }
     return list
