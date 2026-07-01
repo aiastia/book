@@ -193,11 +193,11 @@ def scan_fingerprint_sentences(text: str) -> list[dict]:
     return hits
 
 
-# "不是A，（而）是B" 扫描：只匹配同一句内的紧凑句式
-#   匹配：不是A，是B / 不是A，而是B / 不是A而是B
-#   不匹配：中间有引号、句号、换行分隔的（那是角色口语停顿，是好写法不该改）
+# "不是A，（而）是B" 扫描
+#   匹配逗号或句号分隔的紧凑句式（包括短词对仗的 AI 节奏腔）
+#   引号/破折号的情况在 _scan_not_a_but_b 函数里过滤（那是角色口语停顿）
 _NOT_A_BUT_B_RE = re.compile(
-    r"不是[^。！？\n""''「」『』]{1,25}?(?:[，,]\s*(?:而)?是|而是)[^。！？\n""''「」『』]{1,60}"
+    r"不是[^。！？\n]{1,25}?(?:[，,。]\s*(?:而)?是|而是)[^。！？\n]{1,60}"
 )
 
 
@@ -207,6 +207,11 @@ def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
     for m in _NOT_A_BUT_B_RE.finditer(text):
         start, end = m.start(), m.end()
         sentence = text[start:end].strip()
+        # 跳过含破折号/引号的（角色口语停顿+动作描写打断，是好写法）
+        if "——" in sentence or "\u2014" in sentence:
+            continue
+        if any(q in sentence for q in ['"', '"', '\u2018', '\u2019', '「', '」']):
+            continue
         # "不是A是B" 句式天然较短，降低最小长度阈值
         if len(sentence) >= 6:
             matches.append({"start": start, "end": end, "sentence": sentence})
