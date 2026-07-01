@@ -491,6 +491,10 @@ class AIClient:
             cached = 0
             if usage and hasattr(usage, 'prompt_tokens_details') and usage.prompt_tokens_details:
                 cached = getattr(usage.prompt_tokens_details, 'cached_tokens', 0) or 0
+            # 提取 reasoning_tokens（如果提供商返回）
+            reasoning_tokens = 0
+            if usage and hasattr(usage, 'completion_tokens_details') and usage.completion_tokens_details:
+                reasoning_tokens = getattr(usage.completion_tokens_details, 'reasoning_tokens', 0) or 0
             return {
                 "content": content,
                 "model": resp.model,
@@ -499,12 +503,16 @@ class AIClient:
                 "output_tokens": usage.completion_tokens if usage else 0,
                 "duration_ms": int((time.time() - start) * 1000),
                 "tool_calls": tool_calls,
+                "finish_reason": resp.choices[0].finish_reason if resp.choices else None,
+                "reasoning_tokens": reasoning_tokens,
             }
         except Exception as e:
             return {
                 "content": "",
                 "error": str(e),
                 "duration_ms": int((time.time() - start) * 1000),
+                "reasoning_tokens": 0,
+                "finish_reason": None,
             }
 
     async def chat_stream_collect(

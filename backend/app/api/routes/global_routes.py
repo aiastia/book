@@ -253,7 +253,16 @@ async def test_ai_model(
     )
     if resp.get("error"):
         raise HTTPException(400, f"连接失败: {resp['error']}")
-    return {"ok": True, "reply": resp["content"][:50], "model": resp["model"]}
+    return {
+        "ok": True,
+        "reply": resp["content"][:50],
+        "model": resp["model"],
+        "thinking_mode": getattr(m, "thinking_mode", None) or "auto",
+        "thinking_params": getattr(m, "thinking_params", None) or "",
+        "reasoning_tokens": resp.get("reasoning_tokens", 0),
+        "output_tokens": resp.get("output_tokens", 0),
+        "finish_reason": resp.get("finish_reason"),
+    }
 
 
 # ---- 润色 API 测试 ----

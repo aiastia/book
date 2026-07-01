@@ -135,7 +135,14 @@ async function onTest(id: number) {
   testResult.value[id] = '测试中…'
   try {
     const r = await API.ai.testModel(id)
-    testResult.value[id] = `✅ ${r.reply}`
+    const parts = [`✅ ${r.reply}`]
+    if (r.reasoning_tokens > 0) {
+      parts.push(`⚠️ reasoning_tokens=${r.reasoning_tokens}（thinking 可能未关闭）`)
+    } else {
+      parts.push(`🧠 thinking 已关闭（reasoning_tokens=0）`)
+    }
+    parts.push(`mode=${r.thinking_mode || 'auto'}`)
+    testResult.value[id] = parts.join(' | ')
   } catch (e: any) {
     testResult.value[id] = `❌ ${formatError(e, '失败')}`
   } finally { testing.value = null }

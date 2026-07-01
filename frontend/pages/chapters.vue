@@ -746,6 +746,36 @@ const denoiseResult = ref('')
 const denoising = ref(false)
 const denoiseCompareOpen = ref(false)
 
+// 章节转语音
+const ttsLoading = ref(false)
+const ttsResultOpen = ref(false)
+const ttsResult = ref<any>(null)
+
+async function onTts() {
+  if (!editing.value || !editing.value.content?.trim()) {
+    msg.warning('章节内容为空，请先生成或输入内容')
+    return
+  }
+  ttsLoading.value = true
+  ttsResult.value = null
+  try {
+    const r = await API.chapter.tts(editing.value.id, {
+      chunk_size: 1500,
+      model: selectedModel.value || undefined,
+    })
+    if (r.success) {
+      ttsResult.value = r
+      ttsResultOpen.value = true
+    } else {
+      msg.error(r.error || '语音转换失败')
+    }
+  } catch (e: any) {
+    msg.error(e?.message || '语音转换失败，请检查后端服务和 AI 配置')
+  } finally {
+    ttsLoading.value = false
+  }
+}
+
 function openDenoise() {
   const ta = document.querySelector('.ch-editor textarea') as any
   denoiseText.value = (ta && ta.selectionStart !== ta.selectionEnd)
@@ -1177,6 +1207,7 @@ async function onPlanSaved() {
             <template #fallback><a-button disabled>✏️ 重写/润色</a-button></template>
           </ClientOnly>
           <a-button :loading="denoising" @click="openDenoise">去AI味</a-button>
+          <a-button :loading="ttsLoading" @click="onTts" title="将本章转成语音合成 SSML">🔊 转语音</a-button>
           <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
           <a-button @click="clearContent">清空本章</a-button>
           <a-button danger @click="clearChapterAndAfter">🧹 清空本章及后续</a-button>
@@ -1357,6 +1388,9 @@ async function onPlanSaved() {
       @apply="applyDenoise"
       @discard="() => { denoiseCompareOpen = false }"
     />
+
+    <!-- ===== 转语音结果 ===== -->
+    <TtsResultModal v-model:open="ttsResultOpen" :result="ttsResult" />
 
     <!-- ===== 内嵌阅读器（带标注） ===== -->
     <a-modal

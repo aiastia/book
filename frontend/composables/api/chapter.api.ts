@@ -82,4 +82,8 @@ export const chapterApi = {
 
   // 去AI味（SSE 流式，防网关超时）
   aiDenoising: (body: { text: string }) => postSSE(`/projects/${P()}/ai-denoising/stream`, body),
+
+  // 章节转语音（Director 分析 → SSML）
+  tts: (chapterId: number, body?: { voice?: string; chunk_size?: number; model?: string }, id?: number) =>
+    post(`/projects/${P(id)}/chapters/${chapterId}/tts`, body || {}),
 }
