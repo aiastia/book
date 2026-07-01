@@ -849,12 +849,8 @@ async def generate_outlines_async(
         )
 
         # 每章目标字数（用于控制大纲密度）
-        total_target = proj.target_word_count or 0
-        chapter_count = payload["chapter_count"]
-        if total_target > 0 and chapter_count > 0:
-            per_chapter = max(3000, min(8000, total_target // chapter_count))
-        else:
-            per_chapter = 4000
+        # 不再用总字数÷章数反推（只生成几章时会算出离谱的值），直接用默认每章字数
+        per_chapter = 4000
         per_chapter_word_count = str(per_chapter)
 
         # ======== 首次大纲生成：直接全量注入，跳过两阶段（角色少，无前文/伏笔可查）========
@@ -1325,12 +1321,9 @@ async def continue_outlines(
     proj = await get_user_project(db, project_id, user)
 
     # 每章目标字数（用于控制大纲密度）
-    total_target = proj.target_word_count or 0
-    req_chapter_count = req.chapter_count
-    if total_target > 0 and req_chapter_count > 0:
-        per_chapter = max(3000, min(8000, total_target // req_chapter_count))
-    else:
-        per_chapter = 4000
+    # 每章目标字数（用于控制大纲密度）
+    # 不再用总字数÷章数反推（只生成几章时会算出离谱的值），直接用默认每章字数
+    per_chapter = 4000
     per_chapter_word_count = str(per_chapter)
 
     outlines = (
@@ -1733,13 +1726,9 @@ async def continue_outlines_async(
         foreshadow_context = _format_foreshadows_for_outline(
             foreshadows_list, start_chapter, end_chapter
         )
-        # 计算每章目标字数
-        total_target = proj.target_word_count or 0
-        req_chapter_count = payload["chapter_count"]
-        if total_target and req_chapter_count:
-            per_chapter = max(3000, min(8000, total_target // req_chapter_count))
-        else:
-            per_chapter = 4000
+        # 每章目标字数（用于控制大纲密度）
+        # 不再用总字数÷章数反推（只生成几章时会算出离谱的值），直接用默认每章字数
+        per_chapter = 4000
         per_chapter_word_count = str(per_chapter)
         # 叙事视角：前端留空 = 按小说设定
         effective_pov = payload.get("narrative_pov") or proj.narrative_pov or "第三人称"
