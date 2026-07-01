@@ -335,7 +335,7 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
 async function onGenerate() {
   generating.value = true
   try {
-    const { task_id } = await API.outline.generate(genCount.value)
+    const { task_id } = await API.outline.generate(currentProjectId.value!, { chapterCount: genCount.value })
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_new', title: `生成${genCount.value}章大纲` })
     showGen.value = false
