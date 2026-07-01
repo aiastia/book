@@ -47,6 +47,7 @@ watchEffect(() => {
 const generating = ref(false)
 const genCount = ref(5)
 const showGen = ref(false)
+const genAiModel = ref('')  // 空 = 使用默认模型
 
 // 手动创建大纲
 const showManualCreate = ref(false)
@@ -335,7 +336,7 @@ function getExtraFields(o: any): Array<{ key: string; label: string; value: stri
 async function onGenerate() {
   generating.value = true
   try {
-    const { task_id } = await API.outline.generate(currentProjectId.value!, { chapterCount: genCount.value })
+    const { task_id } = await API.outline.generate(currentProjectId.value!, { chapterCount: genCount.value, aiModel: genAiModel.value })
     const { trackTask } = useBackgroundTasks()
     trackTask({ id: task_id, task_type: 'outline_new', title: `生成${genCount.value}章大纲` })
     showGen.value = false
@@ -356,7 +357,9 @@ function openContinue() {
   // 检查是否已有大纲
   if (!outlines.value || outlines.value.length === 0) {
     // 没有大纲，打开生成弹窗
+    genAiModel.value = ''
     showGen.value = true
+    loadRemoteModels()
   } else {
     // 有大纲，打开续写弹窗
     continueForm.chapter_count = 5
@@ -733,6 +736,19 @@ async function deleteExpansion() {
           <a-radio-group v-model:value="genCount" button-style="solid">
             <a-radio-button v-for="n in chapterCountOptions" :key="n" :value="n">{{ n }} {{ isOneToMany ? '卷' : '章' }}</a-radio-button>
           </a-radio-group>
+        </a-form-item>
+        <a-form-item label="AI 模型">
+          <a-select
+            v-model:value="genAiModel"
+            :placeholder="defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型'"
+            allow-clear
+            show-search
+            option-filter-prop="label"
+            :loading="loadingModels"
+          >
+            <a-select-option value="">{{ defaultModelName ? `使用默认（${defaultModelName}）` : '使用默认模型' }}</a-select-option>
+            <a-select-option v-for="m in remoteModels" :key="m.id" :value="m.id" :label="m.id">{{ m.id }}</a-select-option>
+          </a-select>
         </a-form-item>
       </a-form>
       <template #footer><a-button @click="showGen = false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">生成</a-button></template>

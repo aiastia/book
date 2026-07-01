@@ -870,7 +870,7 @@ async def generate_outlines_async(
             ctx_full = await _project_context(
                 db, payload["project_id"], proj
             )  # 全量上下文
-            engine, ai_client = await make_engine_and_client(db, payload["user_id"])
+            engine, ai_client = await make_engine_and_client(db, payload["user_id"], model_override=(payload.get("ai_model") or None))
             await tracker.update(
                 stage="generating", message=f"AI 正在生成{payload['chapter_count']}章大纲..."
             )
@@ -953,7 +953,7 @@ async def generate_outlines_async(
         logger.info(
             f"[outline:{task_id}] skeleton ok ({len(str(ctx_skeleton))} chars), creating engine..."
         )
-        engine, ai_client = await make_engine_and_client(db, payload["user_id"])
+        engine, ai_client = await make_engine_and_client(db, payload["user_id"], model_override=(payload.get("ai_model") or None))
 
         # Load Phase 1 collection prompt
         import os as _os
@@ -1150,7 +1150,7 @@ async def generate_outlines_async(
         project_id=project_id,
         task_type="outline_new",
         title="生成大纲",
-        payload={"chapter_count": req.chapter_count, "project_id": project_id, "user_id": user.id},
+        payload={"chapter_count": req.chapter_count, "project_id": project_id, "user_id": user.id, "ai_model": req.ai_model},
         runner=_run_outline,
     )
     return {"task_id": task_id}

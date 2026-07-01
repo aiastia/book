@@ -217,6 +217,7 @@ class OrgCreate(BaseModel):
 
 class OutlineGenerateRequest(BaseModel):
     chapter_count: int = 10
+    ai_model: str = ""  # AI 模型（空=使用默认）
 
 
 class OutlineContinueRequest(BaseModel):
