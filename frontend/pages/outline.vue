@@ -45,7 +45,7 @@ watchEffect(() => {
 })
 
 const generating = ref(false)
-const genCount = ref(10)
+const genCount = ref(5)
 const showGen = ref(false)
 
 // 手动创建大纲
@@ -180,7 +180,7 @@ const continueForm = reactive({
   ai_model: '',       // 空 = 使用默认模型
 })
 // 续写章节数固定选项
-const chapterCountOptions = [5, 10, 20, 40]
+const chapterCountOptions = [1, 3, 5, 10, 20, 40]
 // 远程模型列表（动态拉取）
 const remoteModels = ref<Array<{ id: string; owned_by: string }>>([])
 const loadingModels = ref(false)
@@ -727,9 +727,13 @@ async function deleteExpansion() {
     </a-modal>
 
     <!-- 生成弹窗 -->
-    <a-modal v-model:open="showGen" title="AI 生成大纲" width="400px">
+    <a-modal v-model:open="showGen" title="AI 生成大纲" width="440px">
       <a-form layout="vertical">
-        <a-form-item :label="isOneToMany ? '卷数' : '章数'"><a-input-number v-model:value="genCount" :min="3" :max="30" /></a-form-item>
+        <a-form-item :label="isOneToMany ? '卷数' : '章数'">
+          <a-radio-group v-model:value="genCount" button-style="solid">
+            <a-radio-button v-for="n in chapterCountOptions" :key="n" :value="n">{{ n }} {{ isOneToMany ? '卷' : '章' }}</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
       </a-form>
       <template #footer><a-button @click="showGen = false">取消</a-button><a-button type="primary" :loading="generating" @click="onGenerate">生成</a-button></template>
     </a-modal>
