@@ -11,7 +11,7 @@ export const chapterApi = {
     put(`/projects/${P(id)}/chapters/${chapterId}`, body),
   delete: (chapterId: number, id?: number) => del(`/projects/${P(id)}/chapters/${chapterId}`),
   clear: (chapterId: number, cascade = false, id?: number) =>
-    post(`/projects/${P(id)}/chapters/${chapterId}/clear`, { cascade }),
+    post(`/projects/${P(id)}/chapters/${chapterId}/clear?cascade=${cascade}`),
 
   /** 同步生成 */
   generate: (chapterId: number, id?: number) =>

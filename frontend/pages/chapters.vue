@@ -599,15 +599,17 @@ async function clearContent() {
 }
 
 // ===== 列表上一键清空本章及后续 =====
-async function clearChapterAndAfter(c: any) {
-  const chNum = c.chapter_number
+async function clearChapterAndAfter() {
+  if (!editing.value) return
+  const chNum = editing.value.chapter_number
   const afterCount = (chapters.value || []).filter((x: any) => x.chapter_number >= chNum && x.word_count > 0).length
   const hint = afterCount > 1
     ? `将清空第${chNum}章及之后的 ${afterCount} 章正文，连同分析数据、记忆、伏笔等一并删除。\n章节本身保留，可重新生成。\n\n此操作不可撤销，确认？`
     : `将清空第${chNum}章的正文和分析数据，章节保留可重新生成。\n\n确认？`
   if (!await msg.confirm(hint, '清空本章及后续')) return
   try {
-    const res = await API.chapter.clear(c.id, true)
+    const res = await API.chapter.clear(editing.value.id, true)
+    editingContent.value = ''
     await refreshList()
     const cleared = res.cleared || []
     msg.success(cleared.length > 1 ? `已清空第 ${cleared.join('、')} 章` : `已清空第${chNum}章`)
@@ -1074,7 +1076,6 @@ async function onPlanSaved() {
                 <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
                 <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
                 <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
-                <a-button v-if="c.word_count" type="text" size="small" danger @click.stop="clearChapterAndAfter(c)">🧹 清空后续</a-button>
                 <a-popconfirm title="确认删除该章节？" @confirm="onDelete(c.id)">
                   <a-button type="text" size="small" danger @click.stop>🗑️ 删除</a-button>
                 </a-popconfirm>
@@ -1118,7 +1119,6 @@ async function onPlanSaved() {
             <a-button type="text" size="small" @click="openEditor(c)">编辑</a-button>
             <a-button type="text" size="small" @click.stop="openAnalysis(c)">📊 分析</a-button>
             <a-button type="text" size="small" @click.stop="openModify(c)">⚙️ 修改</a-button>
-            <a-button v-if="c.word_count" type="text" size="small" danger @click.stop="clearChapterAndAfter(c)">🧹 清空后续</a-button>
           </div>
         </div>
       </div>
@@ -1167,7 +1167,8 @@ async function onPlanSaved() {
           </ClientOnly>
           <a-button :loading="denoising" @click="openDenoise">去AI味</a-button>
           <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
-          <a-button @click="clearContent">清空</a-button>
+          <a-button @click="clearContent">清空本章</a-button>
+          <a-button danger @click="clearChapterAndAfter">🧹 清空本章及后续</a-button>
         </div>
 
         <!-- 创作设置 -->
