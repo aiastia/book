@@ -372,15 +372,16 @@ class SSMLBuilder:
                 current_chars = 0
 
         for instr in instructions:
-            # ── 场景切换: flush 当前段,用新场景的 style 开新段 ──
+            # ── 场景切换: 先 flush 当前段(用旧场景的 style),再切换到新场景 ──
             if isinstance(instr, SceneChange):
+                # flush 已有内容(用当前 scene_style,即旧场景的)
+                if current_lines:
+                    _flush()
+                # 再切换到新场景
                 current_scene = instr.scene_change
                 current_scene_style = _resolve_scene_style(current_scene)
                 scene_params = self._get_scene_params(current_scene)
-                # flush 已有内容(场景切换意味着氛围变了,需要新的 express-as)
-                if current_lines:
-                    _flush()
-                # 场景切换时加一个停顿(用场景的 pause)
+                # 场景切换时加一个停顿(用新场景的 pause)
                 if scene_params.pause:
                     current_lines.append(f'<break time="{scene_params.pause}"/>')
                 continue
