@@ -703,12 +703,20 @@ class AIClient:
                             if ns.usage:
                                 usage_info = ns.usage
                     except Exception as ns_e:
-                        logger.warning(f"[AI] 非流式重试失败，回退 reasoning_content: {ns_e}")
-                if not content:
+                        logger.warning(f"[AI] 非流式重试失败: {ns_e}")
+                # 有 tool_calls 时，reasoning_content 是内部思考过程，不作为正文
+                # tool_calls 本身就是有效输出，content 保持空即可
+                if not content and not tool_call_buf:
                     content = "".join(reasoning_parts)
                     logger.warning(
                         f"[AI] 模型 {model_name} content 为空，已合并 {len(reasoning_parts)} 段 reasoning_content 兜底，"
                         f"可能因 token 预算耗尽，内容可能只含思维过程不含最终答案"
+                    )
+                elif not content and tool_call_buf:
+                    logger.warning(
+                        f"[AI] 模型 {model_name} content 为空但有 {len(tool_call_buf)} 个 tool_calls，"
+                        f"reasoning_content（{len(reasoning_parts)}段）作为内部思考过程不使用，"
+                        f"tool_calls 将作为有效输出"
                     )
             tool_calls = []
             for idx in sorted(tool_call_buf.keys()):
