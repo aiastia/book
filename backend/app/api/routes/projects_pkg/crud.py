@@ -395,6 +395,19 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
             "color": o.get("color", ""),
         }
     org_list = list(org_map.values())
+
+    # relationships → character_relations（用 name 不用 id，导入时建完角色再映射）
+    rel_list = []
+    for r in mumu.get("relationships", []):
+        rel_list.append({
+            "from_character_name": r.get("source_name", ""),
+            "to_character_name": r.get("target_name", ""),
+            "relation_type": r.get("relationship_name", ""),
+            "intimacy": r.get("intimacy_level", 50),
+            "status": r.get("status", "active"),
+            "description": r.get("description", ""),
+        })
+
     org_member_list = []
     for m in mumu.get("organization_members", []):
         org_member_list.append({
