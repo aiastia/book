@@ -132,6 +132,92 @@ def _is_content_quote(text: str, pos: int) -> bool:
     return True
 
 
+def _fix_unclosed_strings(text: str) -> str:
+    """
+    修复 AI 输出中未闭合的 JSON 字符串值。
+
+    常见场景：AI 在字符串内写入裸换行或对话内容，导致字符串未正常闭合，
+    后续的 JSON 结构（}、,、"key"）被吞入字符串值内。
+
+    策略：追踪引号边界，当检测到字符串未闭合时（遇到结构性元素而仍在字符串内），
+    在适当位置插入闭合引号。
+    """
+    if not text or '"' not in text:
+        return text
+
+    result = []
+    i = 0
+    in_string = False
+    fixed = 0
+
+    while i < len(text):
+        c = text[i]
+
+        # 处理转义序列
+        if c == '\\' and in_string and i + 1 < len(text):
+            result.append(c)
+            result.append(text[i + 1])
+            i += 2
+            continue
+
+        # 处理引号
+        if c == '"':
+            if in_string:
+                # 检查引号后是否跟结构性字符（, } ]），确认这是结束引号
+                j = i + 1
+                while j < len(text) and text[j] in ' \t':
+                    j += 1
+                if j < len(text) and text[j] in (',', '}', ']', '\n', '\r'):
+                    in_string = False
+                    result.append(c)
+                    i += 1
+                    continue
+                # 引号后是内容字符（中文、字母等），这是内容引号
+                result.append('\\')
+                result.append('"')
+                fixed += 1
+                i += 1
+                continue
+            else:
+                # 进入字符串
+                in_string = True
+                result.append(c)
+                i += 1
+                continue
+
+        # 在字符串内遇到结构性元素 → 字符串未闭合，先闭合它
+        if in_string and c in ('}', ']', ','):
+            # 向前看：如果是 }, 或 ], 或 , 后跟 "key" → 确定是结构元素
+            k = i + 1
+            while k < len(text) and text[k] in ' \t\n\r':
+                k += 1
+            if k >= len(text) or text[k] in ('}', ']', '"'):
+                result.append('"')
+                fixed += 1
+                in_string = False
+                # 不消耗当前字符，重新处理
+                continue
+
+        if in_string:
+            result.append(c)
+            i += 1
+            continue
+
+        # 字符串外：正常处理
+        result.append(c)
+        i += 1
+
+    # 如果字符串仍未闭合（文本末尾），补上闭合引号
+    if in_string:
+        result.append('"')
+        fixed += 1
+
+    if fixed > 0:
+        logger.info(f"✅ 关闭了{fixed}个未闭合的JSON字符串")
+
+    return ''.join(result)
+
+
 def _fix_json_string_values(text: str) -> str:
     """
     上下文感知的 JSON 修复，区分字符串内外分别处理。
@@ -648,6 +734,10 @@ def clean_json_response(text: str) -> str:
         except Exception:
             pass
 
+        # 修复0：关闭未闭合的字符串（在 _fix_json_string_values 之前处理）
+        # AI 常见：字符串值内有裸换行导致字符串未闭合，后续 JSON 结构被吞入字符串
+        text = _fix_unclosed_strings(text)
+
         # 上下文感知修复：中文引号/逗号/冒号、裸控制字符、未转义的内容引号
         text = _fix_json_string_values(text)
 
@@ -808,6 +898,15 @@ def clean_json_response(text: str) -> str:
                                 result = extracted
                             except Exception:
                                 pass
+                        # 尝试关闭未闭合的 JSON 字符串/括号
+                        closed = _close_unclosed_json(result)
+                        if closed != result:
+                            try:
+                                _try_loads(closed)
+                                logger.info("✅ 关闭未闭合JSON后解析成功")
+                                result = closed
+                            except Exception:
+                                pass
                         # 输出错误位置附近的片段，便于排查
                         try:
                             import re as _re
@@ -836,17 +935,31 @@ def clean_json_response(text: str) -> str:
 
 
 def _extract_json_by_brackets(text: str) -> str | None:
-    """兜底提取：通过括号匹配找到最长的合法 JSON 子串。"""
+    """兜底提取：通过括号匹配找到最长的合法 JSON 子串（含字符串状态追踪）。"""
     if not text:
         return None
 
     candidates = []
     stack = []
     start = -1
-
+    in_string = False
     i = 0
+
     while i < len(text):
         c = text[i]
+
+        # 字符串状态追踪
+        if c == '"' and (i == 0 or text[i - 1] != '\\'):
+            if not in_string:
+                in_string = True
+            else:
+                in_string = False
+
+        if in_string:
+            i += 1
+            continue
+
+        # 括号处理（仅在字符串外部）
         if c == '{' and not stack:
             stack.append('{')
             start = i
@@ -879,6 +992,69 @@ def _extract_json_by_brackets(text: str) -> str | None:
     # 返回最长的候选
     best = max(candidates, key=len)
     return best if len(best) > 10 else None
+
+
+def _close_unclosed_json(text: str) -> str:
+    """修复未闭合的 JSON：补全未闭合的字符串和缺失的闭合括号。"""
+    if not text or '"' not in text:
+        return text
+
+    result = []
+    in_string = False
+    i = 0
+
+    while i < len(text):
+        c = text[i]
+
+        if c == '\\' and in_string and i + 1 < len(text):
+            # 转义序列，跳过下一个字符
+            result.append(c)
+            result.append(text[i + 1])
+            i += 2
+            continue
+
+        if c == '"':
+            if in_string:
+                in_string = False
+            else:
+                in_string = True
+            result.append(c)
+            i += 1
+            continue
+
+        if in_string:
+            result.append(c)
+            i += 1
+            continue
+
+        # 字符串外：统计括号
+        if c in ('{', '['):
+            result.append(c)
+            i += 1
+            continue
+
+        if c in ('}', ']'):
+            result.append(c)
+            i += 1
+            continue
+
+        result.append(c)
+        i += 1
+
+    # 如果字符串未闭合，补上闭合引号
+    if in_string:
+        result.append('"')
+
+    # 补全缺失的闭合括号（统计未闭合的 { 和 [）
+    open_braces = sum(1 for ch in result if ch == '{')
+    close_braces = sum(1 for ch in result if ch == '}')
+    open_brackets = sum(1 for ch in result if ch == '[')
+    close_brackets = sum(1 for ch in result if ch == ']')
+
+    result.append(']' * (open_brackets - close_brackets))
+    result.append('}' * (open_braces - close_braces))
+
+    return ''.join(result)
 
 
 def parse_json(text: str) -> dict | list:
