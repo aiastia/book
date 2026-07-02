@@ -109,6 +109,10 @@ async function onTestMode(key: string) {
     }
     parts.push(`回复：${r.result.reply}`)
     testResults.value[key] = parts.join(' | ')
+    // 后端返回的警告（如关闭思考但模型仍在推理）
+    if (r.warning) {
+      testResults.value[key] += ` | ⚡ ${r.warning}`
+    }
   } catch (e: any) {
     const detail = e?.data?.detail || ''
     testResults.value[key] = `❌ 测试失败：${detail || e?.message || '未知错误'}`

@@ -918,6 +918,15 @@ async def test_thinking_mode(
                 break
 
     mode_cfg = modes.get(mode_key, {}) if mode_key else {}
+
+    # 当 thinking_mode=disabled 但模型仍在推理时，给出明确提示
+    warning = None
+    if client.thinking_mode == "disabled" and thinking_active:
+        warning = (
+            "已发送关闭思考信号，但模型仍在输出思维过程。"
+            "该模型可能不支持通过 API 关闭 thinking（出厂强制推理）。"
+        )
+
     return {
         "ok": True,
         "skill_key": req.skill_key,
@@ -941,5 +950,7 @@ async def test_thinking_mode(
             "reasoning_content_len": reasoning_content_len,
             "reply": resp.get("content", "")[:80],
             "finish_reason": resp.get("finish_reason"),
+        },
+        "warning": warning,
         },
     }
