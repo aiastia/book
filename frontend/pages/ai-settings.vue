@@ -259,6 +259,21 @@ const topPDisplay = computed({
   set: (v: string) => { form.top_p = Math.round(parseFloat(v) * 100) }
 })
 
+// 自定义参数预设：当文本框内容匹配某个预设时，下拉框显示对应项
+const thinkingParamsPreset = computed(() => {
+  const known = [
+    '', '{"thinking":{"type":"disabled"}}', '{"thinking":{"type":"enabled"}}',
+    '{"enable_thinking":false}', '{"enable_thinking":true}',
+    '{"reasoning_effort":"low"}', '{"reasoning_effort":"medium"}',
+    '{"reasoning_effort":"high"}', '{"reasoning_effort":"off"}',
+    '{"thinking":{"type":"enabled","budget_tokens":8000}}',
+  ]
+  return known.includes(form.thinking_params) ? form.thinking_params : undefined
+})
+function onSelectPreset(val: any) {
+  form.thinking_params = val || ''
+}
+
 // 频率/存在惩罚显示转换（null=不发送，-200~200 映射到 -2.00~2.00）
 function penaltyDisplay(val: number | null): string {
   if (val == null) return '不发送'
@@ -765,11 +780,47 @@ function selectRewriteModel(id: string) {
         </div>
         <div v-if="form.thinking_mode !== 'auto'" style="margin-top:8px;">
           <span style="font-size:12px;color:#595959;">自定义参数（JSON）：</span>
+          <a-select
+            size="small"
+            style="width:100%;margin-top:4px;"
+            placeholder="选择预设模板或手动编辑下方文本框"
+            allow-clear
+            :value="thinkingParamsPreset"
+            @change="onSelectPreset"
+          >
+            <a-select-opt-group label="留空（推荐）">
+              <a-select-option value="">
+                自动映射 — 按模型/厂商自动选择参数（留空即可）
+              </a-select-option>
+            </a-select-opt-group>
+            <a-select-opt-group label="GLM-5 / 智谱">
+              <a-select-option value='{"thinking":{"type":"disabled"}}'>关闭思考：thinking disabled</a-select-option>
+              <a-select-option value='{"thinking":{"type":"enabled"}}'>开启思考：thinking enabled</a-select-option>
+            </a-select-opt-group>
+            <a-select-opt-group label="Step / 阶跃星辰">
+              <a-select-option value='{"enable_thinking":false}'>关闭思考：enable_thinking false</a-select-option>
+              <a-select-option value='{"enable_thinking":true}'>开启思考：enable_thinking true</a-select-option>
+            </a-select-opt-group>
+            <a-select-opt-group label="通义千问 / Kimi / Moonshot">
+              <a-select-option value='{"enable_thinking":false}'>关闭思考：enable_thinking false</a-select-option>
+              <a-select-option value='{"enable_thinking":true}'>开启思考：enable_thinking true</a-select-option>
+            </a-select-opt-group>
+            <a-select-opt-group label="OpenAI o1/o3 / DeepSeek-R1">
+              <a-select-option value='{"reasoning_effort":"low"}'>低强度：reasoning_effort low</a-select-option>
+              <a-select-option value='{"reasoning_effort":"medium"}'>中强度：reasoning_effort medium</a-select-option>
+              <a-select-option value='{"reasoning_effort":"high"}'>高强度：reasoning_effort high</a-select-option>
+              <a-select-option value='{"reasoning_effort":"off"}'>关闭：reasoning_effort off</a-select-option>
+            </a-select-opt-group>
+            <a-select-opt-group label="Anthropic / Claude">
+              <a-select-option value='{"thinking":{"type":"disabled"}}'>关闭思考</a-select-option>
+              <a-select-option value='{"thinking":{"type":"enabled","budget_tokens":8000}}'>开启思考（budget 8000）</a-select-option>
+            </a-select-opt-group>
+          </a-select>
           <a-textarea v-model:value="form.thinking_params" :rows="3" size="small"
-            placeholder='{"thinking": {"type": "disabled"}}&#10;或留空使用默认映射'
-            style="font-family:monospace;font-size:12px;margin-top:4px;width:100%;" />
+            placeholder='留空 = 自动映射（推荐）&#10;或手动填写 JSON，如 {"enable_thinking": false}'
+            style="font-family:monospace;font-size:12px;margin-top:6px;width:100%;" />
           <div style="font-size:11px;color:#999;margin-top:2px;">
-            留空 = 按模型/厂商自动映射。填入后优先使用你提供的 JSON 参数。
+            留空 = 按模型/厂商自动映射。选择上方预设或手动编辑 JSON，填入后优先使用。
           </div>
         </div>
       </a-form-item>
