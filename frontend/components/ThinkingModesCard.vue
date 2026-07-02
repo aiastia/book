@@ -44,30 +44,54 @@ const modeKeyMap: Record<string, string> = {
 }
 
 async function load() {
-  if (!currentProjectId.value) return
   loading.value = true
   try {
-    const data = await apiGet<any>(`/api/projects/${currentProjectId.value}/thinking-modes`)
+    let pid = currentProjectId.value
+    if (!pid) {
+      const projects = await API.book.list()
+      if (!projects?.length) {
+        modes.value = {}
+        return
+      }
+      pid = projects[0].id
+    }
+    const data = await apiGet<any>(`/api/projects/${pid}/thinking-modes`)
     modes.value = data?.modes || {}
-  } catch { /* 暂无数据 */ }
-  finally { loading.value = false }
+  } catch (e: any) {
+    modes.value = {}
+  } finally { loading.value = false }
 }
 async function save() {
-  if (!currentProjectId.value) return
+  if (!currentProjectId.value && !Object.keys(modes.value).length) return
   saving.value = true
   try {
-    await API.book.saveThinkingModes(modes.value)
+    let pid = currentProjectId.value
+    if (!pid) {
+      const projects = await API.book.list()
+      if (!projects?.length) { msg.warning('请先创建一个项目'); return }
+      pid = projects[0].id
+    }
+    await API.book.saveThinkingModes(modes.value, pid)
     msg.success('已保存')
   } catch (e: any) { msg.error('保存失败') }
   finally { saving.value = false }
 }
 
 async function onTestMode(key: string) {
-  if (!currentProjectId.value) return
   testingMode.value = key
   testResults.value[key] = ''
   try {
-    const r = await API.book.testThinkingMode(modeKeyMap[key] || key)
+    // 获取项目 ID：优先用当前项目，否则取用户第一个项目
+    let pid = currentProjectId.value
+    if (!pid) {
+      const projects = await API.book.list()
+      if (!projects?.length) {
+        testResults.value[key] = '❌ 请先创建一个项目再测试'
+        return
+      }
+      pid = projects[0].id
+    }
+    const r = await API.book.testThinkingMode(modeKeyMap[key] || key, pid)
     const cfg = r.mode_config || {}
     const enabled = cfg.enabled
     const parts: string[] = []
@@ -86,7 +110,8 @@ async function onTestMode(key: string) {
     parts.push(`回复：${r.result.reply}`)
     testResults.value[key] = parts.join(' | ')
   } catch (e: any) {
-    testResults.value[key] = `❌ 测试失败：${e?.data?.detail || e?.message || '未知错误'}`
+    const detail = e?.data?.detail || ''
+    testResults.value[key] = `❌ 测试失败：${detail || e?.message || '未知错误'}`
   } finally {
     testingMode.value = null
   }
