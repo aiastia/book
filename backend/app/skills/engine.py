@@ -647,11 +647,14 @@ class SkillEngine:
         tools: list[dict] = None,
         tool_executor=None,
         max_tokens_override: int = None,
+        on_progress=None,
     ) -> dict:
         """执行 Skill
 
         context: 包含执行 Skill 所需的所有上下文数据
         max_tokens_override: 重试时临时提升 token 预算（覆盖 skill 配置）
+        on_progress: 可选 async 回调 on_progress(content_len:int, message:str)，
+                     仅透传给 JSON 技能的 chat_json_retry，用于报告流式进度与重试。
         """
         skill = await self.get_skill(skill_name)
         if not skill:
@@ -922,6 +925,7 @@ class SkillEngine:
                     max_tokens=max_tokens,
                     frequency_penalty=frequency_penalty,
                     presence_penalty=presence_penalty,
+                    on_progress=on_progress,
                 )
 
         for hook in skill.post_hooks or []:

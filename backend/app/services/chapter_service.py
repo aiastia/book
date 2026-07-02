@@ -2025,6 +2025,18 @@ class ChapterService:
 
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
         await _report(10, "AI 正在分析章节剧情...")
+
+        # 流式进度回调：把 AI 已生成的内容长度换算成 10%→48% 的进度，
+        # 让前端进度条平滑推进而非卡在 10%。连接中断重试时提示用户。
+        async def _on_ai_progress(content_len: int, message: str = ""):
+            if message:
+                # 非流式事件（如重试提示），保持当前进度不回退
+                await _report(10, message)
+            else:
+                # 渐进逼近：10% + 内容长度换算，上限 48%（留 7% 给解析保存）
+                p = min(48, 10 + content_len / 50)
+                await _report(int(p), f"AI 正在分析章节剧情...（已生成 {content_len} 字）")
+
         result = await self.skill_engine.execute_skill(
             "plot_analysis",
             ai_client,
@@ -2037,6 +2049,7 @@ class ChapterService:
                 "chapter_content": chapter_text,
                 "user_prompt": user_prompt,
             },
+            on_progress=_on_ai_progress,
         )
         if result.get("error"):
             # AI 调用本身失败（非 JSON 问题）→ 仍保存 raw_response 便于调试

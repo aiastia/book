@@ -535,11 +535,16 @@ class AIClient:
         response_format: dict = None,
         tools: list = None,
         tool_choice: str = None,
+        on_chunk=None,
     ) -> dict:
         """流式调用，收集完整响应（含 tool_calls）。
 
         使用 stream=True 保持连接活跃，防止 Cloudflare/CDN 代理超时掐断。
         返回格式与 chat() 完全一致。
+
+        on_chunk: 可选回调 on_chunk(content_len: int)，在流式接收过程中被调用，
+                  用于向上层报告进度。内部做了节流（≥3s 或内容增长≥200字符才触发一次），
+                  默认 None 时零开销。
         """
         start = time.time()
         kwargs = {
@@ -573,6 +578,9 @@ class AIClient:
             tool_call_buf: dict[int, dict] = {}  # index -> {id, name, arguments}
             model_name = model or self.model
             usage_info = None
+            # on_chunk 节流状态：距上次回调的时间、上次回调时的内容长度
+            _last_cb_time = time.time()
+            _last_cb_len = 0
             async for chunk in stream:
                 if chunk.usage:
                     usage_info = chunk.usage
@@ -580,6 +588,17 @@ class AIClient:
                     delta = chunk.choices[0].delta
                     if delta.content:
                         content_parts.append(delta.content)
+                        # 节流回调：≥3s 或内容增长≥200字符才触发
+                        if on_chunk:
+                            _cur_len = sum(len(p) for p in content_parts)
+                            if (_cur_len - _last_cb_len >= 200
+                                    or time.time() - _last_cb_time >= 3):
+                                _last_cb_time = time.time()
+                                _last_cb_len = _cur_len
+                                try:
+                                    await on_chunk(_cur_len)
+                                except Exception:
+                                    pass  # 回调失败不影响主流程
                     # 推理模型可能把正文输出到 reasoning_content
                     rc = getattr(delta, "reasoning_content", None)
                     if rc:
@@ -824,9 +843,21 @@ class AIClient:
         temperature: float = None,
         max_tokens: int = None,
         frequency_penalty: float = None,
-        presence_penalty: float = None,
+        presence_penalty: int = None,
+        on_progress=None,
     ) -> dict:
-        """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）"""
+        """调用并解析 JSON 响应（移植自 MuMuAINovel 的强清洗逻辑）。
+
+        on_progress: 可选 async 回调 on_progress(content_len: int, message: str="")，
+                     透传给 chat_stream_collect 的 on_chunk（content_len>0, message=""），
+                     content_len=0 时表示非流式事件（如重试提示）。
+        """
+        # 适配：把 on_progress(content_len, message) 转成 on_chunk(content_len)
+        _on_chunk = None
+        if on_progress:
+            async def _on_chunk(content_len: int):
+                await on_progress(content_len, "")
+
         result = await self.chat_stream_collect(
             messages=messages,
             model=model,
@@ -834,6 +865,7 @@ class AIClient:
             max_tokens=max_tokens,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
+            on_chunk=_on_chunk,
         )
         if result.get("error"):
             return result
@@ -910,14 +942,18 @@ class AIClient:
         temperature: float = None,
         max_tokens: int = None,
         frequency_penalty: float = None,
-        presence_penalty: float = None,
+        presence_penalty: int = None,
         max_retries: int = None,
+        on_progress=None,
     ) -> dict:
         """带重试的 JSON 调用：解析失败时最多重试 max_retries 次。
 
         重试策略（移植自 MuMuAINovel call_with_json_retry）：
         - 仅对「JSON 解析失败」重试；AI 调用本身报错（如 401/网络）不重试。
         - 每次重试在 messages 末尾追加格式强化提示，并把上次失败内容反馈给 AI。
+
+        on_progress: 可选 async 回调 on_progress(content_len:int, message:str)，
+                     用于向用户报告流式进度与重试提示。
         """
         if max_retries is None:
             max_retries = settings.AI_MAX_RETRIES
@@ -933,6 +969,7 @@ class AIClient:
                 max_tokens=max_tokens,
                 frequency_penalty=frequency_penalty,
                 presence_penalty=presence_penalty,
+                on_progress=on_progress,
             )
             total_input_tokens += last_result.get("input_tokens", 0)
             total_output_tokens += last_result.get("output_tokens", 0)
@@ -969,6 +1006,11 @@ class AIClient:
                 logger.warning(
                     f"[AI] 连接错误，{delay}s后重试 (attempt {attempt}/{max_retries}): {err_msg[:200]}"
                 )
+                if on_progress:
+                    try:
+                        await on_progress(0, f"连接中断，{delay}s 后第 {attempt + 1}/{max_retries} 次重试中...")
+                    except Exception:
+                        pass
                 await asyncio.sleep(delay)
                 continue
 
