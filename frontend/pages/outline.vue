@@ -36,18 +36,22 @@ const { data: outlineData, refresh: refreshOutlines } = await useFetch<OutlineLi
   onResponse({ response }) {
     const data = response._data
     if (data?.total != null) outlineTotal.value = data.total
+    if (data?.max_chapter_number != null) maxChapterNumber.value = data.max_chapter_number
   }
 })
 const outlines = computed<Outline[]>(() => outlineData.value?.items || [])
 // total 从响应数据直接派生，避免 onResponse 初始化时机问题导致刷新后丢失分页
 watchEffect(() => {
   if (outlineData.value?.total != null) outlineTotal.value = outlineData.value.total
+  if (outlineData.value?.max_chapter_number != null) maxChapterNumber.value = outlineData.value.max_chapter_number
 })
 
 const generating = ref(false)
 const genCount = ref(5)
 const showGen = ref(false)
 const genAiModel = ref('')  // 空 = 使用默认模型
+// 最大章号（来自后端，不受分页影响）
+const maxChapterNumber = ref(0)
 
 // 手动创建大纲
 const showManualCreate = ref(false)
@@ -61,8 +65,8 @@ const manualForm = reactive({
 })
 async function onManualCreate() {
   try {
-    const nextChapter = outlines.value && outlines.value.length > 0
-      ? Math.max(...outlines.value.map((o: any) => o.chapter_number)) + 1
+    const nextChapter = maxChapterNumber.value > 0
+      ? maxChapterNumber.value + 1
       : 1
     manualForm.chapter_number = nextChapter
     showManualCreate.value = true

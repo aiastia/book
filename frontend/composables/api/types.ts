@@ -46,6 +46,7 @@ export interface Outline {
 export interface OutlineListResponse {
   total: number; limit: number; offset: number
   items: Outline[]
+  max_chapter_number?: number
 }
 
 // ==================== 角色 ====================

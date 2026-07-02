@@ -1215,9 +1215,10 @@ async def list_outlines(
         for o in outlines
     ]
 
-    # 分页模式：返回 total + items；兼容模式：返回纯数组
+    # 分页模式：返回 total + items + max_chapter_number；兼容模式：返回纯数组
+    max_chapter = max((o.chapter_number for o in outlines), default=0)
     if limit > 0:
-        return {"total": total, "limit": limit, "offset": offset, "items": items}
+        return {"total": total, "limit": limit, "offset": offset, "items": items, "max_chapter_number": max_chapter}
     return items
 
 
