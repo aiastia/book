@@ -438,6 +438,9 @@ const { trackTask: trackBgTask, onTaskCompleted } = useBackgroundTasks()
 onTaskCompleted('chapter', async () => {
   await refreshList()
 })
+// 续写/生成大纲也会自动创建 draft 章节，需要同步刷新章节列表
+onTaskCompleted('outline_continue', () => { refreshList() })
+onTaskCompleted('outline_new', () => { refreshList() })
 onTaskCompleted('init', () => {
   // 项目初始化完成后也刷新（大纲/章节可能变化）
   setTimeout(() => refreshList(), 2000)
