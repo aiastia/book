@@ -362,7 +362,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
 
     # characters → 同时分离 organization（is_organization=True 的）
     char_list = []
-    org_list = []
+    org_map = {}  # name → org dict，自动去重（organizations 数组优先）
     for c in mumu.get("characters", []):
         item = {
             "name": c.get("name", ""),
@@ -375,37 +375,26 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
             "avatar_url": c.get("avatar_url", ""),
         }
         if c.get("is_organization"):
-            org_list.append({
+            org_map[c.get("name", "")] = {
                 "name": c.get("name", ""),
                 "power_level": c.get("power_level", 50),
                 "location": c.get("location", ""),
                 "motto": c.get("motto", ""),
                 "color": c.get("color", ""),
-            })
+            }
         else:
             char_list.append(item)
 
-    # relationships → character_relations（用 name 不用 id，导入时建完角色再映射）
-    rel_list = []
-    for r in mumu.get("relationships", []):
-        rel_list.append({
-            "from_character_name": r.get("source_name", ""),
-            "to_character_name": r.get("target_name", ""),
-            "relation_type": r.get("relationship_name", ""),
-            "intimacy": r.get("intimacy_level", 50),
-            "status": r.get("status", "active"),
-            "description": r.get("description", ""),
-        })
-
-    # organizations + members
+    # organizations + members（organizations 数组覆盖同名的 is_organization 角色）
     for o in mumu.get("organizations", []):
-        org_list.append({
-            "name": o.get("character_name", ""),  # mumu 用 character_name 存组织名
+        org_map[o.get("character_name", "")] = {
+            "name": o.get("character_name", ""),
             "power_level": o.get("power_level", 50),
             "location": o.get("location", ""),
             "motto": o.get("motto", ""),
             "color": o.get("color", ""),
-        })
+        }
+    org_list = list(org_map.values())
     org_member_list = []
     for m in mumu.get("organization_members", []):
         org_member_list.append({
@@ -715,6 +704,7 @@ async def import_project(
             .scalars().all()
         )
         org_name_map = {o.name: o.id for o in orgs_db if o.name}
+    _seen_org_members = set()
     for it in req.get("organization_members", []):
         if isinstance(it, dict):
             data = {k: v for k, v in it.items() if k != "id"}
@@ -727,8 +717,11 @@ async def import_project(
                 obj = char_name_map.get(data.pop("character_name"))
                 if obj:
                     data["character_id"] = obj.id
-            if data.get("organization_id") and data.get("character_id"):
-                db.add(OrganizationMember(project_id=new_proj.id, **data))
+            member_key = (data.get("organization_id"), data.get("character_id"))
+            if member_key in _seen_org_members or not all(member_key):
+                continue
+            _seen_org_members.add(member_key)
+            db.add(OrganizationMember(project_id=new_proj.id, **data))
 
     add_all(StoryMemory, req.get("memories", []))
     add_all(PlotAnalysis, req.get("analyses", []))
