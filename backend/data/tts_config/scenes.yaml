@@ -5,41 +5,66 @@
 #
 # 角色的 rate/pitch 和场景的 rate/pitch 会叠加(Builder 负责相加)。
 # pause 是该场景下句子之间的默认停顿(当 DirectorLine 没指定 pause_after 时使用)。
+# emotion_style: 该场景下情绪→express-as style 的覆盖映射(可选,不填则用全局映射)。
+#   格式: {中文情绪标签: Azure express-as style 名称}
 
 calm:                    # 安静/日常
   rate: "-2%"
   pitch: "0%"
   pause: "600ms"
+  emotion_style:
+    愤怒: "angry"
+    悲伤: "sad"
+    温柔: "gentle"
+    惊恐: "fearful"
 
 night:                   # 夜晚/沉寂
   rate: "-5%"
   pitch: "0%"
   pause: "600ms"
+  emotion_style:
+    愤怒: "angry"
+    悲伤: "sad"
+    惊恐: "fearful"
 
 suspense:                # 悬念/紧张
   rate: "-3%"
   pitch: "0%"
   pause: "700ms"
+  emotion_style:
+    惊恐: "fearful"
+    紧张: "serious"
 
 battle:                  # 战斗/激烈
   rate: "+8%"
   pitch: "0%"
   pause: "150ms"
+  emotion_style:
+    愤怒: "angry"
+    惊恐: "fearful"
 
 chase:                   # 追逐/急促
   rate: "+10%"
   pitch: "+3%"
   pause: "120ms"
+  emotion_style:
+    惊恐: "fearful"
 
 sad:                     # 悲伤/沉重
   rate: "-10%"
   pitch: "-3%"
   pause: "800ms"
+  emotion_style:
+    悲伤: "depressed"
+    温柔: "empathetic"
 
 comedy:                  # 轻松/喜剧
   rate: "+5%"
   pitch: "+5%"
   pause: "400ms"
+  emotion_style:
+    开心: "cheerful"
+    尴尬: "embarrassed"
 
 default:                 # 兜底
   rate: "0%"

@@ -47,6 +47,7 @@ def _instructions_to_json(instructions) -> list:
                 "speaker": instr.speaker,
                 "text": instr.text,
                 "emotion": instr.emotion,
+                "emphasis": instr.emphasis,
                 "pause_after": instr.pause_after,
             })
     return result
@@ -200,6 +201,7 @@ def _parse_instructions(raw_list: list):
                 speaker=str(item.get("speaker", "Narrator")),
                 text=str(item["text"]),
                 emotion=item.get("emotion"),
+                emphasis=item.get("emphasis"),
                 pause_after=item.get("pause_after"),
             ))
     return instructions
