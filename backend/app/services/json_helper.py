@@ -144,10 +144,13 @@ def _fix_unclosed_strings(text: str) -> str:
     if not text or '"' not in text:
         return text
 
-    # 第一遍扫描：跟踪引号边界，找到第一个未闭合字符串的起始位置
+    # 第一遍扫描：跟踪引号边界，找到扫描结束时仍未闭合的字符串的起始位置。
+    # 关键：unclosed_start 跟随"当前"字符串——每次进入字符串记录起点，
+    # 正确闭合后重置为 -1；只有扫描结束时 in_string 仍为 True，
+    # 此时 unclosed_start 才是真正未闭合字符串的起点。
     in_string = False
     escape_next = False
-    unclosed_start = -1  # 未闭合字符串的起始引号位置
+    unclosed_start = -1  # 当前正在进行的字符串的起始引号位置
 
     for i, c in enumerate(text):
         if escape_next:
@@ -159,17 +162,17 @@ def _fix_unclosed_strings(text: str) -> str:
         if c == '"':
             if in_string:
                 # 检查是否是真正的结束引号（后面跟结构性字符）
+                # 注意 ':' 必须算合法结束符："key": value 中 key 后必然跟 ':'
                 j = i + 1
                 while j < len(text) and text[j] in ' \t\n\r':
                     j += 1
-                if j < len(text) and text[j] in (',', '}', ']', '\n', '\r'):
+                if j < len(text) and text[j] in (',', '}', ']', ':', '\n', '\r'):
                     in_string = False
+                    unclosed_start = -1  # 当前字符串已闭合，重置
                 # 否则是内容引号，继续在字符串内
             else:
                 in_string = True
-                # 如果之前已经发现未闭合字符串，不再更新（取第一个）
-                if unclosed_start < 0:
-                    unclosed_start = i
+                unclosed_start = i  # 记录当前字符串起点
 
     if not in_string:
         # 所有字符串都正确闭合，无需截断
@@ -200,7 +203,7 @@ def _fix_unclosed_strings(text: str) -> str:
                     j = i + 1
                     while j < len(text) and text[j] in ' \t\n\r':
                         j += 1
-                    if j < len(text) and text[j] in (',', '}', ']'):
+                    if j < len(text) and text[j] in (',', '}', ']', ':'):
                         in_str = False
                 continue
             if in_str:
