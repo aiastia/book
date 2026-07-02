@@ -233,7 +233,10 @@ class AIClient:
         mode = self.thinking_mode
         if mode == "auto":
             # auto 模式：仅 GLM-5 系列需要显式关闭（默认开启 thinking）
+            # step 系列默认关闭思考，auto 时不需要发任何参数
             model = (self.model or "").lower()
+            if "step" in model:
+                return None  # step 默认关闭，不传参数即可
             if any(key in model for key in self._MODEL_STREAMING_RC_ONLY):
                 return {"thinking": {"type": "disabled"}}
             return None
@@ -246,6 +249,9 @@ class AIClient:
                 return {"thinking": {"type": "disabled"}}
             if provider == "ollama":
                 return {"options": {"think": False}}
+            # step 系列（阶跃星辰）：用 enable_thinking 参数
+            if "step" in model:
+                return {"enable_thinking": False}
             # 阿里云/通义千问/Kimi 混合思考模型
             if any(k in model for k in ("qwen3", "kimi", "moonshot")):
                 return {"enable_thinking": False}
@@ -261,6 +267,9 @@ class AIClient:
                 return {"thinking": {"type": "enabled"}}
             if provider == "ollama":
                 return {"options": {"think": True}}
+            # step 系列
+            if "step" in model:
+                return {"enable_thinking": True}
             if any(k in model for k in ("qwen3", "kimi", "moonshot")):
                 return {"enable_thinking": True}
             if any(key in model for key in self._MODEL_STREAMING_RC_ONLY):
