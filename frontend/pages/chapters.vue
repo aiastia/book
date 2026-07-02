@@ -831,18 +831,22 @@ async function onTts() {
 }
 
 // chapter_tts 任务完成后,拉取结果并弹窗
+// 注意: onTaskCompleted 在进度更新和完成时都会触发,
+// 因此只有在任务真正 completed/failed 时才消费 _pendingTtsTaskId
 onTaskCompleted('chapter_tts', async () => {
   if (!_pendingTtsTaskId) return
   const taskId = _pendingTtsTaskId
-  _pendingTtsTaskId = null
   try {
     const task = await API.task.getStatus(taskId)
     if (task.status === 'completed' && task.result?.success) {
+      _pendingTtsTaskId = null
       ttsResult.value = task.result
       ttsResultOpen.value = true
     } else if (task.status === 'failed') {
+      _pendingTtsTaskId = null
       msg.error(task.status_message || task.result?.error || '语音转换失败')
     }
+    // 任务仍在运行中: 不消费 _pendingTtsTaskId, 等待下次回调
   } catch (e: any) {
     msg.error('获取语音转换结果失败: ' + formatError(e))
   }
