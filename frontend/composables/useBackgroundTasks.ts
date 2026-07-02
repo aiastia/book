@@ -71,7 +71,13 @@ function _applyWsUpdate(taskData: any) {
       _fireCallbacks(taskData)
     }
   } else {
+    // 本地没有这个任务（页面刷新/路由切换后 tasks 被清空）
+    // 如果收到的是一个已完成/失败的任务，仍需触发回调刷新页面数据
     tasks.value.push({ ...taskData, _source: 'generic' })
+    if (taskData.status === 'completed' || taskData.status === 'failed') {
+      _fireCallbacks(taskData)
+      _scheduleAutoDismiss(taskData.id)
+    }
   }
 }
 
@@ -134,7 +140,13 @@ async function refreshTasks() {
           _fireCallbacks(st)
         }
       } else {
+        // 本地没有这个任务（页面刷新后）。后端 list_active_tasks 现在会返回
+        // 最近 5 分钟内完成的任务，收到时触发回调刷新页面数据。
         tasks.value.push({ ...st, _source: 'generic' })
+        if (st.status === 'completed' || st.status === 'failed') {
+          _fireCallbacks(st)
+          _scheduleAutoDismiss(st.id)
+        }
       }
     }
 

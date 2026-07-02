@@ -1,5 +1,6 @@
 """章节生成服务 - 核心逻辑链路"""
 
+import asyncio
 import json
 import re
 
@@ -2020,268 +2021,288 @@ class ChapterService:
         )
 
         # 章节正文通过 system_prompt 的 {chapter_content} / {content} 注入，不重复放入 user_prompt
-        chapter_text = (chapter.content or "")[:12000]
+        # 分两步分析，每步只提取部分字段，降低单次 prompt 复杂度和 token 消耗
+        chapter_text = (chapter.content or "")[:8000]
         user_prompt = "请分析这个章节，特别注意是否自然回收了「本章必须回收」的伏笔。"
 
         ai_client = await AIClient.from_user_config(self.db, self.user_id)
-        await _report(10, "AI 正在分析章节剧情...")
+        await _report(5, "AI 正在分析章节剧情...")
 
-        # 流式进度回调：把 AI 已生成的内容长度换算成 10%→48% 的进度，
-        # 让前端进度条平滑推进而非卡在 10%。连接中断重试时提示用户。
+        # 流式进度回调：两个并发任务共用一个进度通道，取两者中较大的 content_len
+        _progress_content_len = [0]  # 两个任务累计的 content_len
+
         async def _on_ai_progress(content_len: int, message: str = ""):
             if message:
-                # 非流式事件（如重试提示），保持当前进度不回退
                 await _report(10, message)
             else:
-                # 渐进逼近：10% + 内容长度换算，上限 48%（留 7% 给解析保存）
-                p = min(48, 10 + content_len / 50)
-                await _report(int(p), f"AI 正在分析章节剧情...（已生成 {content_len} 字）")
+                _progress_content_len[0] = max(_progress_content_len[0], content_len)
+                p = min(48, 10 + _progress_content_len[0] / 50)
+                await _report(int(p), f"AI 正在分析章节剧情...（已生成 {_progress_content_len[0]} 字）")
 
-        result = await self.skill_engine.execute_skill(
-            "plot_analysis",
-            ai_client,
-            {
-                "chapter_number": str(chapter.chapter_number),
-                "chapter_title": chapter.title,
-                "word_count": str(chapter.word_count),
-                "existing_foreshadows": fs_layered,
-                "characters_info": chars_info,
-                "chapter_content": chapter_text,
-                "user_prompt": user_prompt,
-            },
-            on_progress=_on_ai_progress,
+        # 构造两步分析的公共上下文
+        _common_ctx = {
+            "chapter_number": str(chapter.chapter_number),
+            "chapter_title": chapter.title,
+            "word_count": str(chapter.word_count),
+            "existing_foreshadows": fs_layered,
+            "characters_info": chars_info,
+            "chapter_content": chapter_text,
+        }
+
+        # ===== 并发执行两步分析（asyncio.gather）=====
+        # 第一步负责剧情结构（输出大但不依赖角色状态维度）
+        # 第二步负责角色状态 + 质量评分（输出最大，单独拆出降低截断率）
+        # 两者并发 → 总耗时 ≈ max(两步)，而非 sum(两步)
+        await _report(10, "AI 正在分析剧情结构与角色质量（并发）...")
+
+        plot_ctx = {
+            **_common_ctx,
+            "user_prompt": user_prompt + "\n\n【第一步：剧情结构】请只返回以下字段：summary, key_events, foreshadows, conflicts, conflict_types, emotion_curve, emotional_curve, key_plot_points, scenes, pacing, plot_stage, dialogue_ratio, description_ratio, hooks。",
+            "_analysis_step": "plot",
+        }
+        quality_ctx = {
+            **_common_ctx,
+            "user_prompt": user_prompt + "\n\n【第二步：角色与质量】请只返回以下字段：character_states, organization_states, item_states, location_states, quality_scores, consistency_issues, suggestions。",
+            "_analysis_step": "quality",
+        }
+
+        plot_result, quality_result = await asyncio.gather(
+            self.skill_engine.execute_skill(
+                "plot_analysis", ai_client, plot_ctx, on_progress=_on_ai_progress,
+            ),
+            self.skill_engine.execute_skill(
+                "plot_analysis", ai_client, quality_ctx, on_progress=_on_ai_progress,
+            ),
+            return_exceptions=True,
         )
-        if result.get("error"):
-            # AI 调用本身失败（非 JSON 问题）→ 仍保存 raw_response 便于调试
+
+        # 处理异常：gather 返回的可能是 Exception
+        if isinstance(plot_result, Exception):
+            plot_result = {"error": str(plot_result)[:500], "content": ""}
+        if isinstance(quality_result, Exception):
+            logger.warning(f"[analyze] 第{chapter.chapter_number}章质量分析异常: {quality_result}")
+            quality_result = {"error": str(quality_result)[:500], "json": {}}
+
+        if plot_result.get("error"):
             analysis = PlotAnalysis(
                 project_id=self.project_id,
                 chapter_id=chapter.id,
                 chapter_number=chapter.chapter_number,
-                suggestions=["⚠️ 分析失败：" + str(result["error"])[:200]],
-                raw_response=result.get("content", ""),
+                suggestions=["⚠️ 分析失败（剧情结构）：" + str(plot_result["error"])[:200]],
+                raw_response=plot_result.get("content", ""),
             )
             self.db.add(analysis)
             await self.db.commit()
-            raise RuntimeError(f"剧情分析 AI 调用失败: {result['error']}")
+            raise RuntimeError(f"剧情分析[剧情结构] AI 调用失败: {plot_result['error']}")
 
-        if result.get("json"):
-            analysis_data = result["json"]
-            await _report(55, "分析完成，正在保存结果...")
+        plot_data = plot_result.get("json") or {}
 
-            # 提取合并的摘要（省掉单独 _generate_summary 调用）
-            summary_text = str(
-                analysis_data.get("summary")
-                or analysis_data.get("suggestion")
-                or analysis_data.get("suggestions")
-                or ""
-            ).strip()[:500]
-            if summary_text:
-                chapter.summary = summary_text
-                self.db.add(chapter)  # 确保 commit 后不丢失
-            elif chapter.content:
-                chapter.summary = chapter.content.strip()[:150]
-            _key_events = (
-                analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
-            )
+        if quality_result.get("error"):
+            # 剧情结构已成功，质量分析失败仍可保存部分结果
+            logger.warning(f"[analyze] 第{chapter.chapter_number}章质量分析失败: {quality_result['error']}")
 
-            # 字段兼容层：统一 DB 提示词字段名 → 代码期望的字段名
-            # hooks：DB 返回 list[{type,content,strength}]，兼容 dict 格式
-            hooks_raw = analysis_data.get("hooks", {})
-            if isinstance(hooks_raw, list):
-                hooks_data = {}
-                for h in hooks_raw:
-                    if isinstance(h, dict):
-                        htype = h.get("type", "general")
-                        hooks_data[htype] = h.get("content", h.get("keyword", ""))
-                    elif isinstance(h, str):
-                        hooks_data["general"] = h
-            else:
-                hooks_data = hooks_raw
-            # conflict：DB 返回单对象 {types,parties,...}，转成数组格式
-            conflicts_data = analysis_data.get("conflicts", [])
-            conflict_types_data = analysis_data.get("conflict_types", [])
-            if not conflicts_data:
-                single_conflict = analysis_data.get("conflict", {})
-                if isinstance(single_conflict, dict):
-                    conflicts_data = [single_conflict]
-                    # 提取 types 到 conflict_types
-                    ct = single_conflict.get("types", [])
-                    if isinstance(ct, list) and not conflict_types_data:
-                        conflict_types_data = ct
-            # scores → quality_scores
-            quality_scores_data = (
-                analysis_data.get("quality_scores") or analysis_data.get("scores") or {}
-            )
-            # plot_points → key_plot_points
-            key_plot_points_data = (
-                analysis_data.get("key_plot_points") or analysis_data.get("plot_points") or []
-            )
-            # emotional_arc → emotional_curve / emotion_curve
-            emotional_curve_data = (
-                analysis_data.get("emotional_curve")
-                or analysis_data.get("emotional_arc")
-                or analysis_data.get("emotion_curve")
-                or {}
-            )
+        quality_data = quality_result.get("json") or {}
+        analysis_data = {**plot_data, **quality_data}
 
-            # 保存分析结果
-            analysis = PlotAnalysis(
-                project_id=self.project_id,
-                chapter_id=chapter.id,
-                chapter_number=chapter.chapter_number,
-                hooks=hooks_data,
-                foreshadows=analysis_data.get("foreshadows", []),
-                conflicts=conflicts_data,
-                conflict_types=conflict_types_data,
-                emotion_curve=analysis_data.get(
-                    "emotion_curve",
-                    emotional_curve_data if isinstance(emotional_curve_data, list) else [],
-                ),
-                emotional_curve=emotional_curve_data
-                if isinstance(emotional_curve_data, dict)
-                else {},
-                character_states=analysis_data.get("character_states", []),
-                organization_states=analysis_data.get("organization_states", []),
-                key_plot_points=key_plot_points_data,
-                scenes=analysis_data.get("scenes", []),
-                plot_stage=analysis_data.get("plot_stage", ""),
-                dialogue_ratio=analysis_data.get("dialogue_ratio", 0),
-                description_ratio=analysis_data.get("description_ratio", 0),
-                pacing=analysis_data.get("pacing", ""),
-                quality_scores=quality_scores_data,
-                consistency_issues=analysis_data.get("consistency_issues", []),
-                suggestions=analysis_data.get("suggestions", []),
-                analysis_report=generate_analysis_summary(analysis_data),
-                raw_response=result.get("content", ""),
-            )
-            self.db.add(analysis)
-            await _report(62, "正在更新章节质量评分...")
+        # 提取合并的摘要（省掉单独 _generate_summary 调用）
+        summary_text = str(
+            analysis_data.get("summary")
+            or analysis_data.get("suggestion")
+            or analysis_data.get("suggestions")
+            or ""
+        ).strip()[:500]
+        if summary_text:
+            chapter.summary = summary_text
+            self.db.add(chapter)  # 确保 commit 后不丢失
+        elif chapter.content:
+            chapter.summary = chapter.content.strip()[:150]
+        _key_events = (
+            analysis_data.get("key_events") or analysis_data.get("key_plot_points") or []
+        )
 
-            # 质量评分转换辅助函数（AI 可能返回字符串，需强制转 float）
-            def _score_float(key, default):
-                """评分字段 AI 可能返回字符串（如 "8.2" 或 "整体质量（8.0）：xxx"），强制转 float 防止类型错误。"""
-                v = quality_scores_data.get(key, default)
-                if isinstance(v, str):
-                    import re
-                    m = re.search(r'[\d]\.?\d*', v)
-                    if m:
-                        try:
-                            return float(m.group())
-                        except (ValueError, TypeError):
-                            return default
-                    return default
-                try:
-                    return float(v)
-                except (ValueError, TypeError):
-                    return default
-
-            # 更新章节质量评分
-            chapter.quality_score = _score_float("overall", None)
-            chapter.quality_detail = quality_scores_data
-
-            # 质量告警检测
-            alert_parts = []
-
-            overall = _score_float("overall", 10)
-            coherence = _score_float("coherence", 10)
-            consistency_issues = analysis_data.get("consistency_issues", [])
-            if overall < 5:
-                alert_parts.append("low_score")
-            if coherence < 4:
-                alert_parts.append("low_coherence")
-            if (
-                consistency_issues
-                and isinstance(consistency_issues, list)
-                and len(consistency_issues) > 0
-            ):
-                alert_parts.append("consistency_issue")
-            chapter.quality_alert = ",".join(alert_parts) if alert_parts else ""
-
-            await self.db.commit()
-            await _report(70, "正在同步伏笔状态...")
-
-            # 重新分析前清理旧的分析伏笔（避免重复分析导致堆积），再同步新状态
-            try:
-                await self.foreshadow_service.clean_analysis_foreshadows(chapter.chapter_number)
-            except Exception as e:
-                print(f"[chapter_service] 清理旧分析伏笔失败（忽略）: {e}", flush=True)
-
-            # 更新伏笔状态
-            await self.foreshadow_service.auto_update_from_analysis(
-                analysis_data, chapter.chapter_number
-            )
-            await _report(78, "正在提取记忆片段...")
-
-            # 提取记忆
-            await self._extract_memories(chapter, analysis_data)
-            await _report(86, "正在更新角色心理状态...")
-
-            # 回写角色心理状态（让 mental_state 随章节自动更新）
-            await self._update_character_states(analysis_data)
-
-            # 角色状态全面更新（#14：生死/心理/关系亲密度/组织成员，带章节防回退）
-            try:
-                from app.services.character_state_update_service import CharacterStateUpdateService
-
-                csu = CharacterStateUpdateService(self.db, self.project_id)
-                await csu.update_from_analysis(
-                    analysis_data.get("character_states", []),
-                    chapter_id=chapter.id,
-                    chapter_number=chapter.chapter_number,
-                )
-                # 自动生成 CharacterChangeLog
-                await self._create_character_change_logs(analysis_data, chapter.chapter_number)
-            except Exception:
-                pass
-            await _report(92, "正在更新角色关系...")
-
-            # 增量更新角色关系（分析结果里若提到关系变化）
-            try:
-                await self._update_relations_from_analysis(analysis_data, chapter.chapter_number)
-            except Exception:
-                pass
-            await _report(96, "正在更新角色职业阶段...")
-
-            # 更新角色职业阶段（#19，对标 MuMu career_update_service）
-            try:
-                from app.services.career_update_service import CareerUpdateService
-
-                cs = CareerUpdateService(self.db, self.project_id)
-                await cs.update_from_analysis(
-                    analysis_data.get("character_states", []),
-                    chapter_id=chapter.id,
-                    chapter_number=chapter.chapter_number,
-                )
-            except Exception:
-                pass
-            await _report(96, "正在更新物品与地点状态...")
-
-            # 更新物品持有者/状态/获得章节
-            try:
-                await self._update_items_from_analysis(analysis_data, chapter.chapter_number)
-            except Exception as e:
-                print(f"[chapter_service] 更新物品状态失败（忽略）: {e}", flush=True)
-            # 更新地点状态
-            try:
-                await self._update_locations_from_analysis(analysis_data, chapter.chapter_number)
-            except Exception as e:
-                print(f"[chapter_service] 更新地点状态失败（忽略）: {e}", flush=True)
-            await _report(99, "分析完成")
-
+        # 字段兼容层：统一 DB 提示词字段名 → 代码期望的字段名
+        # hooks：DB 返回 list[{type,content,strength}]，兼容 dict 格式
+        hooks_raw = analysis_data.get("hooks", {})
+        if isinstance(hooks_raw, list):
+            hooks_data = {}
+            for h in hooks_raw:
+                if isinstance(h, dict):
+                    htype = h.get("type", "general")
+                    hooks_data[htype] = h.get("content", h.get("keyword", ""))
+                elif isinstance(h, str):
+                    hooks_data["general"] = h
         else:
-            # JSON 解析失败（AI 返回了非 JSON 文本）→ 仍保存 raw_response 便于调试和重试
-            analysis = PlotAnalysis(
-                project_id=self.project_id,
+            hooks_data = hooks_raw
+        # conflict：DB 返回单对象 {types,parties,...}，转成数组格式
+        conflicts_data = analysis_data.get("conflicts", [])
+        conflict_types_data = analysis_data.get("conflict_types", [])
+        if not conflicts_data:
+            single_conflict = analysis_data.get("conflict", {})
+            if isinstance(single_conflict, dict):
+                conflicts_data = [single_conflict]
+                # 提取 types 到 conflict_types
+                ct = single_conflict.get("types", [])
+                if isinstance(ct, list) and not conflict_types_data:
+                    conflict_types_data = ct
+        # scores → quality_scores
+        quality_scores_data = (
+            analysis_data.get("quality_scores") or analysis_data.get("scores") or {}
+        )
+        # plot_points → key_plot_points
+        key_plot_points_data = (
+            analysis_data.get("key_plot_points") or analysis_data.get("plot_points") or []
+        )
+        # emotional_arc → emotional_curve / emotion_curve
+        emotional_curve_data = (
+            analysis_data.get("emotional_curve")
+            or analysis_data.get("emotional_arc")
+            or analysis_data.get("emotion_curve")
+            or {}
+        )
+
+        # 保存分析结果
+        analysis = PlotAnalysis(
+            project_id=self.project_id,
+            chapter_id=chapter.id,
+            chapter_number=chapter.chapter_number,
+            hooks=hooks_data,
+            foreshadows=analysis_data.get("foreshadows", []),
+            conflicts=conflicts_data,
+            conflict_types=conflict_types_data,
+            emotion_curve=analysis_data.get(
+                "emotion_curve",
+                emotional_curve_data if isinstance(emotional_curve_data, list) else [],
+            ),
+            emotional_curve=emotional_curve_data
+            if isinstance(emotional_curve_data, dict)
+            else {},
+            character_states=analysis_data.get("character_states", []),
+            organization_states=analysis_data.get("organization_states", []),
+            key_plot_points=key_plot_points_data,
+            scenes=analysis_data.get("scenes", []),
+            plot_stage=analysis_data.get("plot_stage", ""),
+            dialogue_ratio=analysis_data.get("dialogue_ratio", 0),
+            description_ratio=analysis_data.get("description_ratio", 0),
+            pacing=analysis_data.get("pacing", ""),
+            quality_scores=quality_scores_data,
+            consistency_issues=analysis_data.get("consistency_issues", []),
+            suggestions=analysis_data.get("suggestions", []),
+            analysis_report=generate_analysis_summary(analysis_data),
+            raw_response=(plot_data.get("_raw") or quality_data.get("_raw") or ""),
+        )
+        self.db.add(analysis)
+        await _report(62, "正在更新章节质量评分...")
+
+        # 质量评分转换辅助函数（AI 可能返回字符串，需强制转 float）
+        def _score_float(key, default):
+            """评分字段 AI 可能返回字符串（如 "8.2" 或 "整体质量（8.0）：xxx"），强制转 float 防止类型错误。"""
+            v = quality_scores_data.get(key, default)
+            if isinstance(v, str):
+                import re
+                m = re.search(r'[\d]\.?\d*', v)
+                if m:
+                    try:
+                        return float(m.group())
+                    except (ValueError, TypeError):
+                        return default
+                return default
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return default
+
+        # 更新章节质量评分
+        chapter.quality_score = _score_float("overall", None)
+        chapter.quality_detail = quality_scores_data
+
+        # 质量告警检测
+        alert_parts = []
+
+        overall = _score_float("overall", 10)
+        coherence = _score_float("coherence", 10)
+        consistency_issues = analysis_data.get("consistency_issues", [])
+        if overall < 5:
+            alert_parts.append("low_score")
+        if coherence < 4:
+            alert_parts.append("low_coherence")
+        if (
+            consistency_issues
+            and isinstance(consistency_issues, list)
+            and len(consistency_issues) > 0
+        ):
+            alert_parts.append("consistency_issue")
+        chapter.quality_alert = ",".join(alert_parts) if alert_parts else ""
+
+        await self.db.commit()
+        await _report(70, "正在同步伏笔状态...")
+
+        # 重新分析前清理旧的分析伏笔（避免重复分析导致堆积），再同步新状态
+        try:
+            await self.foreshadow_service.clean_analysis_foreshadows(chapter.chapter_number)
+        except Exception as e:
+            print(f"[chapter_service] 清理旧分析伏笔失败（忽略）: {e}", flush=True)
+
+        # 更新伏笔状态
+        await self.foreshadow_service.auto_update_from_analysis(
+            analysis_data, chapter.chapter_number
+        )
+        await _report(78, "正在提取记忆片段...")
+
+        # 提取记忆
+        await self._extract_memories(chapter, analysis_data)
+        await _report(86, "正在更新角色心理状态...")
+
+        # 回写角色心理状态（让 mental_state 随章节自动更新）
+        await self._update_character_states(analysis_data)
+
+        # 角色状态全面更新（#14：生死/心理/关系亲密度/组织成员，带章节防回退）
+        try:
+            from app.services.character_state_update_service import CharacterStateUpdateService
+
+            csu = CharacterStateUpdateService(self.db, self.project_id)
+            await csu.update_from_analysis(
+                analysis_data.get("character_states", []),
                 chapter_id=chapter.id,
                 chapter_number=chapter.chapter_number,
-                suggestions=[
-                    "⚠️ 分析数据解析失败，AI 返回的不是合法 JSON。可点击「重新分析」重试。"
-                ],
-                raw_response=result.get("content", ""),
             )
-            self.db.add(analysis)
-            await self.db.commit()
-            raise RuntimeError("剧情分析数据解析失败：AI 返回的不是合法 JSON 格式")
+            # 自动生成 CharacterChangeLog
+            await self._create_character_change_logs(analysis_data, chapter.chapter_number)
+        except Exception:
+            pass
+        await _report(92, "正在更新角色关系...")
+
+        # 增量更新角色关系（分析结果里若提到关系变化）
+        try:
+            await self._update_relations_from_analysis(analysis_data, chapter.chapter_number)
+        except Exception:
+            pass
+        await _report(96, "正在更新角色职业阶段...")
+
+        # 更新角色职业阶段（#19，对标 MuMu career_update_service）
+        try:
+            from app.services.career_update_service import CareerUpdateService
+
+            cs = CareerUpdateService(self.db, self.project_id)
+            await cs.update_from_analysis(
+                analysis_data.get("character_states", []),
+                chapter_id=chapter.id,
+                chapter_number=chapter.chapter_number,
+            )
+        except Exception:
+            pass
+        await _report(96, "正在更新物品与地点状态...")
+
+        # 更新物品持有者/状态/获得章节
+        try:
+            await self._update_items_from_analysis(analysis_data, chapter.chapter_number)
+        except Exception as e:
+            print(f"[chapter_service] 更新物品状态失败（忽略）: {e}", flush=True)
+        # 更新地点状态
+        try:
+            await self._update_locations_from_analysis(analysis_data, chapter.chapter_number)
+        except Exception as e:
+            print(f"[chapter_service] 更新地点状态失败（忽略）: {e}", flush=True)
+        await _report(99, "分析完成")
 
     async def _index_chapter_chunks(self, chapter: Chapter):
         """将章节正文按自然段切分为 chunk（400-800字+重叠120字），每个 chunk 存入向量库。

@@ -414,12 +414,23 @@ class AIClient:
                 base_url=self.base_url,
                 api_key=self.api_key or "dummy-key",
                 timeout=httpx.Timeout(
-                    float(settings.AI_TIMEOUT),
+                    float(settings.AI_TIMEOUT),  # 兜底总超时；实际每请求用 _effective_timeout 覆盖
                     connect=float(settings.AI_CONNECT_TIMEOUT),
                 ),
                 max_retries=settings.AI_SDK_MAX_RETRIES,  # SDK 层不重试，由应用层统一控制，避免透明重试导致重复计费
             )
         return self._client
+
+    def _effective_timeout(self, model: str = None) -> int:
+        """返回适合当前模型的单次调用超时（秒）。
+
+        推理模型（step/glm 等）思考时间长，给更长预算。
+        """
+        model_name = (model or self.model or "").lower()
+        for key in self._MODEL_STREAMING_RC_ONLY:
+            if key in model_name:
+                return max(settings.AI_TIMEOUT, 900)  # 推理模型至少 900 秒
+        return settings.AI_TIMEOUT
 
     async def chat(
         self,
@@ -436,12 +447,14 @@ class AIClient:
     ) -> dict:
         """非流式调用（支持 MCP 工具）"""
         start = time.time()
+        actual_model = model or self.model
         kwargs = {
-            "model": model or self.model,
+            "model": actual_model,
             "messages": messages,
             "temperature": self._resolve_temperature(temperature),
             "top_p": self._resolve_top_p(top_p),
             "max_tokens": self._resolve_max_tokens(max_tokens),
+            "timeout": self._effective_timeout(actual_model),
         }
         # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
         eff_fp = (
@@ -548,13 +561,16 @@ class AIClient:
                   默认 None 时零开销。
         """
         start = time.time()
+        # 按实际请求的 model 算超时（推理模型给更长预算），而非 client 初始化时的默认 model
+        actual_model = model or self.model
         kwargs = {
-            "model": model or self.model,
+            "model": actual_model,
             "messages": messages,
             "temperature": self._resolve_temperature(temperature),
             "top_p": self._resolve_top_p(top_p),
             "max_tokens": self._resolve_max_tokens(max_tokens),
             "stream": True,
+            "timeout": self._effective_timeout(actual_model),
         }
         # penalty 参数：显式传 > 实例默认（模型配置）> 不发送（兼容不支持的模型）
         eff_fp = (

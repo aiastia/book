@@ -283,11 +283,25 @@ async def list_user_tasks(
 
 
 async def list_active_tasks(user_id: int, project_id: int | None = None) -> list[dict]:
-    """列出活跃任务（pending/running）。"""
+    """列出活跃任务（pending/running）+ 最近完成的任务。
+
+    包含最近 5 分钟内完成的任务，让前端页面刷新后能收到"完成通知"
+    并触发 onTaskCompleted 回调刷新页面数据。
+    """
+    from datetime import timedelta
+
     async with async_session() as db:
+        recent_threshold = datetime.utcnow() - timedelta(minutes=5)
         stmt = select(BackgroundTask).where(
             BackgroundTask.user_id == user_id,
-            BackgroundTask.status.in_(["pending", "running"]),
+            # 活跃任务 OR 最近 5 分钟内完成的任务（含 failed/cancelled）
+            (
+                BackgroundTask.status.in_(["pending", "running"])
+                | (
+                    BackgroundTask.status.in_(["completed", "failed", "cancelled"])
+                    & BackgroundTask.completed_at >= recent_threshold
+                )
+            ),
         )
         if project_id:
             stmt = stmt.where(BackgroundTask.project_id == project_id)

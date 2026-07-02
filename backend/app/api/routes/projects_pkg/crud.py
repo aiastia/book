@@ -446,17 +446,22 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
 
     # chapters
     chapter_list = []
-    for c in mumu.get("chapters", []):
+    for idx, c in enumerate(mumu.get("chapters", [])):
+        # chapter_number：优先用 mumu 原值，缺失时按导入顺序自动编号（避免全为 1 冲突）
+        ch_num = c.get("chapter_number")
+        if ch_num is None or (isinstance(ch_num, str) and not ch_num.strip()):
+            ch_num = idx + 1
         chapter_list.append({
             "title": c.get("title", ""),
             "content": c.get("content", ""),
-            "chapter_number": c.get("chapter_number", 1),
+            "chapter_number": ch_num,
             "status": c.get("status", "draft"),
-            "word_count": c.get("word_count", 0),
+            "word_count": c.get("word_count", 0) or len(c.get("content", "")),
             "summary": c.get("summary", ""),
             "expansion_plan": c.get("expansion_plan"),
             "outline_title": c.get("outline_title"),  # 1-N: 用于重建大纲关联
-            "sub_index": c.get("sub_index"),
+            "sub_index": c.get("sub_index") or 1,
+            "generation_mode": c.get("generation_mode") or "one_to_one",
         })
 
     # careers
