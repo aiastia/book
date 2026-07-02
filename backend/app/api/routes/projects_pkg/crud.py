@@ -952,5 +952,4 @@ async def test_thinking_mode(
             "finish_reason": resp.get("finish_reason"),
         },
         "warning": warning,
-        },
     }
