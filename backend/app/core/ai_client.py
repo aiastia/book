@@ -167,7 +167,8 @@ class AIClient:
     # 已知在 streaming 时把所有内容（含最终答案）输出到 reasoning_content 的模型
     # GLM-5 系列：streaming 仅输出 delta.reasoning_content，delta.content 始终为空
     # 非流式 API 则正常分离 content（最终答案）和 reasoning_content（思维过程）
-    _MODEL_STREAMING_RC_ONLY = {"glm-5", "glm-5.2", "glm-4", "glm-4v"}
+    # step-3.7-flash：推理模型，流式可能将大量内容输出到 reasoning_content
+    _MODEL_STREAMING_RC_ONLY = {"glm-5", "glm-5.2", "glm-4", "glm-4v", "step-3.7-flash"}
 
     def __init__(
         self,
@@ -900,12 +901,11 @@ class AIClient:
             f"duration={result.get('duration_ms', 0)}ms content_len={len(content)}"
         )
 
-        # 先尝试解析 JSON。如果短内容（如 "[]" "{}"）能解析成功，不应拒绝。
-        from app.services.json_helper import clean_json_response, parse_json
+        # 先尝试解析 JSON。parse_json 内部已调用 clean_json_response，无需重复清洗。
+        from app.services.json_helper import parse_json
 
         try:
-            cleaned = clean_json_response(content)
-            parsed = parse_json(cleaned)
+            parsed = parse_json(content)
             if parsed is not None:
                 result["json"] = parsed
                 return result
@@ -917,10 +917,9 @@ class AIClient:
             result["error"] = f"AI 返回内容过短（{len(content)}字符），无法解析为 JSON"
             return result
 
-        # 用原项目的强清洗逻辑：中文标点、未转义引号、markdown、json5 兜底
+        # 强清洗重试（仅 parse_json 一次，避免 clean_json_response 被双重调用导致截断为空）
         try:
-            cleaned = clean_json_response(content)
-            parsed = parse_json(cleaned)
+            parsed = parse_json(content)
             if parsed is not None:
                 result["json"] = parsed
                 return result

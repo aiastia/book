@@ -220,6 +220,12 @@ def _fix_unclosed_strings(text: str) -> str:
 
         if last_valid_close > 0:
             truncated = text[:last_valid_close + 1]
+            if len(truncated) < 10:
+                logger.warning(
+                    f"⚠️ _fix_unclosed_strings 截断结果过短（{len(truncated)}字符），"
+                    f"返回原文避免丢失有效内容"
+                )
+                return text
             logger.info(f"✅ 检测到未闭合字符串（起始位置 {unclosed_start}），截断到最后一个合法闭合符（位置 {last_valid_close}）")
             return truncated
 
@@ -233,6 +239,13 @@ def _fix_unclosed_strings(text: str) -> str:
                 truncate_at = j + 1
                 break
         truncated = text[:truncate_at].rstrip()
+        # 安全兜底：截断结果过短（可能是全文被误判为未闭合字符串），返回原文
+        if len(truncated) < 10:
+            logger.warning(
+                f"⚠️ _fix_unclosed_strings 截断结果过短（{len(truncated)}字符），"
+                f"返回原文避免丢失有效内容（未闭合起始位置 {unclosed_start}）"
+            )
+            return text
         logger.info(f"✅ 检测到未闭合字符串（起始位置 {unclosed_start}），截断到位置 {truncate_at}")
         return truncated
 
