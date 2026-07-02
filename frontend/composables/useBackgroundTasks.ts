@@ -373,7 +373,7 @@ export function useBackgroundTasks() {
     }
   }
 
-  function dismissTask(id: number | string) {
+  async function dismissTask(id: number | string) {
     const t = tasks.value.find(t => t.id === id)
     if (t) t._dismissed = true
     if (typeof id === 'string' && id.startsWith('legacy-')) {
