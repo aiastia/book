@@ -734,6 +734,31 @@ async def import_project(
             db.add(Chapter(project_id=new_proj.id, **data))
     await db.flush()
 
+    # 1对1模式：为没有对应 Chapter 的大纲自动创建 draft 章节记录
+    # 场景：导入 mumu 大纲但 JSON 里不含 chapters（只导入了大纲没写正文），
+    # 此时大纲页面能看到大纲，但章节页面为空——需要为每个大纲创建占位章节
+    if (new_proj.outline_mode or "one_to_one") == "one_to_one":
+        existing_ch_nums = set(
+            c.chapter_number
+            for c in (await db.execute(
+                select(Chapter.chapter_number).where(Chapter.project_id == new_proj.id)
+            )).scalars().all()
+        )
+        for o in outlines_db:
+            if o.chapter_number not in existing_ch_nums:
+                db.add(Chapter(
+                    project_id=new_proj.id,
+                    chapter_number=o.chapter_number,
+                    title=o.title or "",
+                    summary=(o.summary or "")[:200],
+                    status="draft",
+                    outline_id=o.id,
+                    sub_index=1,
+                    generation_mode="one_to_one",
+                ))
+                existing_ch_nums.add(o.chapter_number)
+        await db.flush()
+
     add_all(Foreshadow, req.get("foreshadows", []))
     add_all(Career, req.get("careers", []))
     # 角色职业关联：mumu 格式用 name，需映射为 id
