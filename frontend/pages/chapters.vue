@@ -77,7 +77,7 @@ function countMatches() {
   replaceForm.matchCount = count
 }
 
-function doReplaceAll() {
+async function doReplaceAll() {
   if (!replaceForm.find) return
   countMatches()
   if (replaceForm.matchCount === 0) { msg.warning('未找到匹配内容'); return }
