@@ -32,6 +32,7 @@ from app.api.routes.projects_pkg import (
     org_members,
     outlines,
     relations,
+    screenplay,
     tts,
     worlds,
 )
@@ -62,6 +63,7 @@ _merge(org_members.router)
 _merge(character_careers.router)
 _merge(batch_generation.router)
 _merge(chapter_rewrite.router)
+_merge(screenplay.router)
 _merge(tts.router)
 
 __all__ = ["router"]

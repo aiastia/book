@@ -31,5 +31,6 @@ class Chapter(Base):
     generation_history = Column(JSON, default=list)  # 生成历史记录
     style_config = Column(JSON, default=dict)  # 本章写作风格覆盖
     ssml_result = Column(JSON, nullable=True)  # TTS 转换结果 {ssml_parts, stats, created_at}
+    screenplay_result = Column(JSON, nullable=True)  # 分镜剧本 {shots, stats, created_at}
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

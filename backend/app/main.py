@@ -194,6 +194,8 @@ async def _auto_migrate():
         ("chapters", "ADD COLUMN raw_output TEXT DEFAULT ''"),
         # 第22批：项目笔名/作者名
         ("projects", "ADD COLUMN pen_name VARCHAR(100) DEFAULT ''"),
+        # 第23批：分镜剧本（小说→视频中间层）
+        ("chapters", "ADD COLUMN screenplay_result JSON"),
     ]
     async with engine.begin() as conn:
         for table, col_def in migrations:
