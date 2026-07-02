@@ -516,7 +516,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
         "project": {
             "title": proj.get("title", "导入项目"),
             "genre": proj.get("genre", ""),
-            "synopsis": proj.get("synopsis", ""),
+            "synopsis": proj.get("synopsis") or proj.get("description", ""),
             "narrative_pov": proj.get("narrative_pov", "第三人称"),
             "world_time_period": proj.get("world_time_period", ""),
             "world_location": proj.get("world_location", ""),
@@ -524,6 +524,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
             "world_rules": proj.get("world_rules", ""),
             "cover_url": proj.get("cover_url", ""),
             "outline_mode": proj.get("outline_mode", "one_to_one"),
+            "theme": proj.get("theme", ""),
         },
         "characters": char_list,
         "character_relations": rel_list,
@@ -578,9 +579,9 @@ async def import_project(
 
     proj_data = req.get("project", {})
     # Mumu 格式 description/theme → 系统 synopsis/settings
-    if not proj.get("synopsis") and proj.get("description"):
-        proj = dict(proj)
-        proj["synopsis"] = proj.pop("description")
+    if not proj_data.get("synopsis") and proj_data.get("description"):
+        proj_data = dict(proj_data)
+        proj_data["synopsis"] = proj_data.pop("description")
     # 创建新项目（不沿用原 id）
     new_proj = Project(
         user_id=user.id,
