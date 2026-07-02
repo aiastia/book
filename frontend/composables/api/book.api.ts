@@ -19,6 +19,8 @@ export const bookApi = {
   getThinkingModes: (id?: number) => get(`/projects/${P(id)}/thinking-modes`),
   saveThinkingModes: (modes: Record<string, any>, id?: number) =>
     put(`/projects/${P(id)}/thinking-modes`, { modes }),
+  testThinkingMode: (skillKey: string, id?: number) =>
+    post(`/projects/${P(id)}/thinking-modes/test`, { skill_key: skillKey }),
   // 灵感
   inspirationStep: (step: string, body: any, id?: number) =>
     post(`/projects/${P(id)}/inspiration/step/${step}`, body),

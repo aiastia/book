@@ -840,3 +840,106 @@ async def update_thinking_modes(
     proj.settings = settings
     await db.commit()
     return {"ok": True}
+
+
+class TestThinkingModeReq(BaseModel):
+    skill_key: str = "analysis"  # 要测试的模式分组，如 analysis / chapter / outline 等
+
+
+@router.post("/{project_id}/thinking-modes/test")
+async def test_thinking_mode(
+    project_id: int, req: TestThinkingModeReq, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+):
+    """测试项目级思考模式：用默认模型发一条测试请求，模拟指定技能的思考模式覆盖效果。"""
+    from app.core.ai_client import AIClient
+    from app.skills.engine import _apply_thinking_mode_override, _SKILL_TO_THINKING_MODE
+
+    proj = await get_user_project(db, project_id, user)
+    settings = dict(proj.settings or {})
+    modes = settings.get("thinking_modes", THINKING_MODES_DEFAULTS)
+
+    # 找到用户默认模型
+    from app.models.ai_model import AIModelConfig
+    result = await db.execute(
+        select(AIModelConfig).where(AIModelConfig.user_id == user.id, AIModelConfig.is_default == True)
+    )
+    cfg = result.scalar_one_or_none()
+    if not cfg:
+        # fallback：取第一个可用配置
+        result = await db.execute(
+            select(AIModelConfig).where(AIModelConfig.user_id == user.id)
+        )
+        cfg = result.scalar_one_or_none()
+    if not cfg:
+        raise HTTPException(400, "请先添加 AI 模型配置")
+
+    # 构造客户端（携带模型级 thinking_mode / reasoning_model 设置）
+    client = AIClient(
+        base_url=cfg.base_url,
+        api_key=cfg.api_key,
+        model=cfg.model,
+        provider=getattr(cfg, "provider", None) or getattr(cfg, "backend_type", None) or "openai",
+        reasoning_model=getattr(cfg, "reasoning_model", None) or False,
+        reasoning_effort=getattr(cfg, "reasoning_effort", None) or "low",
+        thinking_mode=getattr(cfg, "thinking_mode", None) or "auto",
+        thinking_params=getattr(cfg, "thinking_params", None) or "",
+        **AIClient._defaults_from_cfg(cfg),
+    )
+
+    # 记录覆盖前的状态
+    before_thinking = client.thinking_mode
+    before_reasoning = client.reasoning_model
+    before_effort = client.reasoning_effort
+
+    # 模拟技能执行时的思考模式覆盖
+    fake_context = {"_thinking_modes": modes}
+    _apply_thinking_mode_override(client, req.skill_key, fake_context)
+
+    # 发一条极短测试请求
+    try:
+        resp = await client.chat(
+            messages=[{"role": "user", "content": "请回复：连接成功"}],
+            max_tokens=20,
+        )
+    except Exception as e:
+        raise HTTPException(400, f"测试请求失败: {str(e)[:200]}")
+
+    # 判断 reasoning 是否实际生效
+    reasoning_tokens = resp.get("reasoning_tokens", 0)
+    reasoning_content_len = resp.get("reasoning_content_len", 0)
+    thinking_active = reasoning_tokens > 0 or reasoning_content_len > 0
+
+    # 查找该技能对应的模式分组名
+    mode_key = _SKILL_TO_THINKING_MODE.get(req.skill_key)
+    if not mode_key:
+        for prefix, key in _SKILL_TO_THINKING_MODE.items():
+            if prefix.endswith("_") and req.skill_key.startswith(prefix):
+                mode_key = key
+                break
+
+    mode_cfg = modes.get(mode_key, {}) if mode_key else {}
+    return {
+        "ok": True,
+        "skill_key": req.skill_key,
+        "mode_group": mode_key or "unknown",
+        "mode_config": mode_cfg,
+        "model": cfg.model,
+        "provider": client.provider,
+        "before": {
+            "thinking_mode": before_thinking,
+            "reasoning_model": before_reasoning,
+            "reasoning_effort": before_effort,
+        },
+        "after": {
+            "thinking_mode": client.thinking_mode,
+            "reasoning_model": client.reasoning_model,
+            "reasoning_effort": client.reasoning_effort,
+        },
+        "result": {
+            "thinking_active": thinking_active,
+            "reasoning_tokens": reasoning_tokens,
+            "reasoning_content_len": reasoning_content_len,
+            "reply": resp.get("content", "")[:80],
+            "finish_reason": resp.get("finish_reason"),
+        },
+    }

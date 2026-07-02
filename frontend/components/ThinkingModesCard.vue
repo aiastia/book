@@ -11,6 +11,10 @@ const modes = ref<Record<string, any>>({})
 const loading = ref(false)
 const saving = ref(false)
 
+// 测试状态
+const testingMode = ref<string | null>(null)
+const testResults = ref<Record<string, string>>({})
+
 const modeGroups = [
   { key: 'world',     label: '🌍 生成世界观',        desc: '世界设定生成' },
   { key: 'character', label: '👤 生成人物设定',      desc: '角色创建与批量生成' },
@@ -27,6 +31,17 @@ const effortOptions = [
   { value: 'low', label: '低思考' },
   { value: 'none', label: '关闭思考' },
 ]
+
+// 模式分组 → 技能 key 映射（与后端 _SKILL_TO_THINKING_MODE 一致）
+const modeKeyMap: Record<string, string> = {
+  world: 'world_core_generate',
+  character: 'character_generate',
+  outline: 'outline_create',
+  expand: 'outline_expand_single',
+  chapter: 'chapter_generation_',
+  polish: 'ai_denoising',
+  analysis: 'plot_analysis',
+}
 
 async function load() {
   if (!currentProjectId.value) return
@@ -45,6 +60,36 @@ async function save() {
     msg.success('已保存')
   } catch (e: any) { msg.error('保存失败') }
   finally { saving.value = false }
+}
+
+async function onTestMode(key: string) {
+  if (!currentProjectId.value) return
+  testingMode.value = key
+  testResults.value[key] = ''
+  try {
+    const r = await API.book.testThinkingMode(modeKeyMap[key] || key)
+    const cfg = r.mode_config || {}
+    const enabled = cfg.enabled
+    const parts: string[] = []
+    if (enabled) {
+      parts.push(`🧠 思考已开启`)
+      parts.push(`effort=${cfg.reasoning_effort || '默认'}`)
+    } else {
+      parts.push(`🧢 思考已关闭`)
+    }
+    if (r.result.thinking_active) {
+      parts.push(`⚠️ 推理实际运行中`)
+      parts.push(`reasoning_tokens=${r.result.reasoning_tokens}`)
+    } else {
+      parts.push(`✅ 推理未运行`)
+    }
+    parts.push(`回复：${r.result.reply}`)
+    testResults.value[key] = parts.join(' | ')
+  } catch (e: any) {
+    testResults.value[key] = `❌ 测试失败：${e?.data?.detail || e?.message || '未知错误'}`
+  } finally {
+    testingMode.value = null
+  }
 }
 
 function toggleMode(key: string) {
@@ -66,7 +111,12 @@ onMounted(load)
         <a-card size="small" :class="{ 'mode-card-on': modes[g.key]?.enabled, 'mode-card-off': !modes[g.key]?.enabled }">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-weight:600;font-size:13px">{{ g.label }}</span>
-            <a-switch size="small" :checked="!!modes[g.key]?.enabled" @change="toggleMode(g.key)" />
+            <div style="display:flex;align-items:center;gap:6px">
+              <a-button size="small" :loading="testingMode===g.key" @click="onTestMode(g.key)">
+                {{ testingMode === g.key ? '测试中...' : '🧪 测试' }}
+              </a-button>
+              <a-switch size="small" :checked="!!modes[g.key]?.enabled" @change="toggleMode(g.key)" />
+            </div>
           </div>
           <div style="font-size:11px;color:#8c8c8c;margin-bottom:6px">{{ g.desc }}</div>
           <template v-if="modes[g.key]?.enabled">
@@ -81,6 +131,9 @@ onMounted(load)
               <a-input-number v-model:value="modes[g.key].temperature" size="small" :min="0" :max="200" :step="5" style="width:70px" placeholder="默认" />
             </div>
           </template>
+          <div v-if="testResults[g.key]" class="test-result" :class="{ ok: testResults[g.key].startsWith('✅'), err: testResults[g.key].startsWith('❌'), warn: testResults[g.key].includes('⚠️') }">
+            {{ testResults[g.key] }}
+          </div>
         </a-card>
       </a-col>
     </a-row>
@@ -90,4 +143,8 @@ onMounted(load)
 <style scoped>
 .mode-card-on  { border: 1px solid #597ef7; background: #f0f5ff; }
 .mode-card-off { border: 1px solid #e8e4d9; background: #fafaf7; opacity: 0.7; }
+.test-result { margin-top: 6px; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+.test-result.ok { background: #EAF0F1; color: #4D8088; }
+.test-result.err { background: #fbe9e7; color: #c62828; }
+.test-result.warn { background: #fff3e0; color: #e65100; }
 </style>
