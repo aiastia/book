@@ -144,6 +144,8 @@ export function useBackgroundTasks() {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         connectWs()
+        // 页面重新可见时，主动拉一次活跃任务（处理刷新/切后台期间完成的任务）
+        refreshTasks()
       } else {
         // 页面隐藏时关闭 WebSocket（节省资源）
         if (ws) { ws.close(); ws = null }
@@ -153,6 +155,8 @@ export function useBackgroundTasks() {
     document.addEventListener('visibilitychange', handleVisibility)
     // 初始连接
     connectWs()
+    // 初始化时主动拉一次活跃任务（刷新页面后恢复正在运行的后台任务）
+    refreshTasks()
   }
 
   // 注册任务完成回调（taskType 支持前缀匹配，如 'chapter' 匹配 'chapter_generate'）
