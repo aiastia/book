@@ -456,7 +456,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
     for c in mumu.get("careers", []):
         career_list.append({
             "name": c.get("name", ""),
-            "type": c.get("type", "main"),
+            "career_type": c.get("type", "main"),
             "description": c.get("description", ""),
             "category": c.get("category", ""),
             "stages": c.get("stages", "[]"),
@@ -633,9 +633,9 @@ async def import_project(
             # mumu 格式 traits → tags
             if "tags" not in data and "traits" in it:
                 data["tags"] = it["traits"]
-            # role_type (英文) → role (中文)
-            if "role" not in data and "role_type" in it:
-                data["role"] = _role_map.get(it["role_type"], it["role_type"])
+            # role 值翻译（转换器可能已映射 role_type→role，但值仍是英文）
+            if data.get("role") in _role_map:
+                data["role"] = _role_map[data["role"]]
             obj = Character(project_id=new_proj.id, **data)
             db.add(obj)
             new_chars.append((it.get("id"), obj))
@@ -717,9 +717,18 @@ async def import_project(
             .scalars().all()
         )
         org_name_map = {o.name: o.id for o in orgs_db if o.name}
+    # 先清除该项目已有的旧组织成员，避免重复导入时 UNIQUE 冲突
+    await db.execute(delete(OrganizationMember).where(OrganizationMember.project_id == new_proj.id))
     _seen_org_members = set()
     for it in req.get("organization_members", []):
         if isinstance(it, dict):
+            org_name = it.get("organization_name", "")
+            char_name = it.get("character_name", "")
+            # 按原始 name 去重（在 ID 映射之前）
+            name_key = (org_name, char_name)
+            if name_key in _seen_org_members or not (org_name and char_name):
+                continue
+            _seen_org_members.add(name_key)
             data = {k: v for k, v in it.items() if k != "id"}
             # name → id（mumu）
             if "organization_name" in data:
@@ -730,11 +739,8 @@ async def import_project(
                 obj = char_name_map.get(data.pop("character_name"))
                 if obj:
                     data["character_id"] = obj.id
-            member_key = (data.get("organization_id"), data.get("character_id"))
-            if member_key in _seen_org_members or not all(member_key):
-                continue
-            _seen_org_members.add(member_key)
-            db.add(OrganizationMember(project_id=new_proj.id, **data))
+            if data.get("organization_id") and data.get("character_id"):
+                db.add(OrganizationMember(project_id=new_proj.id, **data))
 
     add_all(StoryMemory, req.get("memories", []))
     add_all(PlotAnalysis, req.get("analyses", []))

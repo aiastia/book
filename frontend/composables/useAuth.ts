@@ -12,12 +12,31 @@ interface UserInfo {
 
 const USER_KEY = 'moyu_user'
 const TOKEN_COOKIE = 'moyu_token'
+const USER_COOKIE = 'moyu_user'
 
 /** 写入 cookie（SSR 可读） */
 function setCookie(name: string, value: string, days = 30) {
   if (import.meta.server) return
   const expires = new Date(Date.now() + days * 86400000).toUTCString()
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; expires=${expires}; SameSite=Lax`
+}
+
+/** 读取 cookie（SSR/CSR 通用） */
+function getCookie(name: string): string | null {
+  if (import.meta.server) {
+    // Nuxt SSR: 从 event node.req.headers.cookie 读取
+    try {
+      const cookies = useRequestHeaders()?.cookie
+      if (!cookies) return null
+      const match = cookies.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'))
+      return match ? decodeURIComponent(match[1]) : null
+    } catch {
+      return null
+    }
+  }
+  // 客户端: 从 document.cookie 读取
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : null
 }
 
 /** 删除 cookie */
@@ -32,16 +51,22 @@ export function useAuth() {
   const user = ref<UserInfo | null>(null)
 
   function loadFromStorage() {
-    if (import.meta.server) return
-    const token = getToken()
-    const raw = localStorage.getItem(USER_KEY)
-    isLogged.value = !!token
-    user.value = raw ? (JSON.parse(raw) as UserInfo) : null
+    const raw = getCookie(USER_COOKIE) || (import.meta.client ? localStorage.getItem(USER_KEY) : null)
+    if (raw) {
+      try {
+        const u = JSON.parse(raw) as UserInfo
+        user.value = u
+        isLogged.value = true
+      } catch {
+        // ignore parse error
+      }
+    }
   }
 
   function saveLogin(token: string, u: UserInfo) {
     setToken(token)
     setCookie(TOKEN_COOKIE, token)
+    setCookie(USER_COOKIE, JSON.stringify(u))
     if (import.meta.client) {
       localStorage.setItem(USER_KEY, JSON.stringify(u))
     }
@@ -52,6 +77,7 @@ export function useAuth() {
   function logout() {
     setToken(null)
     deleteCookie(TOKEN_COOKIE)
+    deleteCookie(USER_COOKIE)
     if (import.meta.client) {
       localStorage.removeItem(USER_KEY)
     }
@@ -59,11 +85,21 @@ export function useAuth() {
     user.value = null
   }
 
-  // 客户端初始化：先从缓存读，再调后端 API 验证（防止篡改）
+  // 初始化：先从 cookie 读取用户信息（SSR + CSR 通用）
+  loadFromStorage()
+  // 客户端额外：从 localStorage 读取（作为 cookie 的补充/回退）
   if (import.meta.client) {
-    loadFromStorage()
+    const raw = localStorage.getItem(USER_KEY)
+    if (raw && !user.value) {
+      try {
+        user.value = JSON.parse(raw) as UserInfo
+        isLogged.value = true
+      } catch {
+        // ignore
+      }
+    }
+    // 客户端再调后端验证（防止篡改）
     if (getToken()) {
-      // 直接调后端（不走 Nuxt 代理，auth 路由不在代理范围内）
       const config = useRuntimeConfig()
       const base = config.public.apiBase
       fetch(`${base}/api/auth/me`, { headers: { Authorization: `Bearer ${getToken()}` } })
@@ -71,12 +107,12 @@ export function useAuth() {
         .then(u => {
           if (u?.id) {
             localStorage.setItem(USER_KEY, JSON.stringify(u))
+            setCookie(USER_COOKIE, JSON.stringify(u))
             user.value = u as UserInfo
             isLogged.value = true
           }
         })
         .catch((e: any) => {
-          // 网络不可达时静默处理（偶尔 Failed to fetch 可忽略）
           if (e?.message !== 'Failed to fetch') console.warn('[useAuth] 验证登录态失败', e?.message)
         })
     }

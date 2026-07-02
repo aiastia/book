@@ -1,11 +1,16 @@
 <script setup lang="ts">
 // 侧边栏：主色 Logo 区 + 折叠 + 分组菜单 + 项目上下文 + 用户
-import { nextTick, onMounted } from 'vue'
+import { nextTick, onMounted, computed } from 'vue'
 
 const { nav, groupedNav, currentPath, adminNav, showAdminEntry } = useNavigation()
 const { currentProjectInfo } = useProject()
 
-const collapsed = ref(false)
+// 用 useCookie 保证 SSR/CSR 初始渲染一致，避免 hydration mismatch
+const _collapsedCookie = useCookie('moyu_sidebar_collapsed', { default: () => '0' })
+const collapsed = computed({
+  get: () => _collapsedCookie.value === '1',
+  set: (v: boolean) => { _collapsedCookie.value = v ? '1' : '0' },
+})
 
 function syncCollapsed() {
   if (import.meta.client) {
@@ -21,12 +26,13 @@ function toggleCollapse() {
   }
 }
 
+// 同步旧 localStorage 数据到 cookie（首次访问时）
 if (import.meta.client) {
   onMounted(() => {
     const saved = localStorage.getItem('moyu_sidebar_collapsed')
-    if (saved !== null) {
+    if (saved !== null && _collapsedCookie.value !== saved) {
+      _collapsedCookie.value = saved
       collapsed.value = saved === '1'
-      // 通知 default.vue 初始折叠状态
       nextTick(() => syncCollapsed())
     }
   })

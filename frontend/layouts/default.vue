@@ -1,13 +1,20 @@
 <script setup lang="ts">
 // App 后台外壳：固定侧栏 + 主色顶栏 + 内容白卡
 // 侧栏折叠状态同步到 main-content 和 header 的 margin/left
-const collapsed = ref(false)
+const _collapsedCookie = useCookie('moyu_sidebar_collapsed', { default: () => '0' })
+const collapsed = computed({
+  get: () => _collapsedCookie.value === '1',
+  set: (v: boolean) => { _collapsedCookie.value = v ? '1' : '0' },
+})
 const route = useRoute()
 
 if (import.meta.client) {
   onMounted(() => {
+    // 同步旧 localStorage 数据到 cookie
     const saved = localStorage.getItem('moyu_sidebar_collapsed')
-    if (saved !== null) collapsed.value = saved === '1'
+    if (saved !== null && _collapsedCookie.value !== saved) {
+      _collapsedCookie.value = saved
+    }
 
     // 监听 localStorage 变化（跨标签页同步）
     window.addEventListener('storage', () => {
