@@ -1,5 +1,6 @@
 """项目 CRUD：创建/列表/详情/更新/删除/导入导出"""
 
+import json
 from datetime import datetime
 
 from app.api.routes.projects_pkg.base import *
@@ -120,6 +121,7 @@ async def delete_project(
 
     from app.models.career import Career
     from app.models.character import Character, CharacterRelation
+    from app.models.character_career import CharacterCareer
     from app.models.foreshadow import Foreshadow
     from app.models.organization import Organization
     from app.models.outline import Outline
@@ -172,6 +174,7 @@ async def export_project(
 
     from app.models.career import Career
     from app.models.character import Character, CharacterRelation
+    from app.models.character_career import CharacterCareer
     from app.models.foreshadow import Foreshadow
     from app.models.item import Item
     from app.models.location import Location
@@ -293,6 +296,11 @@ async def export_project(
     careers = (
         (await db.execute(select(Career).where(Career.project_id == project_id))).scalars().all()
     )
+    char_careers = (
+        (await db.execute(select(CharacterCareer).where(CharacterCareer.project_id == project_id)))
+        .scalars()
+        .all()
+    )
     items = (await db.execute(select(Item).where(Item.project_id == project_id))).scalars().all()
     locations = (
         (await db.execute(select(Location).where(Location.project_id == project_id)))
@@ -328,6 +336,7 @@ async def export_project(
         "chapters": list_dicts(chapters),
         "foreshadows": list_dicts(foreshadows),
         "careers": list_dicts(careers),
+        "character_careers": list_dicts(char_careers),
         "items": list_dicts(items),
         "locations": list_dicts(locations),
         "memories": list_dicts(memories),
@@ -454,15 +463,19 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
     # careers
     career_list = []
     for c in mumu.get("careers", []):
+        stages_raw = c.get("stages", "[]")
+        # MumuAINovel 的 stages 可能是 JSON 字符串，需解析为 list
+        if isinstance(stages_raw, str):
+            try:
+                stages_raw = json.loads(stages_raw)
+            except Exception:
+                stages_raw = []
         career_list.append({
             "name": c.get("name", ""),
             "career_type": c.get("type", "main"),
             "description": c.get("description", ""),
             "category": c.get("category", ""),
-            "stages": c.get("stages", "[]"),
-            "max_stage": c.get("max_stage", 10),
-            "requirements": c.get("requirements", ""),
-            "special_abilities": c.get("special_abilities", ""),
+            "stages": stages_raw,
             "source": c.get("source", "ai"),
         })
 
@@ -502,6 +515,18 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
             "suggestions": p.get("suggestions", []),
         })
 
+    # character_careers（mumu 格式用 name，导入时映射为 id）
+    char_career_list = []
+    for cc in mumu.get("character_careers", []):
+        char_career_list.append({
+            "character_name": cc.get("character_name", ""),
+            "career_name": cc.get("career_name", ""),
+            "career_type": cc.get("career_type", "main"),
+            "current_stage": cc.get("current_stage", 1),
+            "stage_progress": cc.get("stage_progress", 0),
+            "source": cc.get("source", "ai"),
+        })
+
     # foreshadows（mumu 没有独立的 foreshadow 表，从 story_memories 里 is_foreshadow=1 提取）
     foreshadow_list = []
     for m in mumu.get("story_memories", []):
@@ -536,6 +561,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
         "chapters": chapter_list,
         "foreshadows": foreshadow_list,
         "careers": career_list,
+        "character_careers": char_career_list,
         "items": [],
         "locations": [],
         "memories": memory_list,
@@ -569,6 +595,7 @@ async def import_project(
 
     from app.models.career import Career
     from app.models.character import Character, CharacterRelation
+    from app.models.character_career import CharacterCareer
     from app.models.foreshadow import Foreshadow
     from app.models.item import Item
     from app.models.location import Location
@@ -705,6 +732,30 @@ async def import_project(
 
     add_all(Foreshadow, req.get("foreshadows", []))
     add_all(Career, req.get("careers", []))
+    # 角色职业关联：mumu 格式用 name，需映射为 id
+    if req.get("character_careers"):
+        career_name_map = {}
+        careers_db = (
+            (await db.execute(select(Career).where(Career.project_id == new_proj.id)))
+            .scalars().all()
+        )
+        career_name_map = {c.name: c.id for c in careers_db if c.name}
+        _seen_char_careers = set()
+        for it in req.get("character_careers", []):
+            if isinstance(it, dict):
+                char_name = it.get("character_name", "")
+                career_name = it.get("career_name", "")
+                name_key = (char_name, career_name)
+                if name_key in _seen_char_careers or not (char_name and career_name):
+                    continue
+                _seen_char_careers.add(name_key)
+                data = {k: v for k, v in it.items() if k != "id" and k != "character_name" and k != "career_name"}
+                c_obj = char_name_map.get(char_name)
+                career_id = career_name_map.get(career_name)
+                if c_obj and career_id:
+                    data["character_id"] = c_obj.id
+                    data["career_id"] = career_id
+                    db.add(CharacterCareer(project_id=new_proj.id, **data))
     add_all(Item, req.get("items", []))
     add_all(Location, req.get("locations", []))
     await db.flush()

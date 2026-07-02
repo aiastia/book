@@ -52,7 +52,7 @@ async def list_char_careers(
             career_map[c.id] = {
                 "name": c.name,
                 "career_type": c.career_type,
-                "max_stage": c.max_stage or len(stages) if isinstance(stages, list) else 10,
+                "max_stage": len(stages) if isinstance(stages, list) else 10,
                 "stages": stages if isinstance(stages, list) else [],
             }
     char_ids = list({r.character_id for r in rows})
