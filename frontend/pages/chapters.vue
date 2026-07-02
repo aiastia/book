@@ -1755,4 +1755,13 @@ async function onPlanSaved() {
   border: 6px solid transparent;
   border-top-color: #2B2B2B;
 }
+
+/* 查找替换预览 */
+.replace-preview-area { margin-top: 4px; }
+.replace-preview-header { font-size: 13px; margin-bottom: 8px; }
+.replace-preview-list { max-height: 240px; overflow-y: auto; border: 1px solid #f0f0f0; border-radius: 6px; padding: 4px; }
+.replace-preview-item { padding: 4px 8px; font-size: 13px; line-height: 1.7; border-bottom: 1px solid #fafafa; word-break: break-all; }
+.replace-preview-item:last-child { border-bottom: none; }
+.preview-ctx { color: #8c8c8c; }
+.preview-match { background: #fff3bf; color: #d48806; padding: 0 2px; border-radius: 2px; font-weight: 600; }
 </style>
