@@ -57,6 +57,7 @@ async def submit_async_task(
     title: str,
     payload: dict,
     runner: Callable,
+    timeout: int | None = None,
 ) -> int:
     """提交一个异步 AI 任务。
 
@@ -66,7 +67,8 @@ async def submit_async_task(
         task_type: 任务类型（chapter_generate / outline_new / outline_continue / characters_batch 等）
         title: 任务标题（显示在浮窗）
         payload: 任务参数（传给 runner 的数据快照）
-        runner: 异步执行函数 async def runner(task_id: int, payload: dict)
+        runner: 异步执行函数 async def runner(task_id: int, payload: dict, db: AsyncSession)
+        timeout: 任务总超时（秒），None=不设超时。默认用 settings.AI_TASK_TIMEOUT。
 
     Returns:
         task_id: 任务ID，前端用于轮询
@@ -81,7 +83,7 @@ async def submit_async_task(
         title=title,
         payload=payload,
     )
-    asyncio.create_task(_wrap_runner(task.id, runner, payload))
+    asyncio.create_task(_wrap_runner(task.id, runner, payload, timeout=timeout))
     return task.id
 
 
@@ -145,29 +147,32 @@ async def retry_task(task_id: int, user_id: int) -> int:
         title=f"重试：{title}",
         payload=payload,
     )
-    asyncio.create_task(_wrap_runner(new_task.id, runner, payload))
+    asyncio.create_task(_wrap_runner(new_task.id, runner, payload, timeout=settings.AI_TASK_TIMEOUT))
     return new_task.id
 
 
-async def _wrap_runner(task_id: int, runner: Callable, payload: dict):
+async def _wrap_runner(task_id: int, runner: Callable, payload: dict, timeout: int | None = None):
     """包装 runner：标记开始、执行、标记完成/失败。
 
     创建共享 session 贯穿整个任务生命周期，避免 TaskProgressTracker 与 runner
     各自独立 session 并发写 SQLite 导致的 database is locked 错误。
     外层 try/except 兜底 session 创建/mark_started 失败，确保不会静默丢失。
-    整体任务有超时保护（AI_TASK_TIMEOUT），超时后标记失败。
+    整体任务有超时保护（timeout），超时后标记失败；timeout=None 表示不设超时。
     """
     try:
         async with async_session() as db:
             await bg_service.mark_started(task_id, db=db)
             try:
-                await asyncio.wait_for(
-                    runner(task_id, payload, db),
-                    timeout=settings.AI_TASK_TIMEOUT,
-                )
+                if timeout is not None:
+                    await asyncio.wait_for(
+                        runner(task_id, payload, db),
+                        timeout=timeout,
+                    )
+                else:
+                    await runner(task_id, payload, db)
             except asyncio.TimeoutError:
                 tracker = bg_service.TaskProgressTracker(task_id, db=db)
-                await tracker.fail(f"任务超时（{settings.AI_TASK_TIMEOUT}秒）")
+                await tracker.fail(f"任务超时（{timeout}秒）")
             except Exception as e:
                 tracker = bg_service.TaskProgressTracker(task_id, db=db)
                 await tracker.fail(str(e)[:5000])

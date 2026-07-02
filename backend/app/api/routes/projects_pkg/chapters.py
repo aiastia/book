@@ -764,6 +764,7 @@ async def analyze_all_unanalyzed(
             "total": len(candidate_ids),
         },
         runner=_run_batch_analysis,
+        timeout=None,  # 批量分析逐章串行，不设总超时；单章分析由 AI 调用超时保护
     )
     return {
         "task_id": task_id,
