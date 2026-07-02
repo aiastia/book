@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { API } from '~/composables/api'
 import { CheckOutlined } from '@ant-design/icons-vue'
 import type { AIModelConfig } from '~/composables/api/types'
@@ -8,6 +8,8 @@ const msg = useMessage()
 const { data: models, refresh: refresh } = await useFetch<AIModelConfig[]>(() => `${useRuntimeConfig().public.apiBase}/api/ai-models`)
 const showAdd = ref(false)
 const editing = ref<any>(null)
+const isClient = ref(false) // SSR hydration 保护：这些 ref 在客户端才初始化
+onMounted(() => { isClient.value = true })
 const form = reactive({
   id: 0, name: '默认', base_url: '', api_key: '', model: 'gpt-4o',
   temperature: 85, top_p: 90, max_tokens: 8192, is_default: false,
@@ -410,8 +412,8 @@ function selectRewriteModel(id: string) {
 <template>
   <PageHeader title="AI 模型设置" back="/books" />
   <div class="page-content">
-    <!-- 顶部状态卡片 -->
-    <div class="stats-bar">
+    <!-- 顶部状态卡片（依赖 localStorage 测试结果，仅客户端渲染以避免 SSR hydration  mismatch） -->
+    <div v-if="isClient" class="stats-bar">
       <a-card hoverable class="stat-card-el">
         <a-statistic title="已配置模型" :value="stats.total" />
       </a-card>
@@ -434,7 +436,7 @@ function selectRewriteModel(id: string) {
       </template>
       <p class="section-desc">配置各 AI 模型对应的 API 密钥。点击卡片可切换默认模型。</p>
 
-      <div v-if="models && models.length" class="model-cards">
+      <div v-if="isClient && models && models.length" class="model-cards">
         <a-card
           v-for="m in models" :key="m.id"
           hoverable
@@ -475,11 +477,11 @@ function selectRewriteModel(id: string) {
           </div>
         </a-card>
       </div>
-      <a-empty v-else description="暂无模型配置，点击「添加模型」开始" />
+      <a-empty v-else-if="isClient" description="暂无模型配置，点击「添加模型」开始" />
     </a-card>
 
-    <!-- 默认模型与参数 -->
-    <a-card v-if="models && models.length" class="section-card">
+    <!-- 默认模型与参数（依赖客户端状态，避免 SSR hydration mismatch） -->
+    <a-card v-if="isClient && models && models.length" class="section-card">
       <template #title>
         <h2>默认模型与参数</h2>
       </template>
@@ -917,7 +919,7 @@ function selectRewriteModel(id: string) {
     </div>
   </a-card>
 
-  <ThinkingModesCard />
+  <ThinkingModesCard v-if="isClient" />
 </template>
 
 <style scoped>

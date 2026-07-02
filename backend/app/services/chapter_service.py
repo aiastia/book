@@ -2057,6 +2057,16 @@ class ChapterService:
 
         await _report(10, "AI 正在分析剧情结构与角色质量（并发）...")
 
+        # 读取项目级思考模式配置，让剧情分析也能响应思考模式开关
+        _thinking_modes: dict = {}
+        try:
+            from app.models.project import Project
+            _proj = await self.db.get(Project, self.project_id)
+            if _proj and isinstance(_proj.settings, dict):
+                _thinking_modes = dict(_proj.settings.get("thinking_modes", {}))
+        except Exception:
+            pass
+
         plot_ctx = {
             **_chapter_info,
             "existing_foreshadows": fs_layered,  # 完整分层伏笔（分析回收需要）
@@ -2064,6 +2074,7 @@ class ChapterService:
             "chapter_content": chapter_text,
             "user_prompt": user_prompt + "\n\n【第一步：剧情结构】请只返回以下字段：summary, key_events, foreshadows, conflicts, conflict_types, emotion_curve, emotional_curve, key_plot_points, scenes, pacing, plot_stage, dialogue_ratio, description_ratio, hooks。",
             "_analysis_step": "plot",
+            "_thinking_modes": _thinking_modes,
         }
         quality_ctx = {
             **_chapter_info,
@@ -2072,6 +2083,7 @@ class ChapterService:
             "chapter_content": chapter_text,
             "user_prompt": user_prompt + "\n\n【第二步：角色与质量】请只返回以下字段：character_states, organization_states, item_states, location_states, quality_scores, consistency_issues, suggestions。",
             "_analysis_step": "quality",
+            "_thinking_modes": _thinking_modes,
         }
 
         plot_result, quality_result = await asyncio.gather(
