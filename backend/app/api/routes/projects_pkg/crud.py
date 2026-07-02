@@ -313,7 +313,14 @@ async def export_project(
     return {
         "project": to_dict(p),
         "worlds": list_dicts(worlds),
-        "characters": list_dicts(chars),
+        "characters": [
+            {
+                c.name: getattr(it, c.name)
+                for c in it.__table__.columns
+                if c.name not in ("project_id", "created_at", "updated_at")
+            }
+            for it in chars
+        ],
         "character_relations": list_dicts(rels),
         "organizations": list_dicts(orgs),
         "organization_members": list_dicts(members),
@@ -570,6 +577,10 @@ async def import_project(
     from app.models.world import WorldSetting
 
     proj_data = req.get("project", {})
+    # Mumu 格式 description/theme → 系统 synopsis/settings
+    if not proj.get("synopsis") and proj.get("description"):
+        proj = dict(proj)
+        proj["synopsis"] = proj.pop("description")
     # 创建新项目（不沿用原 id）
     new_proj = Project(
         user_id=user.id,
@@ -588,30 +599,40 @@ async def import_project(
     db.add(new_proj)
     await db.commit()
     await db.refresh(new_proj)
+    # 补充 theme 到 settings
+    if proj_data.get("theme"):
+        settings = dict(new_proj.settings or {})
+        settings["theme"] = proj_data["theme"]
+        new_proj.settings = settings
+        await db.commit()
 
     # ID 重映射（旧角色 ID → 新角色 ID，用于关系表）
     char_id_map = {}
 
-    def add_all(Model, items, id_mapper=None):
+    def add_all(Model, items):
+        valid_cols = {c.name for c in Model.__table__.columns}
         for it in items:
             if isinstance(it, dict):
-                data = {k: v for k, v in it.items() if k != "id"}
+                data = {k: v for k, v in it.items() if k != "id" and k in valid_cols}
                 obj = Model(project_id=new_proj.id, **data)
                 db.add(obj)
-                if id_mapper and it.get("id") is not None:
-                    pass  # ID 映射在 flush 后处理
-
-        if id_mapper:
-            db.flush()
 
     # 先导入角色（关系表依赖角色 id）
     char_items = req.get("characters", [])
     old_char_ids = []
     new_chars = []
     char_name_map = {}  # name → new id（用于 mumu 格式的关系映射）
+    char_valid_cols = {c.name for c in Character.__table__.columns}
+    _role_map = {"protagonist": "主角", "supporting": "配角", "villain": "反派", "passerby": "路人"}
     for it in char_items:
         if isinstance(it, dict):
-            data = {k: v for k, v in it.items() if k != "id"}
+            data = {k: v for k, v in it.items() if k != "id" and k in char_valid_cols}
+            # mumu 格式 traits → tags
+            if "tags" not in data and "traits" in it:
+                data["tags"] = it["traits"]
+            # role_type (英文) → role (中文)
+            if "role" not in data and "role_type" in it:
+                data["role"] = _role_map.get(it["role_type"], it["role_type"])
             obj = Character(project_id=new_proj.id, **data)
             db.add(obj)
             new_chars.append((it.get("id"), obj))
