@@ -176,6 +176,37 @@ def _build_outline(
     )
 
 
+async def _fix_outline_numbering(created_objs: list, project_id: int, db: AsyncSession):
+    """确保新大纲编号不与已有章节/大纲冲突。
+
+    场景：通过 JSON 导入的小说已有 120 章正文但无大纲，AI 生成新大纲时
+    默认从第 1 章开始编号，导致与已有章节冲突、章节无法创建。
+    处理：若新大纲中有编号 <= 已有最大章节号，全部后移到 max+1 起。
+    """
+    from app.models.chapter import Chapter
+    from app.models.outline import Outline
+
+    existing_ch_nums = set(
+        (await db.execute(
+            select(Chapter.chapter_number).where(Chapter.project_id == project_id)
+        )).scalars().all()
+    )
+    existing_ol_nums = set(
+        (await db.execute(
+            select(Outline.chapter_number).where(Outline.project_id == project_id)
+        )).scalars().all()
+    )
+    all_existing = existing_ch_nums | existing_ol_nums
+    if not all_existing:
+        return
+
+    max_existing = max(all_existing)
+    if any(o.chapter_number <= max_existing for o in created_objs):
+        new_start = max_existing + 1
+        for idx, o in enumerate(created_objs):
+            o.chapter_number = new_start + idx
+
+
 def _format_foreshadows_for_outline(foreshadows: list, start_chapter: int, end_chapter: int) -> str:
     """将伏笔按目标章节分组格式化，让 AI 知道哪些必须在本次大纲中回收。
 
@@ -861,7 +892,15 @@ async def generate_outlines_async(
                 )
             )
         ).scalar()
-        is_first_outline = (existing_outlines or 0) == 0
+        existing_chapters = (
+            await db.execute(
+                select(func.count(Chapter.id)).where(
+                    Chapter.project_id == payload["project_id"]
+                )
+            )
+        ).scalar()
+        # 有章节但无大纲 = 通过导入等方式建章，不能按"第一卷"处理
+        is_first_outline = (existing_outlines or 0) == 0 and (existing_chapters or 0) == 0
 
         if is_first_outline:
             logger.info(
@@ -914,6 +953,7 @@ async def generate_outlines_async(
                     db.add(o)
                     created_objs.append(o)
                 await db.flush()
+                await _fix_outline_numbering(created_objs, payload["project_id"], db)
                 if (proj.outline_mode or "one_to_one") == "one_to_one":
                     for o in created_objs:
                         existing = (
@@ -1115,6 +1155,7 @@ async def generate_outlines_async(
                 db.add(o)
                 created_objs.append(o)
             await db.flush()
+            await _fix_outline_numbering(created_objs, payload["project_id"], db)
             if (proj.outline_mode or "one_to_one") == "one_to_one":
                 for o in created_objs:
                     existing = (
@@ -1515,7 +1556,10 @@ async def continue_outlines(
         else "暂无"
     )
 
-    current_count = max((o.chapter_number for o in outlines), default=0)
+    current_count = max(
+        max((o.chapter_number for o in outlines), default=0),
+        max((c.chapter_number for c in chapters), default=0),
+    )
     start_chapter, end_chapter = current_count + 1, current_count + req.chapter_count
 
     foreshadow_context = _format_foreshadows_for_outline(
@@ -1583,6 +1627,7 @@ async def continue_outlines(
         created_objs.append(o)
         created.append(item)
     await db.flush()
+    await _fix_outline_numbering(created_objs, project_id, db)
 
     # 1对1模式：自动为续写的大纲创建对应章节
     if (proj.outline_mode or "one_to_one") == "one_to_one":
@@ -1704,7 +1749,21 @@ async def continue_outlines_async(
             .scalars()
             .all()
         )
-        current_count = max((o.chapter_number for o in outlines), default=0)
+        chapters = (
+            (
+                await db.execute(
+                    select(Chapter)
+                    .where(Chapter.project_id == payload["project_id"])
+                    .order_by(Chapter.chapter_number)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        current_count = max(
+            max((o.chapter_number for o in outlines), default=0),
+            max((c.chapter_number for c in chapters), default=0),
+        )
         await tracker.update(
             stage="generating",
             message=f"AI 续写第{current_count + 1}到{current_count + payload['chapter_count']}章...",
@@ -1874,6 +1933,7 @@ async def continue_outlines_async(
                 db.add(o)
                 created_objs.append(o)
             await db.flush()
+            await _fix_outline_numbering(created_objs, payload["project_id"], db)
             # 1对1模式：自动为续写的大纲创建对应章节
             if (proj.outline_mode or "one_to_one") == "one_to_one":
                 for o in created_objs:
