@@ -2039,29 +2039,37 @@ class ChapterService:
                 p = min(48, 10 + _progress_content_len[0] / 50)
                 await _report(int(p), f"AI 正在分析章节剧情...（已生成 {_progress_content_len[0]} 字）")
 
-        # 构造两步分析的公共上下文
-        _common_ctx = {
+        # 构造两步分析的差异化上下文：
+        # 第一步（剧情结构）需要伏笔（分析回收），但不需要完整角色列表
+        # 第二步（角色质量）需要角色信息（追踪状态），伏笔只需标题列表做一致性检查
+        # 正文两步都需要，且 prompt cache 会命中（system prompt 前缀一致）
+        _chapter_info = {
             "chapter_number": str(chapter.chapter_number),
             "chapter_title": chapter.title,
             "word_count": str(chapter.word_count),
-            "existing_foreshadows": fs_layered,
-            "characters_info": chars_info,
-            "chapter_content": chapter_text,
         }
 
-        # ===== 并发执行两步分析（asyncio.gather）=====
-        # 第一步负责剧情结构（输出大但不依赖角色状态维度）
-        # 第二步负责角色状态 + 质量评分（输出最大，单独拆出降低截断率）
-        # 两者并发 → 总耗时 ≈ max(两步)，而非 sum(两步)
+        # 伏笔精简版（给第二步做一致性检查，只保留 id+标题+状态，去掉详细内容）
+        fs_titles = "\n".join(
+            f"(id:{f.id}) {f.title}({f.status})"
+            for f in existing_fs[:20]
+        ) if existing_fs else "无"
+
         await _report(10, "AI 正在分析剧情结构与角色质量（并发）...")
 
         plot_ctx = {
-            **_common_ctx,
+            **_chapter_info,
+            "existing_foreshadows": fs_layered,  # 完整分层伏笔（分析回收需要）
+            "characters_info": "",  # 第一步不需要角色列表
+            "chapter_content": chapter_text,
             "user_prompt": user_prompt + "\n\n【第一步：剧情结构】请只返回以下字段：summary, key_events, foreshadows, conflicts, conflict_types, emotion_curve, emotional_curve, key_plot_points, scenes, pacing, plot_stage, dialogue_ratio, description_ratio, hooks。",
             "_analysis_step": "plot",
         }
         quality_ctx = {
-            **_common_ctx,
+            **_chapter_info,
+            "existing_foreshadows": fs_titles,  # 精简伏笔标题（一致性检查够用）
+            "characters_info": chars_info,  # 角色信息（追踪状态变化需要）
+            "chapter_content": chapter_text,
             "user_prompt": user_prompt + "\n\n【第二步：角色与质量】请只返回以下字段：character_states, organization_states, item_states, location_states, quality_scores, consistency_issues, suggestions。",
             "_analysis_step": "quality",
         }
