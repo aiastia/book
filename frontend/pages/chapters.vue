@@ -1448,7 +1448,7 @@ async function onPlanSaved() {
     </a-modal>
 
     <!-- ===== 查找替换弹窗 ===== -->
-    <a-modal v-model:open="showReplace" title="查找替换" width="500px">
+    <a-modal v-model:open="showReplace" title="查找替换" width="500px" :z-index="2000" :mask="false" wrapClassName="replace-modal">
       <a-form layout="vertical">
         <a-form-item label="查找">
           <a-input v-model:value="replaceForm.find" placeholder="输入要查找的内容" @input="countMatches" allow-clear />
