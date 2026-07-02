@@ -195,15 +195,14 @@ def _parse_percent(value: str) -> float:
 def _combine_prosody(char_params: VoiceParams, scene_params: VoiceParams) -> Tuple[str, str, Optional[str]]:
     """
     角色参数 + 场景参数相加,返回合并后的 (rate, pitch, volume)。
-    ★ rate/pitch 叠加后 clamp 到 [-15%, +15%],防止中文 TTS 不自然。
+    ★ rate/pitch 叠加后 clamp 到 [-12%, +12%] / [-8%, +8%],
+       超出范围中文 TTS 会不自然(参考:有声书推荐 rate -5%~+5%)。
     """
     rate = _parse_percent(char_params.rate) + _parse_percent(scene_params.rate)
     pitch = _parse_percent(char_params.pitch) + _parse_percent(scene_params.pitch)
-    # clamp: 中文 TTS 超出 ±15% 会很不自然
-    rate = max(-15, min(15, rate))
-    pitch = max(-10, min(10, pitch))
+    rate = max(-12, min(12, rate))
+    pitch = max(-8, min(8, pitch))
     volume = char_params.volume or scene_params.volume or None
-    # 格式化
     def fmt(v: float) -> str:
         v = round(v)
         if v == 0:
@@ -255,6 +254,33 @@ def _escape_xml_text(text: str) -> str:
     text = text.replace("<", "&lt;")
     text = text.replace(">", "&gt;")
     return text
+
+
+def _insert_internal_breaks(text: str) -> str:
+    """
+    在句子内部的标点后插入 <break> 标签,让朗读节奏更自然。
+    
+    参考 Azure TTS 最佳实践:
+      逗号(，)后 200ms — 正常停顿
+      分号(；)后 300ms — 稍长停顿
+      枚举号(、)后 150ms — 短停顿
+    
+    句子末尾的标点(。！？)不在此处理,由行尾的 <break> 负责。
+    """
+    _PUNCT_BREAKS = {
+        '，': '200ms',
+        '、': '150ms',
+        '；': '300ms',
+    }
+    parts: List[str] = []
+    last_end = 0
+    for i, ch in enumerate(text):
+        if ch in _PUNCT_BREAKS:
+            parts.append(_escape_xml_text(text[last_end:i]))
+            parts.append(f'<break time="{_PUNCT_BREAKS[ch]}"/>')
+            last_end = i + 1
+    parts.append(_escape_xml_text(text[last_end:]))
+    return ''.join(parts)
 
 
 def _build_prosody_tag(rate: str, pitch: str, volume: Optional[str], inner: str) -> str:
@@ -403,13 +429,13 @@ class SSMLBuilder:
                 _flush()
 
             # ── 构建内容行 ──
-            # 结构: [emphasis?] + prosody(rate/pitch[/volume]) + 正文
-            escaped = _escape_xml_text(instr.text)
+            # 结构: [emphasis?] + prosody(rate/pitch[/volume]) + 正文(含内部标点停顿)
+            inner_text = _insert_internal_breaks(instr.text)
 
             if emphasis:
-                inner = f'<emphasis level="{emphasis}">{escaped}</emphasis>'
+                inner = f'<emphasis level="{emphasis}">{inner_text}</emphasis>'
             else:
-                inner = escaped
+                inner = inner_text
 
             line = _build_prosody_tag(rate, pitch, volume, inner)
             current_lines.append(line)

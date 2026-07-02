@@ -20,29 +20,29 @@ Narrator:                # 旁白(默认叙述者)
   volume: null
 
 Messenger:               # 信使/路人对话
-  rate: "-8%"
-  pitch: "-2%"
-  style: null
-  emphasis: "none"
-  volume: null
-
-KailanWeak:              # 凯兰 - 病弱态(第一卷)
-  rate: "-10%"
-  pitch: "-3%"
-  style: null
-  emphasis: "none"
-  volume: null
-
-KailanCalm:              # 凯兰 - 冷静/伪装态
   rate: "-5%"
   pitch: "-1%"
   style: null
   emphasis: "none"
   volume: null
 
-Servant:                 # 仆人/老仆
-  rate: "-5%"
+KailanWeak:              # 凯兰 - 病弱态(第一卷)
+  rate: "-8%"
   pitch: "-2%"
+  style: null
+  emphasis: "none"
+  volume: null
+
+KailanCalm:              # 凯兰 - 冷静/伪装态
+  rate: "-4%"
+  pitch: "-1%"
+  style: null
+  emphasis: "none"
+  volume: null
+
+Servant:                 # 仆人/老仆
+  rate: "-4%"
+  pitch: "-1%"
   style: "gentle"
   emphasis: "none"
   volume: null

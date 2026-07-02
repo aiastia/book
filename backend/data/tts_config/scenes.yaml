@@ -30,8 +30,8 @@ battle:
   pause: "150ms"
 
 chase:
-  rate: "+8%"
-  pitch: "+2%"
+  rate: "+5%"
+  pitch: "+1%"
   pause: "120ms"
 
 sad:
