@@ -202,17 +202,36 @@ _NOT_A_BUT_B_RE = re.compile(
 
 
 def _scan_not_a_but_b(text: str, existing_hits: list[dict]) -> list[dict]:
-    """扫描「不是A，而是B」句式。全章 > 4 次时，第 5 次及以后标记为需改写。"""
+    """扫描「不是A，而是B」句式。
+
+    策略：
+    - 逗号分隔的（不是A，是B）：无论长短都改（这是典型 AI 套路）
+    - 句号分隔的（不是A。是B）：只有 A 和 B 都 ≤4 字时才改（短词对仗的 AI 节奏腔）。
+      长句的句号分隔是角色口语停顿（不是摄政王。是个法师），是好写法。
+    - 含破折号/引号的：跳过（角色对话被动作打断）
+    """
     matches = []
     for m in _NOT_A_BUT_B_RE.finditer(text):
         start, end = m.start(), m.end()
         sentence = text[start:end].strip()
-        # 跳过含破折号/引号的（角色口语停顿+动作描写打断，是好写法）
+        # 跳过含破折号/引号的（角色口语停顿+动作描写打断）
         if "——" in sentence or "\u2014" in sentence:
             continue
-        if any(q in sentence for q in ['"', '"', '\u2018', '\u2019', '「', '」']):
+        if any(q in sentence for q in ['\u201c', '\u201d', '\u2018', '\u2019', '\u300c', '\u300d']):
             continue
-        # "不是A是B" 句式天然较短，降低最小长度阈值
+
+        # 提取 A 和 B 的文本长度
+        # 匹配格式：不是A[，,。](而)?是B  或  不是A而是B
+        inner = m.group()
+        # 找到 A 和 B 的分界点
+        sep_match = re.search(r'不是(.+?)(?:[，,。]\s*(?:而)?是|而是)(.+)', inner, re.DOTALL)
+        if sep_match:
+            a_text = sep_match.group(1).strip()
+            b_text = sep_match.group(2).strip()
+            # 句号分隔时，只有短词对仗才改（A≤4 且 B≤4）
+            if '。' in inner and (len(a_text) > 4 or len(b_text) > 4):
+                continue
+
         if len(sentence) >= 6:
             matches.append({"start": start, "end": end, "sentence": sentence})
 
