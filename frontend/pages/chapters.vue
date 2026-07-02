@@ -54,7 +54,7 @@ if (import.meta.client) {
 // ===== 查找替换 =====
 const showReplace = ref(false)
 const replaceForm = reactive({ find: '', replace: '', matchCount: 0 })
-const replaceLoading = ref(false)
+const replacePreviews = ref<Array<{ before: string; match: string; after: string }>>([])
 
 function openReplace() {
   // 如果编辑器有选中文本，预填到查找框
@@ -64,17 +64,29 @@ function openReplace() {
   }
   replaceForm.replace = ''
   replaceForm.matchCount = 0
+  replacePreviews.value = []
   showReplace.value = true
 }
 
 function countMatches() {
+  replacePreviews.value = []
   if (!replaceForm.find || !editingContent.value) { replaceForm.matchCount = 0; return }
   const text = editingContent.value
   const target = replaceForm.find
+  const previews: Array<{ before: string; match: string; after: string }> = []
   let count = 0
   let pos = 0
-  while ((pos = text.indexOf(target, pos)) !== -1) { count++; pos += target.length }
+  while ((pos = text.indexOf(target, pos)) !== -1) {
+    count++
+    // 提取前后各 15 字上下文
+    const ctxBefore = text.substring(Math.max(0, pos - 15), pos)
+    const ctxAfter = text.substring(pos + target.length, Math.min(text.length, pos + target.length + 15))
+    previews.push({ before: ctxBefore, match: target, after: ctxAfter })
+    pos += target.length
+  }
   replaceForm.matchCount = count
+  // 最多预览 50 条，防止太多
+  replacePreviews.value = previews.slice(0, 50)
 }
 
 async function doReplaceAll() {
@@ -1448,7 +1460,7 @@ async function onPlanSaved() {
     </a-modal>
 
     <!-- ===== 查找替换弹窗 ===== -->
-    <a-modal v-model:open="showReplace" title="查找替换" width="500px" :z-index="2000" :mask="false" wrapClassName="replace-modal">
+    <a-modal v-model:open="showReplace" title="查找替换" width="600px" :z-index="2000" :mask="false" wrapClassName="replace-modal">
       <a-form layout="vertical">
         <a-form-item label="查找">
           <a-input v-model:value="replaceForm.find" placeholder="输入要查找的内容" @input="countMatches" allow-clear />
@@ -1456,13 +1468,25 @@ async function onPlanSaved() {
         <a-form-item label="替换为">
           <a-input v-model:value="replaceForm.replace" placeholder="输入替换后的内容" allow-clear />
         </a-form-item>
-        <div v-if="replaceForm.find" style="font-size:13px;color:#8c8c8c;margin-bottom:8px;">
-          {{ replaceForm.matchCount > 0 ? `找到 ${replaceForm.matchCount} 处匹配` : '未找到匹配内容' }}
-        </div>
       </a-form>
+      <!-- 匹配预览 -->
+      <div v-if="replaceForm.find" class="replace-preview-area">
+        <div class="replace-preview-header" @click="countMatches" style="cursor:pointer">
+          <span v-if="replaceForm.matchCount > 0" style="color:#52c41a;font-weight:600;">✅ 找到 {{ replaceForm.matchCount }} 处匹配</span>
+          <span v-else style="color:#ff4d4f;">❌ 未找到匹配内容</span>
+          <span v-if="replaceForm.matchCount > 50" style="color:#999;font-size:12px;margin-left:8px;">（仅显示前 50 条）</span>
+        </div>
+        <div v-if="replacePreviews.length" class="replace-preview-list">
+          <div v-for="(p, i) in replacePreviews" :key="i" class="replace-preview-item">
+            <span class="preview-ctx">{{ p.before }}</span>
+            <span class="preview-match">{{ p.match }}</span>
+            <span class="preview-ctx">{{ p.after }}</span>
+          </div>
+        </div>
+      </div>
       <template #footer>
         <a-button @click="showReplace = false">关闭</a-button>
-        <a-button :disabled="!replaceForm.find" @click="countMatches">统计</a-button>
+        <a-button :disabled="!replaceForm.find" @click="countMatches">🔍 统计预览</a-button>
         <a-button type="primary" :disabled="!replaceForm.find || replaceForm.matchCount === 0" @click="doReplaceAll">
           全部替换（{{ replaceForm.matchCount }}）
         </a-button>
