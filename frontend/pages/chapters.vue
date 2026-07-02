@@ -51,6 +51,42 @@ if (import.meta.client) {
   if (s) targetWords.value = Number(s)
 }
 
+// ===== 查找替换 =====
+const showReplace = ref(false)
+const replaceForm = reactive({ find: '', replace: '', matchCount: 0 })
+const replaceLoading = ref(false)
+
+function openReplace() {
+  // 如果编辑器有选中文本，预填到查找框
+  const ta = document.querySelector('.ch-editor textarea') as HTMLTextAreaElement | null
+  if (ta && ta.selectionStart !== ta.selectionEnd) {
+    replaceForm.find = ta.value.substring(ta.selectionStart, ta.selectionEnd)
+  }
+  replaceForm.replace = ''
+  replaceForm.matchCount = 0
+  showReplace.value = true
+}
+
+function countMatches() {
+  if (!replaceForm.find || !editingContent.value) { replaceForm.matchCount = 0; return }
+  const text = editingContent.value
+  const target = replaceForm.find
+  let count = 0
+  let pos = 0
+  while ((pos = text.indexOf(target, pos)) !== -1) { count++; pos += target.length }
+  replaceForm.matchCount = count
+}
+
+function doReplaceAll() {
+  if (!replaceForm.find) return
+  countMatches()
+  if (replaceForm.matchCount === 0) { msg.warning('未找到匹配内容'); return }
+  if (!await msg.confirm(`确认将 ${replaceForm.matchCount} 处「${replaceForm.find}」替换为「${replaceForm.replace}」？`)) return
+  editingContent.value = editingContent.value.split(replaceForm.find).join(replaceForm.replace)
+  msg.success(`已替换 ${replaceForm.matchCount} 处`)
+  countMatches()
+}
+
 // ===== 选中文字浮动工具栏 =====
 const selPopup = reactive({ visible: false, top: 0, left: 0, text: '', start: 0, end: 0 })
 const selRewriting = ref(false)
@@ -1247,6 +1283,7 @@ async function onPlanSaved() {
             <template #fallback><a-button disabled>✏️ 重写/润色</a-button></template>
           </ClientOnly>
           <a-button :loading="denoising" @click="openDenoise">去AI味</a-button>
+          <a-button @click="openReplace">🔄 替换</a-button>
           <a-button :loading="ttsLoading" @click="onTts" title="将本章转成语音合成 SSML">🔊 转语音</a-button>
           <a-button @click="onTtsView" title="查看本章最近一次语音转换结果">📋 查看SSML</a-button>
           <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
@@ -1407,6 +1444,28 @@ async function onPlanSaved() {
       <template #footer>
         <a-button @click="manualCreateOpen = false">取消</a-button>
         <a-button type="primary" @click="onManualCreate">创建</a-button>
+      </template>
+    </a-modal>
+
+    <!-- ===== 查找替换弹窗 ===== -->
+    <a-modal v-model:open="showReplace" title="查找替换" width="500px">
+      <a-form layout="vertical">
+        <a-form-item label="查找">
+          <a-input v-model:value="replaceForm.find" placeholder="输入要查找的内容" @input="countMatches" allow-clear />
+        </a-form-item>
+        <a-form-item label="替换为">
+          <a-input v-model:value="replaceForm.replace" placeholder="输入替换后的内容" allow-clear />
+        </a-form-item>
+        <div v-if="replaceForm.find" style="font-size:13px;color:#8c8c8c;margin-bottom:8px;">
+          {{ replaceForm.matchCount > 0 ? `找到 ${replaceForm.matchCount} 处匹配` : '未找到匹配内容' }}
+        </div>
+      </a-form>
+      <template #footer>
+        <a-button @click="showReplace = false">关闭</a-button>
+        <a-button :disabled="!replaceForm.find" @click="countMatches">统计</a-button>
+        <a-button type="primary" :disabled="!replaceForm.find || replaceForm.matchCount === 0" @click="doReplaceAll">
+          全部替换（{{ replaceForm.matchCount }}）
+        </a-button>
       </template>
     </a-modal>
 
