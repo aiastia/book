@@ -1,16 +1,12 @@
 """
 SSML Builder —— 把 Director 指令 + 配置拼成 Azure 合法 SSML。
 
-这是纯程序模块,不调 AI。所有 prosody 值来自 YAML 配置,不接受任意字符串,
-从根本上杜绝 +1dB 这类非法值。
+设计原则（针对中文小说朗读）:
+  1. express-as 管场景氛围 —— 段级,由 scene_change 决定,同一场景内不切换
+  2. prosody 管角色特征 —— 句级,rate/pitch 微调,幅度保守(中文大幅变调会不自然)
+  3. emphasis 管关键时刻 —— 句级,只有情绪强烈的台词才加,旁白不加
 
-核心职责:
-  1. 遇到 SceneChange 更新当前场景预设(场景持续生效直到下一次切换)
-  2. 对每个 DirectorLine:角色 prosody + 场景 prosody 叠加 → 生成 <prosody>(平铺,不嵌套)
-  3. 根据 emotion 映射生成 <mstts:express-as> 情感标签
-  4. 根据 emphasis 生成 <emphasis> 强调标签
-  5. 句后插入 <break>(优先 pause_after,否则用场景默认 pause)
-  6. 累计纯文本长度,超过上限则切断开新的 <speak> 外壳
+三者分层,不互相覆盖,避免"层层叠加"导致的虚假感。
 """
 import os
 import re
@@ -25,142 +21,146 @@ from .models import DirectorLine, SceneChange, VoiceParams, DirectorOutput
 # Azure TTS 单次请求建议的文本字符数上限
 MAX_TEXT_CHARS_PER_REQUEST = 3000
 
-# 默认配置文件路径:放在墨语 data/tts_config/ 下
+# 默认配置文件路径
 _CONFIG_DIR = os.path.join(settings.DATA_DIR, "tts_config")
 _DEFAULT_CHARACTERS_PATH = os.path.join(_CONFIG_DIR, "characters.yaml")
 _DEFAULT_SCENES_PATH = os.path.join(_CONFIG_DIR, "scenes.yaml")
 
-# ---- 内置默认配置（首次运行或 Docker 环境自动写入）----
-_DEFAULT_CHARACTERS_YAML = """\
-# 角色映射配置 ─ speaker(由 Director 分析产出)→ 语音参数
-# 字段说明: rate/pitch 用百分比, style 是 express-as 的 style
-#   emphasis: 强调级别(strong/moderate/none/reduced), 覆盖角色默认
-#   volume:   prosody volume(soft/loud/x-loud/medium 等)
-Narrator:
-  rate: "-2%"
-  pitch: "0%"
-  style: "calm"
-  emphasis: "none"
-  volume: null
-Messenger:
-  rate: "-12%"
-  pitch: "-6%"
-  style: "calm"
-  emphasis: "none"
-  volume: null
-default:
-  rate: "0%"
-  pitch: "0%"
-  style: "calm"
-  emphasis: "none"
-  volume: null
-"""
-
-_DEFAULT_SCENES_YAML = """\
-# 场景预设 ─ 场景名 → 语音参数 + 默认停顿
-# 场景会持续生效:遇到一个 scene_change 后,后续所有句子叠加该场景的参数,
-# 直到下一个 scene_change 出现。
-# 角色的 rate/pitch 和场景的 rate/pitch 会叠加(Builder 负责相加)。
-# pause 是该场景下句子之间的默认停顿(当 DirectorLine 没指定 pause_after 时使用)。
-# emotion_style: 场景下情绪→express-as style 的覆盖映射(可选)
-calm:
-  rate: "-2%"
-  pitch: "0%"
-  pause: "600ms"
-  emotion_style:
-    愤怒: "angry"
-    悲伤: "sad"
-    温柔: "gentle"
-    惊恐: "fearful"
-night:
-  rate: "-5%"
-  pitch: "0%"
-  pause: "600ms"
-  emotion_style:
-    愤怒: "angry"
-    悲伤: "sad"
-suspense:
-  rate: "-3%"
-  pitch: "0%"
-  pause: "700ms"
-  emotion_style:
-    惊恐: "fearful"
-battle:
-  rate: "+8%"
-  pitch: "0%"
-  pause: "150ms"
-  emotion_style:
-    愤怒: "angry"
-chase:
-  rate: "+10%"
-  pitch: "+3%"
-  pause: "120ms"
-sad:
-  rate: "-10%"
-  pitch: "-3%"
-  pause: "800ms"
-  emotion_style:
-    悲伤: "depressed"
-comedy:
-  rate: "+5%"
-  pitch: "+5%"
-  pause: "400ms"
-  emotion_style:
-    开心: "cheerful"
-default:
-  rate: "0%"
-  pitch: "0%"
-  pause: "500ms"
-"""
-
-
-# ===== 情绪 → Azure express-as style 映射 =====
-# 这是全局兜底映射(场景级 emotion_style 优先,然后到这里)
-_EMOTION_STYLE_MAP: Dict[str, str] = {
-    # 中文情绪标签 → Azure express-as style
-    "愤怒": "angry",
-    "生气": "angry",
-    "暴怒": "angry",
-    "悲伤": "sad",
-    "哀伤": "sad",
-    "痛苦": "sad",
-    "沮丧": "depressed",
-    "消沉": "depressed",
-    "温柔": "gentle",
-    "亲切": "gentle",
-    "和蔼": "gentle",
-    "慈爱": "affectionate",
-    "宠爱": "affectionate",
-    "惊恐": "fearful",
-    "害怕": "fearful",
-    "恐惧": "fearful",
-    "严肃": "serious",
-    "郑重": "serious",
-    "平静": "serene",
-    "安宁": "serene",
-    "冷静": "calm",
-    "开心": "cheerful",
-    "高兴": "cheerful",
-    "兴奋": "cheerful",
-    "同情": "empathetic",
-    "怜悯": "empathetic",
-    "嫉妒": "envious",
-    "羡慕": "envious",
-    "尴尬": "embarrassed",
-    "窘迫": "embarrassed",
-    "冷淡": None,          # 不加 express-as
-    "冷漠": None,
-    "虚弱": "depressed",
-    "慵懒": "depressed",
+# ===== 场景 → express-as style 映射（内置,不放在 YAML 里避免用户配错）=====
+# 每个场景名直接对应一个 Azure express-as style,切换时变更,持续生效。
+# 中文 Azure  voices 支持的 style: calm, cheerful, sad, angry, fearful,
+#   serious, depressed, gentle, empathetic, serene, affectionate, embarrassed, envious
+_SCENE_STYLE_MAP: Dict[str, str] = {
+    "calm":    "calm",
+    "night":   "calm",
+    "suspense": "serious",
+    "battle":  "angry",
+    "chase":   "serious",
+    "sad":     "sad",
+    "comedy":  "cheerful",
+    "default": "calm",
 }
 
-# Azure express-as style 白名单(用于校验,防止输出非法值)
+# ===== 情绪 → 默认强调级别 映射 =====
+# 根据中文情绪标签的强度,决定 emphasis 级别。
+# "无强调"的情绪(平静/温柔/冷淡等)不输出 emphasis 标签,避免每句都加。
+_EMOTION_EMPHASIS_MAP: Dict[str, Optional[str]] = {
+    # strong — 强烈情绪,必须强调
+    "愤怒": "strong", "暴怒": "strong", "狂怒": "strong",
+    "惊恐": "strong", "恐惧": "strong", "尖叫": "strong",
+    # moderate — 中等情绪,适度强调
+    "悲伤": "moderate", "哀伤": "moderate", "痛苦": "moderate",
+    "严肃": "moderate", "郑重": "moderate",
+    "沮丧": "moderate", "消沉": "moderate",
+    "温柔": "moderate", "亲切": "moderate", "和蔼": "moderate",
+    "同情": "moderate", "怜悯": "moderate",
+    "兴奋": "moderate", "高兴": "moderate",
+    "尴尬": "moderate", "窘迫": "moderate",
+    "虚弱": "moderate", "慵懒": "moderate",
+    # none — 平静/中性情绪,不加 emphasis
+    "平静": None, "安宁": None, "冷静": None,
+    "冷淡": None, "冷漠": None, "客观": None,
+    "慈爱": None, "宠爱": None, "羡慕": None, "嫉妒": None,
+}
+
+# Azure express-as style 白名单
 _VALID_EXPRESS_AS_STYLES = {
     "chat", "customerservice", "cheerful", "sad", "angry",
     "fearful", "serious", "newscast", "depressed", "gentle",
     "poetry-reading", "lyrical", "empathetic", "calm",
     "affectionate", "embarrassed", "envious", "serene",
 }
+
+# ---- 内置默认配置（首次运行或 Docker 环境自动写入）----
+_DEFAULT_CHARACTERS_YAML = """\
+# 角色映射配置 ─ speaker(由 Director 分析产出)→ 语音参数
+# 字段说明:
+#   rate/pitch: prosody 属性值,统一用百分比(避免 dB 坑)。
+#               ★ 注意:中文 TTS 的 rate 建议在 -10% ~ +10% 之间,
+#               超出范围会听起来不自然(太慢像卡壳,太快像机关枪)。
+#   style:      express-as 的 style,如 calm/gentle/sad。
+#               ★ 注意:段级 style 由 scene_change 决定,角色的 style
+#               仅在场景没有默认 style 时作为兜底。
+#   emphasis:   强调级别(strong/moderate/none), 覆盖角色默认。
+#               默认 none,只有特定角色(如战斗狂)才设为 strong。
+#   volume:     prosody volume,如 soft/loud/x-loud/medium。
+Narrator:
+  rate: "-2%"
+  pitch: "0%"
+  style: null
+  emphasis: "none"
+  volume: null
+Messenger:
+  rate: "-8%"
+  pitch: "-2%"
+  style: null
+  emphasis: "none"
+  volume: null
+KailanWeak:
+  rate: "-10%"
+  pitch: "-3%"
+  style: null
+  emphasis: "none"
+  volume: null
+KailanCalm:
+  rate: "-5%"
+  pitch: "-1%"
+  style: null
+  emphasis: "none"
+  volume: null
+Servant:
+  rate: "-5%"
+  pitch: "-2%"
+  style: "gentle"
+  emphasis: "none"
+  volume: null
+default:
+  rate: "0%"
+  pitch: "0%"
+  style: null
+  emphasis: "none"
+  volume: null
+"""
+
+_DEFAULT_SCENES_YAML = """\
+# 场景预设 ─ 场景名(Director 的 scene_change 产出)→ 语音参数 + 默认停顿
+# ★ express-as style 由 scene_change 自动决定(见 _SCENE_STYLE_MAP),
+#   不需要在这里配置 style。
+# 角色的 rate/pitch 和场景的 rate/pitch 会叠加(Builder 负责相加)。
+# pause 是该场景下句子之间的默认停顿(当 DirectorLine 没指定 pause_after 时使用)。
+calm:
+  rate: "-2%"
+  pitch: "0%"
+  pause: "600ms"
+night:
+  rate: "-3%"
+  pitch: "0%"
+  pause: "600ms"
+suspense:
+  rate: "-3%"
+  pitch: "0%"
+  pause: "700ms"
+battle:
+  rate: "+5%"
+  pitch: "+2%"
+  pause: "150ms"
+chase:
+  rate: "+8%"
+  pitch: "+2%"
+  pause: "120ms"
+sad:
+  rate: "-5%"
+  pitch: "-2%"
+  pause: "800ms"
+comedy:
+  rate: "+3%"
+  pitch: "+3%"
+  pause: "400ms"
+default:
+  rate: "0%"
+  pitch: "0%"
+  pause: "500ms"
+"""
 
 
 def _ensure_default_configs():
@@ -185,27 +185,25 @@ def _load_yaml_params(path: str) -> Dict[str, VoiceParams]:
 
 
 def _parse_percent(value: str) -> float:
-    """
-    解析百分比字符串为浮点数。
-    支持: "-10%" / "+5%" / "0%" / "-3"
-    不支持 dB / Hz(那些不该出现在配置里,若出现说明配置写错了)。
-    """
+    """解析百分比字符串为浮点数。"""
     value = value.strip()
     if value.endswith("%"):
         return float(value[:-1])
-    # 纯数字也按百分比处理(配置里 "0" 视为 0%)
     return float(value)
 
 
 def _combine_prosody(char_params: VoiceParams, scene_params: VoiceParams) -> Tuple[str, str, Optional[str]]:
     """
     角色参数 + 场景参数相加,返回合并后的 (rate, pitch, volume)。
-    volume 优先用角色的,角色的为 None 则用场景的。
+    ★ rate/pitch 叠加后 clamp 到 [-15%, +15%],防止中文 TTS 不自然。
     """
     rate = _parse_percent(char_params.rate) + _parse_percent(scene_params.rate)
     pitch = _parse_percent(char_params.pitch) + _parse_percent(scene_params.pitch)
+    # clamp: 中文 TTS 超出 ±15% 会很不自然
+    rate = max(-15, min(15, rate))
+    pitch = max(-10, min(10, pitch))
     volume = char_params.volume or scene_params.volume or None
-    # 格式化:整数不带小数点,负零归零
+    # 格式化
     def fmt(v: float) -> str:
         v = round(v)
         if v == 0:
@@ -215,38 +213,44 @@ def _combine_prosody(char_params: VoiceParams, scene_params: VoiceParams) -> Tup
     return fmt(rate), fmt(pitch), volume
 
 
-def _resolve_emotion_style(emotion: Optional[str], scene_params: VoiceParams) -> Optional[str]:
+def _resolve_scene_style(scene: Optional[str]) -> Optional[str]:
     """
-    根据情绪标签解析出 Azure express-as style。
+    根据场景名决定 express-as style。
+    只认内置映射,不依赖 YAML 配置,避免用户配出非法值。
+    """
+    if not scene:
+        return _SCENE_STYLE_MAP.get("default", "calm")
+    return _SCENE_STYLE_MAP.get(scene, _SCENE_STYLE_MAP.get("default", "calm"))
+
+
+def _resolve_emphasis(emotion: Optional[str], director_emphasis: Optional[str]) -> Optional[str]:
+    """
+    决定这一行是否需要 emphasis,以及级别。
 
     优先级:
-      1. 场景配置的 emotion_style 映射(场景级覆盖)
-      2. 全局 _EMOTION_STYLE_MAP 兜底
-      3. 返回 None(不加 express-as)
+      1. Director 显式指定的 emphasis（strong/moderate/none/reduced）
+      2. 根据 emotion 标签推断（情绪强烈→strong, 中等→moderate, 平静→none）
+      3. 默认 none
 
-    返回的 style 会经过白名单校验,非法值被丢弃。
+    ★ 原则:旁白(无情绪)一律不加 emphasis;只有台词+强烈情绪才加 strong。
     """
-    if not emotion:
+    _valid = {"strong", "moderate", "reduced"}
+    # 1) Director 显式指定
+    if director_emphasis and director_emphasis in _valid:
+        return director_emphasis
+    if director_emphasis == "none":
         return None
-
-    # 1) 场景级 emotion_style 优先
-    scene_emotion_map = getattr(scene_params, 'emotion_style', None)
-    if scene_emotion_map and isinstance(scene_emotion_map, dict):
-        style = scene_emotion_map.get(emotion)
-        if style and style in _VALID_EXPRESS_AS_STYLES:
-            return style
-
-    # 2) 全局映射
-    style = _EMOTION_STYLE_MAP.get(emotion)
-    if style and style in _VALID_EXPRESS_AS_STYLES:
-        return style
-
-    # 3) 未知情绪:不匹配 express-as
+    # 2) 根据情绪推断
+    if emotion:
+        inferred = _EMOTION_EMPHASIS_MAP.get(emotion)
+        if inferred and inferred in _valid:
+            return inferred
+    # 3) 默认不加
     return None
 
 
 def _escape_xml_text(text: str) -> str:
-    """转义正文里的 XML 特殊字符(不碰我们自己加的标签)。"""
+    """转义正文里的 XML 特殊字符。"""
     text = text.replace("&", "&amp;")
     text = text.replace("<", "&lt;")
     text = text.replace(">", "&gt;")
@@ -264,7 +268,7 @@ def _build_prosody_tag(rate: str, pitch: str, volume: Optional[str], inner: str)
 def _build_speak_shell(inner_content: str, voice: str, style: Optional[str]) -> str:
     """
     用 <speak><voice><express-as> 外壳包裹内容。
-    命名空间声明放在 <speak> 根元素上(Azure 要求)。
+    ★ express-as 放在段级,同一段内所有行共享同一个 style。
     """
     parts = [
         '<speak version="1.0" '
@@ -273,21 +277,17 @@ def _build_speak_shell(inner_content: str, voice: str, style: Optional[str]) -> 
         f'xml:lang="zh-CN">',
         f'<voice name="{voice}">',
     ]
-    if style:
+    if style and style in _VALID_EXPRESS_AS_STYLES:
         parts.append(f'<mstts:express-as style="{style}">')
     parts.append(inner_content)
-    if style:
+    if style and style in _VALID_EXPRESS_AS_STYLES:
         parts.append('</mstts:express-as>')
     parts.extend(['</voice>', '</speak>'])
     return "\n".join(parts)
 
 
 def _is_valid_prosody_output(ssml: str) -> Optional[str]:
-    """
-    兜底校验:扫一遍生成的 SSML,确认没有 dB/Hz 等非法后缀。
-    正常情况下配置正确时永远不会触发;触发说明配置写错了。
-    返回错误提示,或 None。
-    """
+    """兜底校验:确认 prosody 属性值合法。"""
     for match in re.finditer(r'<prosody\b[^>]*>', ssml, re.IGNORECASE):
         tag = match.group(0)
         for attr in ("volume", "rate", "pitch"):
@@ -295,7 +295,6 @@ def _is_valid_prosody_output(ssml: str) -> Optional[str]:
             if not am:
                 continue
             value = am.group(1)
-            # 合法:百分比 / 预设词(这里我们只用百分比)
             if re.fullmatch(r"[+-]?\d+%", value):
                 continue
             if value in ("default", "medium", "silent", "x-soft", "soft",
@@ -310,9 +309,10 @@ class SSMLBuilder:
     """
     把 DirectorOutput + 配置 → SSML 字符串列表。
 
-    用法:
-        builder = SSMLBuilder(characters_path, scenes_path)
-        ssml_parts = builder.build(director_output, voice="zh-CN-XiaoxiaoNeural")
+    分层架构:
+      - express-as: 段级,由 scene_change 决定,不随每行切换
+      - prosody:    句级,角色+场景 rate/pitch 叠加(±15% clamp)
+      - emphasis:   句级,仅情绪强烈时出现
     """
 
     def __init__(
@@ -324,7 +324,6 @@ class SSMLBuilder:
     ):
         self.characters = _load_yaml_params(characters_path)
         self.scenes = _load_yaml_params(scenes_path)
-        # 允许调用方覆盖配置(API 请求里传入自定义角色/场景)
         if characters_override:
             for name, params in characters_override.items():
                 self.characters[name] = VoiceParams(**params)
@@ -355,92 +354,66 @@ class SSMLBuilder:
             max_chars: 单个 SSML 的纯文本上限,超出则分段
 
         Returns:
-            SSML 字符串列表(通常 1 个,长文本可能多个)
+            SSML 字符串列表
         """
         current_scene: Optional[str] = None
-        current_style: Optional[str] = None       # 段级 express-as style(场景决定)
-        segments: List[str] = []                   # 每个 segment 是一段已拼接的内容
-        current_lines: List[str] = []             # 当前 segment 的内容行
-        current_chars: int = 0                    # 当前 segment 的纯文本字数
+        current_scene_style: Optional[str] = None  # 当前场景的 express-as style
+        segments: List[str] = []
+        current_lines: List[str] = []
+        current_chars: int = 0
 
         def _flush():
-            """把当前累积的内容包进 <speak> 外壳,存入 segments。"""
             nonlocal current_lines, current_chars
             if current_lines:
                 inner = "\n".join(current_lines)
-                ssml = _build_speak_shell(inner, voice, current_style)
+                ssml = _build_speak_shell(inner, voice, current_scene_style)
                 segments.append(ssml)
                 current_lines = []
                 current_chars = 0
 
         for instr in instructions:
-            # 场景切换
+            # ── 场景切换: flush 当前段,用新场景的 style 开新段 ──
             if isinstance(instr, SceneChange):
                 current_scene = instr.scene_change
+                current_scene_style = _resolve_scene_style(current_scene)
                 scene_params = self._get_scene_params(current_scene)
-                # 场景的 style 决定段级 express-as
-                if scene_params.style:
-                    current_style = scene_params.style
-                # 场景切换本身加一个稍长的停顿(用场景的 pause)
-                if scene_params.pause and current_lines:
+                # flush 已有内容(场景切换意味着氛围变了,需要新的 express-as)
+                if current_lines:
+                    _flush()
+                # 场景切换时加一个停顿(用场景的 pause)
+                if scene_params.pause:
                     current_lines.append(f'<break time="{scene_params.pause}"/>')
                 continue
 
             if not isinstance(instr, DirectorLine):
                 continue
 
-            # 计算这一行的 prosody:角色参数 + 场景参数叠加
+            # ── 计算 prosody: 角色参数 + 场景参数叠加 ──
             char_params = self._get_char_params(instr.speaker)
             scene_params = self._get_scene_params(current_scene)
             rate, pitch, volume = _combine_prosody(char_params, scene_params)
 
-            # style 优先用角色的(角色个性 > 场景氛围),角色没指定则用场景的
-            line_style = char_params.style or scene_params.style or current_style
-            current_style = line_style
+            # ── 决定 emphasis ──
+            emphasis = _resolve_emphasis(instr.emotion, instr.emphasis)
 
-            # emphasis: Director 产出优先,角色配置仅在为有效强调级别(非 none)时覆盖
-            _valid_emphasis = {"strong", "moderate", "none", "reduced"}
-            char_emphasis = char_params.emphasis if (char_params.emphasis and char_params.emphasis != "none") else None
-            instr_emphasis = instr.emphasis if instr.emphasis in _valid_emphasis else None
-            line_emphasis = char_emphasis or instr_emphasis or None
-
-            # emotion → express-as style(逐句级,可覆盖段级)
-            # 场景 emotion_style 优先,然后全局映射
-            line_emotion_style = _resolve_emotion_style(instr.emotion, scene_params)
-            # 逐句 style 只在有情绪映射时覆盖段级,避免无意义切换
-            effective_style = line_emotion_style or line_style
-
-            # 纯文本字数统计(用于分段)
+            # ── 分段检查 ──
             text_chars = len(instr.text)
             if current_chars + text_chars > max_chars and current_lines:
                 _flush()
 
-            # 构建内容行:可选 <emphasis> + <prosody>(含 volume) + 正文
+            # ── 构建内容行 ──
+            # 结构: [emphasis?] + prosody(rate/pitch[/volume]) + 正文
             escaped = _escape_xml_text(instr.text)
 
-            # emphasis 包裹
-            if line_emphasis and line_emphasis != "none":
-                content_with_emphasis = f'<emphasis level="{line_emphasis}">{escaped}</emphasis>'
+            if emphasis:
+                inner = f'<emphasis level="{emphasis}">{escaped}</emphasis>'
             else:
-                content_with_emphasis = escaped
+                inner = escaped
 
-            # prosody 包裹(含 volume)
-            line = _build_prosody_tag(rate, pitch, volume, content_with_emphasis)
+            line = _build_prosody_tag(rate, pitch, volume, inner)
+            current_lines.append(line)
 
-            # 如果逐句 style 与段级不同,加一层 express-as
-            if effective_style and effective_style != current_style:
-                # 切换段级 style 为当前行的 style
-                current_style = effective_style
-                # 需要 flush 当前段(因为 express-as 在段级外壳),然后在新段里放这一行
-                # 但为了避免频繁 flush,我们用另一种方式:在同一段内不加嵌套 express-as,
-                # 而是把当前段 flush,然后以新 style 开始新段
-                _flush()
-                current_style = effective_style
-                current_lines.append(line)
-            else:
-                current_lines.append(line)
-
-            # 句后停顿
+            # ── 句后停顿 ──
             if instr.pause_after is not None:
                 pause_ms = f"{instr.pause_after}ms"
             else:
@@ -453,10 +426,9 @@ class SSMLBuilder:
         _flush()
 
         if not segments:
-            # 空输入,返回一个最小有效 SSML
             return [_build_speak_shell("", voice, "calm")]
 
-        # 兜底校验所有输出(理论上不会触发,触发说明配置有误)
+        # 兜底校验
         for ssml in segments:
             err = _is_valid_prosody_output(ssml)
             if err:

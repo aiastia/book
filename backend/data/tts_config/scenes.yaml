@@ -1,72 +1,50 @@
 # 场景预设 ─ 场景名(Director 的 scene_change 产出)→ 语音参数 + 默认停顿
 #
-# 场景会持续生效:遇到一个 scene_change 后,后续所有句子叠加该场景的参数,
-# 直到下一个 scene_change 出现。
+# ★ express-as style 由 scene_change 自动映射(见 builder._SCENE_STYLE_MAP):
+#   calm→calm, night→calm, suspense→serious, battle→angry,
+#   chase→serious, sad→sad, comedy→cheerful
+#   不需要在这里配置 style。
 #
-# 角色的 rate/pitch 和场景的 rate/pitch 会叠加(Builder 负责相加)。
+# 角色的 rate/pitch 和场景的 rate/pitch 会叠加(Builder 负责相加),
+# 叠加后 clamp 到 [-15%, +15%] 防止中文 TTS 不自然。
 # pause 是该场景下句子之间的默认停顿(当 DirectorLine 没指定 pause_after 时使用)。
-# emotion_style: 该场景下情绪→express-as style 的覆盖映射(可选,不填则用全局映射)。
-#   格式: {中文情绪标签: Azure express-as style 名称}
 
-calm:                    # 安静/日常
+calm:
   rate: "-2%"
   pitch: "0%"
   pause: "600ms"
-  emotion_style:
-    愤怒: "angry"
-    悲伤: "sad"
-    温柔: "gentle"
-    惊恐: "fearful"
 
-night:                   # 夜晚/沉寂
-  rate: "-5%"
+night:
+  rate: "-3%"
   pitch: "0%"
   pause: "600ms"
-  emotion_style:
-    愤怒: "angry"
-    悲伤: "sad"
-    惊恐: "fearful"
 
-suspense:                # 悬念/紧张
+suspense:
   rate: "-3%"
   pitch: "0%"
   pause: "700ms"
-  emotion_style:
-    惊恐: "fearful"
-    紧张: "serious"
 
-battle:                  # 战斗/激烈
-  rate: "+8%"
-  pitch: "0%"
-  pause: "150ms"
-  emotion_style:
-    愤怒: "angry"
-    惊恐: "fearful"
-
-chase:                   # 追逐/急促
-  rate: "+10%"
-  pitch: "+3%"
-  pause: "120ms"
-  emotion_style:
-    惊恐: "fearful"
-
-sad:                     # 悲伤/沉重
-  rate: "-10%"
-  pitch: "-3%"
-  pause: "800ms"
-  emotion_style:
-    悲伤: "depressed"
-    温柔: "empathetic"
-
-comedy:                  # 轻松/喜剧
+battle:
   rate: "+5%"
-  pitch: "+5%"
-  pause: "400ms"
-  emotion_style:
-    开心: "cheerful"
-    尴尬: "embarrassed"
+  pitch: "+2%"
+  pause: "150ms"
 
-default:                 # 兜底
+chase:
+  rate: "+8%"
+  pitch: "+2%"
+  pause: "120ms"
+
+sad:
+  rate: "-5%"
+  pitch: "-2%"
+  pause: "800ms"
+
+comedy:
+  rate: "+3%"
+  pitch: "+3%"
+  pause: "400ms"
+
+default:
   rate: "0%"
   pitch: "0%"
   pause: "500ms"

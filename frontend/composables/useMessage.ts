@@ -31,6 +31,7 @@ export function useMessage() {
         content: text,
         okText: '确认',
         cancelText: '取消',
+        zIndex: 2001,
         onOk: () => resolve(true),
         onCancel: () => resolve(false),
       })

@@ -73,6 +73,10 @@ A) 台词/旁白行:
 B) 场景切换(只在氛围明显变化时插入,不要每句都标):
 {"scene_change": "场景代号"}
 
+【架构说明】系统会自动根据 scene_change 选择语音风格,你不需要在每句里指定风格。
+你的 emotion 字段用于推断这一句是否需要强调(强调会让这句读得更重、更有力)。
+你的 emphasis 字段可以覆盖自动推断的结果。
+
 【speaker 字段】
 从以下选择(如果都不合适,用 Narrator):
 - Narrator:旁白、叙述
@@ -109,12 +113,16 @@ B) 场景切换(只在氛围明显变化时插入,不要每句都标):
 
 【emphasis 字段(重要)】
 根据情绪强度决定强调级别,从以下选择:
-- strong: 强烈情绪(愤怒咒骂、惊恐尖叫、极度悲伤) → 加 <emphasis level="strong">
-- moderate: 中等情绪(温柔叮嘱、严肃警告、悲伤叹息) → 加 <emphasis level="moderate">
+- strong: 强烈情绪(愤怒咒骂、惊恐尖叫、极度悲伤、严肃命令) → 加 <emphasis level="strong">
+- moderate: 中等情绪(温柔叮嘱、悲伤叹息、严肃警告) → 加 <emphasis level="moderate">
 - none: 无明显情绪或平静叙述 → 不加 emphasis 标签
 - reduced: 旁白中快速带过的次要信息 → 加 <emphasis level="reduced">
 
-注意:只有情绪强烈的台词才用 strong;旁白和对话默认 moderate 或 none;不要每句都加 strong。
+★ 强调原则:
+  - 只有情绪强烈的台词才用 strong;旁白一律不加 emphasis。
+  - 温柔、平静、冷静的情绪用 moderate 或 none,不要用 strong。
+  - 同一段对话里最多 1-2 句用 strong,不要每句都 strong。
+  - 如果不确定,写 "none" 比乱加 strong 更好。
 
 【pause_after】
 这一句读完后的停顿(毫秒)。参考:
