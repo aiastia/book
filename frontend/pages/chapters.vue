@@ -5,6 +5,7 @@ import { useProject } from '~/composables/useProject'
 import { fetchWritingStyles, fetchSkills, fetchRemoteModels } from '~/composables/useChapterStream'
 import ChapterReaderModal from '~/components/ChapterReaderModal.vue'
 import RewriteSuggestionModal from '~/components/RewriteSuggestionModal.vue'
+import ScreenplayPanel from '~/components/ScreenplayPanel.vue'
 import type { Chapter, Outline, Project } from '~/composables/api/types'
 
 useHead({ title: '故事章节 — 墨语' })
@@ -208,6 +209,17 @@ function openAnalysis(c: any) {
   analysisPanelChapter.value = c
   nextTick(() => {
     analysisPanelRef.value?.open()
+  })
+}
+
+// ===== 分镜剧本 =====
+const screenplayPanelRef = ref<any>(null)
+const screenplayPanelChapter = ref<any>(null)
+
+function openScreenplay(c: any) {
+  screenplayPanelChapter.value = c
+  nextTick(() => {
+    screenplayPanelRef.value?.open()
   })
 }
 
@@ -441,6 +453,8 @@ onTaskCompleted('chapter', async () => {
 // 续写/生成大纲也会自动创建 draft 章节，需要同步刷新章节列表
 onTaskCompleted('outline_continue', () => { refreshList() })
 onTaskCompleted('outline_new', () => { refreshList() })
+// 分镜生成完成后刷新（ScreenplayPanel 内部也会自刷新，这里作为页面级兜底）
+onTaskCompleted('chapter_screenplay', () => {})
 onTaskCompleted('init', () => {
   // 项目初始化完成后也刷新（大纲/章节可能变化）
   setTimeout(() => refreshList(), 2000)
@@ -1305,6 +1319,7 @@ async function onPlanSaved() {
           <a-button @click="openReplace">🔄 替换</a-button>
           <a-button :loading="ttsLoading" @click="onTts" title="将本章转成语音合成 SSML">🔊 转语音</a-button>
           <a-button @click="onTtsView" title="查看本章最近一次语音转换结果">📋 查看SSML</a-button>
+          <a-button @click="openScreenplay(editing)" title="生成分镜剧本（小说→视频中间层）">🎬 分镜</a-button>
           <a-button type="primary" :loading="saving" @click="onSave">💾 保存</a-button>
           <a-button @click="clearContent">清空本章</a-button>
           <a-button danger @click="clearChapterAndAfter">🧹 清空本章及后续</a-button>
@@ -1598,6 +1613,14 @@ async function onPlanSaved() {
       :chapter-number="analysisPanelChapter.chapter_number"
       :quality-score="analysisPanelChapter.quality_score"
       @rewrite-with-suggestions="onRewriteWithSuggestions"
+    />
+
+    <!-- ===== 分镜剧本面板 ===== -->
+    <ScreenplayPanel
+      v-if="screenplayPanelChapter"
+      ref="screenplayPanelRef"
+      :chapter-id="screenplayPanelChapter.id"
+      :chapter-number="screenplayPanelChapter.chapter_number"
     />
 
     <!-- ===== 章节规划编辑器 ===== -->

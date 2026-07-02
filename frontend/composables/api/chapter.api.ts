@@ -86,4 +86,10 @@ export const chapterApi = {
   // 章节转语音（Director 分析 → SSML）
   tts: (chapterId: number, body?: { voice?: string; chunk_size?: number; model?: string }, id?: number) =>
     post(`/projects/${P(id)}/chapters/${chapterId}/tts`, body || {}),
+
+  // 分镜剧本（Director → Screenwriter → 分镜 JSON）
+  generateScreenplay: (chapterId: number, body?: { chunk_size?: number; model?: string }, id?: number) =>
+    post(`/projects/${P(id)}/chapters/${chapterId}/screenplay`, body || {}),
+  getScreenplay: (chapterId: number, id?: number) =>
+    get(`/projects/${P(id)}/chapters/${chapterId}/screenplay`),
 }
