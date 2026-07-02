@@ -136,86 +136,107 @@ def _fix_unclosed_strings(text: str) -> str:
     """
     修复 AI 输出中未闭合的 JSON 字符串值。
 
-    常见场景：AI 在字符串内写入裸换行或对话内容，导致字符串未正常闭合，
-    后续的 JSON 结构（}、,、"key"）被吞入字符串值内。
+    常见场景：AI 在字符串值内写入裸换行或对话内容（含引号），导致字符串未正常闭合，
+    后续的 JSON 结构被吞入字符串值内，_fix_json_string_values 会因此 corrupt 后续所有 key。
 
-    策略：追踪引号边界，当检测到字符串未闭合时（遇到结构性元素而仍在字符串内），
-    在适当位置插入闭合引号。
+    策略：扫描字符串边界，找到第一个未闭合字符串的起始位置，
+    截断到该位置之前（保留前面所有合法的 JSON），
+    让后续的 _extract_json_by_brackets 提取合法子串。
     """
     if not text or '"' not in text:
         return text
 
-    result = []
-    i = 0
+    # 第一遍扫描：跟踪引号边界，找到第一个未闭合字符串的起始位置
     in_string = False
-    fixed = 0
+    escape_next = False
+    unclosed_start = -1  # 未闭合字符串的起始引号位置
 
-    while i < len(text):
-        c = text[i]
-
-        # 处理转义序列
-        if c == '\\' and in_string and i + 1 < len(text):
-            result.append(c)
-            result.append(text[i + 1])
-            i += 2
+    for i, c in enumerate(text):
+        if escape_next:
+            escape_next = False
             continue
-
-        # 处理引号
+        if c == '\\' and in_string:
+            escape_next = True
+            continue
         if c == '"':
             if in_string:
-                # 检查引号后是否跟结构性字符（, } ]），确认这是结束引号
+                # 检查是否是真正的结束引号（后面跟结构性字符）
                 j = i + 1
-                while j < len(text) and text[j] in ' \t':
+                while j < len(text) and text[j] in ' \t\n\r':
                     j += 1
                 if j < len(text) and text[j] in (',', '}', ']', '\n', '\r'):
                     in_string = False
-                    result.append(c)
-                    i += 1
-                    continue
-                # 引号后是内容字符（中文、字母等），这是内容引号
-                result.append('\\')
-                result.append('"')
-                fixed += 1
-                i += 1
-                continue
+                # 否则是内容引号，继续在字符串内
             else:
-                # 进入字符串
                 in_string = True
-                result.append(c)
-                i += 1
+                # 如果之前已经发现未闭合字符串，不再更新（取第一个）
+                if unclosed_start < 0:
+                    unclosed_start = i
+
+    if not in_string:
+        # 所有字符串都正确闭合，无需截断
+        return text
+
+    # 有未闭合的字符串：截断到未闭合字符串的起始位置之前
+    # 同时，在截断点之前找到最后一个合法的 } 或 ]，
+    # 确保截断到一个完整的 JSON 结构
+    if unclosed_start > 0:
+        # 在未闭合字符串之前，找最后一个结构闭合符
+        last_valid_close = -1
+        depth = 0
+        in_str = False
+        esc = False
+        for i, c in enumerate(text):
+            if i >= unclosed_start:
+                break
+            if esc:
+                esc = False
                 continue
-
-        # 在字符串内遇到结构性元素 → 字符串未闭合，先闭合它
-        if in_string and c in ('}', ']', ','):
-            # 向前看：如果是 }, 或 ], 或 , 后跟 "key" → 确定是结构元素
-            k = i + 1
-            while k < len(text) and text[k] in ' \t\n\r':
-                k += 1
-            if k >= len(text) or text[k] in ('}', ']', '"'):
-                result.append('"')
-                fixed += 1
-                in_string = False
-                # 不消耗当前字符，重新处理
+            if c == '\\' and in_str:
+                esc = True
                 continue
+            if c == '"':
+                if not in_str:
+                    in_str = True
+                else:
+                    j = i + 1
+                    while j < len(text) and text[j] in ' \t\n\r':
+                        j += 1
+                    if j < len(text) and text[j] in (',', '}', ']'):
+                        in_str = False
+                continue
+            if in_str:
+                continue
+            if c in ('{', '['):
+                depth += 1
+            elif c == '}':
+                if depth > 0:
+                    depth -= 1
+                    last_valid_close = i
+            elif c == ']':
+                if depth > 0:
+                    last_valid_close = i
 
-        if in_string:
-            result.append(c)
-            i += 1
-            continue
+        if last_valid_close > 0:
+            truncated = text[:last_valid_close + 1]
+            logger.info(f"✅ 检测到未闭合字符串（起始位置 {unclosed_start}），截断到最后一个合法闭合符（位置 {last_valid_close}）")
+            return truncated
 
-        # 字符串外：正常处理
-        result.append(c)
-        i += 1
+    # 找不到安全的截断点，截断到未闭合字符串起始位置之前
+    if unclosed_start > 0:
+        # 向前找到前一个结构性分隔符位置
+        truncate_at = unclosed_start
+        # 尝试找到前一个 , 或 } 来截断到完整结构
+        for j in range(unclosed_start - 1, -1, -1):
+            if text[j] in (',', '}', ']'):
+                truncate_at = j + 1
+                break
+        truncated = text[:truncate_at].rstrip()
+        logger.info(f"✅ 检测到未闭合字符串（起始位置 {unclosed_start}），截断到位置 {truncate_at}")
+        return truncated
 
-    # 如果字符串仍未闭合（文本末尾），补上闭合引号
-    if in_string:
-        result.append('"')
-        fixed += 1
-
-    if fixed > 0:
-        logger.info(f"✅ 关闭了{fixed}个未闭合的JSON字符串")
-
-    return ''.join(result)
+    # 找不到安全的截断点，返回原始文本
+    return text
 
 
 def _fix_json_string_values(text: str) -> str:
@@ -726,10 +747,16 @@ def clean_json_response(text: str) -> str:
         if len(text) != original_length:
             logger.debug(f"   移除markdown后长度: {len(text)}")
 
-        # 全局替换中文引号为转义的 ASCII 引号（\"），确保它们在 JSON 字符串值内合法
-        # 必须在 _fix_json_string_values 之前执行，避免引号混淆导致解析失败
+        # 修复 AI 的引号格式混乱：
+        # 1. 先将 AI 用 \" 包裹的 key（如 \"summary\"）恢复为正常 "summary"
+        #    —— 用占位符保护，避免后续引号替换干扰
+        _escaped_ph = "\x00ESC\x00"
+        text = text.replace('\\"', _escaped_ph)
+        # 2. 中文引号 "" → \"（在字符串值内合法的转义形式）
         for ch, mapped in _QUOTE_MAP.items():
             text = text.replace(ch, r'\"')
+        # 3. 恢复占位符为 "
+        text = text.replace(_escaped_ph, '"')
 
         # 快速路径：原始文本用 json5 直接解析（json5 容错强，跳过清洗避免误伤）
         try:
@@ -739,7 +766,7 @@ def clean_json_response(text: str) -> str:
         except Exception:
             pass
 
-        # 修复0：关闭未闭合的字符串（在 _fix_json_string_values 之前处理）
+        # 修复0：截断未闭合的字符串（在 _fix_json_string_values 之前处理）
         # AI 常见：字符串值内有裸换行导致字符串未闭合，后续 JSON 结构被吞入字符串
         text = _fix_unclosed_strings(text)
 
