@@ -18,7 +18,7 @@ const outlineTotal = ref(0)
 
 // 同步分页参数到 URL（仅客户端）
 watch([currentPage, pageSize], () => {
-  if (process.client) {
+  if (import.meta.client) {
     router.replace({
       query: {
         ...route.query,
@@ -74,7 +74,7 @@ async function onManualCreate() {
 }
 async function submitManualCreate() {
   try {
-    await API.outline.create(currentProjectId.value, {
+    await API.outline.create({
       chapter_number: manualForm.chapter_number,
       title: manualForm.title,
       summary: manualForm.summary,

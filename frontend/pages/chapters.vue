@@ -271,7 +271,7 @@ const pageSizeOptions = ['20', '50', '100']
 
 // 同步分页参数到 URL（仅客户端）
 watch([currentPage, pageSize, searchKeyword], () => {
-  if (process.client) {
+  if (import.meta.client) {
     router.replace({
       query: {
         ...route.query,
