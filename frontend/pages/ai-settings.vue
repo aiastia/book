@@ -802,11 +802,7 @@ function selectRewriteModel(id: string) {
               <a-select-option value='{"thinking":{"type":"disabled"}}'>关闭思考：thinking disabled</a-select-option>
               <a-select-option value='{"thinking":{"type":"enabled"}}'>开启思考：thinking enabled</a-select-option>
             </a-select-opt-group>
-            <a-select-opt-group label="Step / 阶跃星辰">
-              <a-select-option value='{"enable_thinking":false}'>关闭思考：enable_thinking false</a-select-option>
-              <a-select-option value='{"enable_thinking":true}'>开启思考：enable_thinking true</a-select-option>
-            </a-select-opt-group>
-            <a-select-opt-group label="通义千问 / Kimi / Moonshot">
+            <a-select-opt-group label="Step / 通义千问 / Kimi / Moonshot">
               <a-select-option value='{"enable_thinking":false}'>关闭思考：enable_thinking false</a-select-option>
               <a-select-option value='{"enable_thinking":true}'>开启思考：enable_thinking true</a-select-option>
             </a-select-opt-group>
