@@ -282,6 +282,7 @@ async def run_batch_generation(task_id: int):
         last_err = ""
         attempt = 0
         max_attempts = max_retries + 1
+        ch_num = chapter_id  # 兜底：章节号未取到时用 ID（避免日志显示异常）
         while attempt < max_attempts:
             try:
                 async with async_session() as chap_db:
@@ -395,7 +396,7 @@ async def run_batch_generation(task_id: int):
                     break
             except Exception as e:
                 last_err = str(e)
-                logger.warning(f"[batch] 第{chapter_id}章异常（尝试 {attempt + 1}）: {e}")
+                logger.warning(f"[batch] 第{ch_num}章异常（尝试 {attempt + 1}）: {e}")
                 attempt += 1
                 delay = 2
                 if any(k in last_err.lower() for k in ("504", "gateway", "time-out")):
@@ -426,12 +427,12 @@ async def run_batch_generation(task_id: int):
                     )
                 )
                 await fdb.commit()
-            logger.error(f"[batch] 第{chapter_id}章最终失败: {last_err}")
+            logger.error(f"[batch] 第{ch_num}章最终失败: {last_err}")
             # 任一章失败 → 终止后续（对标 MuMu 不跳过）
             await _mark_status(
                 task_id,
                 "failed",
-                f"第{chapter_id}章生成失败: {last_err[:200]}",
+                f"第{ch_num}章生成失败: {last_err[:200]}",
                 error=last_err[:2000],
             )
             return
