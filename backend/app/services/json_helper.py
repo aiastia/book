@@ -726,6 +726,11 @@ def clean_json_response(text: str) -> str:
         if len(text) != original_length:
             logger.debug(f"   移除markdown后长度: {len(text)}")
 
+        # 全局替换中文引号为转义的 ASCII 引号（\"），确保它们在 JSON 字符串值内合法
+        # 必须在 _fix_json_string_values 之前执行，避免引号混淆导致解析失败
+        for ch, mapped in _QUOTE_MAP.items():
+            text = text.replace(ch, r'\"')
+
         # 快速路径：原始文本用 json5 直接解析（json5 容错强，跳过清洗避免误伤）
         try:
             _try_loads(text)
