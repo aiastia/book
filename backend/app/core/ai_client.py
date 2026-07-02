@@ -490,10 +490,10 @@ class AIClient:
                 for tc in (message.tool_calls or [])
             ]
             # 推理模型可能把正文输出到 reasoning_content 而非 content
+            raw_reasoning_content = getattr(message, "reasoning_content", None) or ""
             if not content:
-                rc = getattr(message, "reasoning_content", None)
-                if rc:
-                    content = rc
+                if raw_reasoning_content:
+                    content = raw_reasoning_content
                     model_name = kwargs.get("model", "")
                     logger.info(
                         f"[AI] 模型 {model_name} 输出到 reasoning_content 而非 content，"
@@ -536,6 +536,7 @@ class AIClient:
                 "tool_calls": tool_calls,
                 "finish_reason": resp.choices[0].finish_reason if resp.choices else None,
                 "reasoning_tokens": reasoning_tokens,
+                "reasoning_content_len": len(raw_reasoning_content),
             }
         except Exception as e:
             return {

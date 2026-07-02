@@ -136,10 +136,15 @@ async function onTest(id: number) {
   try {
     const r = await API.ai.testModel(id)
     const parts = [`✅ ${r.reply}`]
-    if (r.reasoning_tokens > 0) {
-      parts.push(`⚠️ reasoning_tokens=${r.reasoning_tokens}（thinking 可能未关闭）`)
+    // 双重信号判断推理状态
+    if (r.thinking_active) {
+      parts.push(`⚠️ 推理仍在运行！`)
+      const reasons: string[] = []
+      if (r.reasoning_tokens > 0) reasons.push(`reasoning_tokens=${r.reasoning_tokens}`)
+      if (r.reasoning_content_len > 0) reasons.push(`思维过程=${r.reasoning_content_len}字`)
+      parts.push(`（${reasons.join('，')}）`)
     } else {
-      parts.push(`🧠 thinking 已关闭（reasoning_tokens=0）`)
+      parts.push(`🧢 推理已关闭（reasoning_tokens=0，无思维过程）`)
     }
     parts.push(`mode=${r.thinking_mode || 'auto'}`)
     testResult.value[id] = parts.join(' | ')

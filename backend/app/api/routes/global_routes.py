@@ -253,13 +253,21 @@ async def test_ai_model(
     )
     if resp.get("error"):
         raise HTTPException(400, f"连接失败: {resp['error']}")
+    # 双重信号判断推理是否开启：
+    # ① reasoning_tokens > 0（部分提供商在 completion_tokens_details 里返回）
+    # ② reasoning_content 有内容（部分提供商在 message.reasoning_content 里返回思维过程）
+    reasoning_tokens = resp.get("reasoning_tokens", 0)
+    reasoning_content_len = resp.get("reasoning_content_len", 0)
+    thinking_active = reasoning_tokens > 0 or reasoning_content_len > 0
     return {
         "ok": True,
         "reply": resp["content"][:50],
         "model": resp["model"],
         "thinking_mode": getattr(m, "thinking_mode", None) or "auto",
         "thinking_params": getattr(m, "thinking_params", None) or "",
-        "reasoning_tokens": resp.get("reasoning_tokens", 0),
+        "reasoning_tokens": reasoning_tokens,
+        "reasoning_content_len": reasoning_content_len,
+        "thinking_active": thinking_active,
         "output_tokens": resp.get("output_tokens", 0),
         "finish_reason": resp.get("finish_reason"),
     }
