@@ -18,6 +18,7 @@ from app.models.story_memory import StoryMemory
 from app.models.world import WorldSetting
 from app.services.chapter_context_service import ChapterContextService
 from app.services.foreshadow_service import ForeshadowService
+from app.services.json_helper import loads_json
 from app.skills.engine import SkillEngine
 
 # 分析报告评分维度展示顺序（含番茄平台维度，自动支持任意维度）
@@ -1468,7 +1469,7 @@ class ChapterService:
                     s = await self._query_chapter_summary(n)
                     if s:
                         try:
-                            data = json.loads(s) if isinstance(s, str) else s
+                            data = loads_json(s) if isinstance(s, str) else s
                             title = data.get("title", "")
                             summary = data.get("summary", "")
                             # 如果没有分析摘要，用章节正文前 400 字兜底（原 150 字只能看到开头，

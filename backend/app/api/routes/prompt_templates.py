@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.prompt_template import PromptTemplate, PromptVersion
+from app.services.json_helper import loads_json
 
 router = APIRouter(prefix="/api/prompt-templates", tags=["提示词模板"])
 
@@ -375,7 +376,7 @@ async def batch_import(
         variables = tpl.get("variables", [])
         if isinstance(variables, str):
             try:
-                variables = json.loads(variables)
+                variables = loads_json(variables)
             except (json.JSONDecodeError, TypeError):
                 variables = []
         config = tpl.get("config", {})

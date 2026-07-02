@@ -18,6 +18,9 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
     - DSML: <｜DSML｜tool_calls>...<invoke name="x">...<parameter ...>...</invoke>...</｜DSML｜tool_calls>
     - 通用 XML: <function:name>...<parameter:name>value
     """
+    # 局部 import 避免与 json_helper 下游形成模块加载期循环依赖
+    from app.services.json_helper import loads_json
+
     if "<|tool_call_begin|>" in content:
         tool_calls = []
         for match in re.finditer(
@@ -28,7 +31,7 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
             name = match.group(1).strip()
             args_str = match.group(2).strip()
             try:
-                args = json.loads(args_str)
+                args = loads_json(args_str)
             except Exception:
                 args = {}
             # 去掉 functions. 前缀（如 functions.query_location → query_location）
@@ -66,7 +69,7 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
                 pval = pm.group(2).strip()
                 # 尝试解析 JSON，否则保留字符串
                 try:
-                    pval = json.loads(pval)
+                    pval = loads_json(pval)
                 except Exception:
                     pass
                 args[pname] = pval
@@ -100,7 +103,7 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
                 pname = pm.group(1).strip()
                 pval = pm.group(2).strip()
                 try:
-                    pval = json.loads(pval)
+                    pval = loads_json(pval)
                 except Exception:
                     pass
                 args[pname] = pval
@@ -126,7 +129,7 @@ def _try_parse_inline_tool_calls(content: str) -> list | None:
                 pname = pm.group(1).strip()
                 pval = pm.group(2).strip()
                 try:
-                    pval = json.loads(pval)
+                    pval = loads_json(pval)
                 except Exception:
                     pass
                 args[pname] = pval
@@ -1119,7 +1122,9 @@ class AIClient:
                 func = tc.get("function", {})
                 tool_name = func.get("name", "")
                 try:
-                    args = json.loads(func.get("arguments", "{}"))
+                    # 局部 import 避免循环依赖；loads_json 兼容 json5 等容错格式
+                    from app.services.json_helper import loads_json
+                    args = loads_json(func.get("arguments", "{}"))
                 except Exception:
                     args = {}
 

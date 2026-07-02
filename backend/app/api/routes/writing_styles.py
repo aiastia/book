@@ -14,6 +14,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.project import Project
 from app.models.writing_style import WritingStyle
+from app.services.json_helper import loads_json
 
 router = APIRouter(prefix="/api/writing-styles", tags=["写作风格"])
 
@@ -314,11 +315,9 @@ async def analyze_style(
     traits = result.get("json") or {}
     if not traits:
         # 极少数模型可能把 JSON 放在 content 里，兜底解析
-        import json as _json
-
         content = result.get("content") or ""
         try:
-            traits = _json.loads(content)
+            traits = loads_json(content)
         except Exception:
             raise HTTPException(500, "文风提炼返回格式异常，请重试或更换模型") from None
 

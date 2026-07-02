@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 
 from app.api.routes.projects_pkg.base import *
+from app.services.json_helper import loads_json
 
 router = make_router()
 
@@ -364,8 +365,6 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
       - plot_analysis: [{chapter_title, plot_stage, conflict_level, ...}]
       - writing_styles: [{name, style_type, prompt_content}]
     """
-    import json as _json
-
     # project
     proj = mumu.get("project", {}) or {}
 
@@ -435,7 +434,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
         struct = o.get("structure")
         if isinstance(struct, str):
             try:
-                struct = _json.loads(struct)
+                struct = loads_json(struct)
             except Exception:
                 struct = None
         outline_list.append({
@@ -467,7 +466,7 @@ def _convert_mumu_to_native(mumu: dict) -> dict:
         # MumuAINovel 的 stages 可能是 JSON 字符串，需解析为 list
         if isinstance(stages_raw, str):
             try:
-                stages_raw = json.loads(stages_raw)
+                stages_raw = loads_json(stages_raw)
             except Exception:
                 stages_raw = []
         career_list.append({

@@ -27,14 +27,12 @@ except ImportError:
     HAS_JSON5 = False
 
 
-# json5 为主解析器，标准 json 为降级
+# json5 为主解析器（JSON5 是 JSON 的超集，凡 json 能解析的 json5 均可解析，
+# 故无需保留标准 json 降级）
 def _try_loads(text: str) -> Any:
-    """尝试解析 JSON 文本：json5 优先，标准 json 降级。返回解析结果，失败抛异常。"""
+    """尝试解析 JSON 文本：json5 为主。返回解析结果，失败抛异常。"""
     if HAS_JSON5:
-        try:
-            return json5.loads(text)
-        except Exception:
-            pass
+        return json5.loads(text)
     return json.loads(text)
 
 
@@ -1093,21 +1091,14 @@ def parse_json(text: str) -> dict | list:
     """解析 JSON，json5 为主解析器（兼容无引号 key、单引号、尾逗号等 AI 常见格式）。"""
     cleaned = clean_json_response(text)
 
-    # json5 做主解析器（JSON 超集，兼容性更好）
-    if HAS_JSON5:
-        try:
-            return json5.loads(cleaned)
-        except Exception as e5:
-            logger.warning(f"json5 解析失败: {e5}，降级到标准 json")
-
-    # 降级：标准 json（对合法 JSON 更高效）
+    # json5 做主解析器（JSON 超集，兼容性更好；超集关系下无需标准 json 降级）
     try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, Exception) as e:
-        logger.error(f"❌ parse_json 完全失败: {e}")
+        return _try_loads(cleaned)
+    except Exception as e:
+        logger.error(f"❌ parse_json 失败: {e}")
         logger.error(f"   原始文本长度: {len(text) if text else 0}，清洗后: {len(cleaned) if cleaned else 0}")
         logger.warning(f"   [JSON失败内容预览 前500字] {safe_preview(cleaned, 500)}")
-        raise json.JSONDecodeError("JSON解析失败（json5和标准json均失败）", cleaned, 0) from None
+        raise json.JSONDecodeError("JSON解析失败", cleaned, 0) from None
 
 
 def loads_json(text: str) -> Any:
@@ -1115,31 +1106,19 @@ def loads_json(text: str) -> Any:
     json.loads 的容错替代品，可直接替换 json.loads()。
     json5 为主解析器（兼容无引号 key、单引号、尾逗号等 AI 常见格式）。
     """
-    # json5 做主解析器（JSON 超集，兼容性更好）
-    if HAS_JSON5:
+    # json5 做主解析器（JSON 超集，兼容性更好；超集关系下无需标准 json 降级）
+    try:
+        return _try_loads(text)
+    except Exception:
+        pass
+
+    # 兜底修复无效转义序列后重试 json5
+    fixed_text = _fix_all_invalid_escapes(text)
+    if fixed_text != text:
         try:
-            return json5.loads(text)
+            return _try_loads(fixed_text)
         except Exception:
             pass
 
-    # 降级：标准 json
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, Exception):
-        pass
-
-    # 兜底修复无效转义序列后重试
-    fixed_text = _fix_all_invalid_escapes(text)
-    if fixed_text != text:
-        if HAS_JSON5:
-            try:
-                return json5.loads(fixed_text)
-            except Exception:
-                pass
-        try:
-            return json.loads(fixed_text)
-        except (json.JSONDecodeError, Exception):
-            pass
-
     # 最终失败，抛出标准异常
-    raise json.JSONDecodeError("JSON解析失败（json5和标准json均失败）", text, 0)
+    raise json.JSONDecodeError("JSON解析失败", text, 0)
