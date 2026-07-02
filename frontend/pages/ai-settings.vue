@@ -775,10 +775,10 @@ function selectRewriteModel(id: string) {
       <a-form-item>
         <span style="font-size:14px;color:#333;">Thinking 模式</span>
         <div style="font-size:12px;color:#999;margin-top:4px;">
-          控制模型是否进行深度思考。GLM-5 系列默认开启，不关闭会消耗全部 token 导致无输出。
+          控制模型是否进行深度思考。关闭可避免推理模型消耗全部 token 导致无输出。
         </div>
         <a-select v-model:value="form.thinking_mode" size="small" style="width:200px;margin-top:8px">
-          <a-select-option value="auto">自动（GLM-5 自动关闭，其他不变）</a-select-option>
+          <a-select-option value="auto">自动（使用模型出厂默认）</a-select-option>
           <a-select-option value="enabled">开启（强制启用 thinking）</a-select-option>
           <a-select-option value="disabled">关闭（强制关闭 thinking）</a-select-option>
         </a-select>

@@ -216,9 +216,9 @@ class AIClient:
 
         优先级：
         1. thinking_params（用户自定义 JSON）→ 直接使用，不再猜测
-        2. thinking_mode=auto → 不发送（用户自己通过 thinking_params 处理）
-        3. thinking_mode=enabled → 标准 reasoning_effort
-        4. thinking_mode=disabled → 不发送（用户自己通过 thinking_params 处理）
+        2. thinking_mode=auto → 不发送（让模型使用出厂默认行为）
+        3. thinking_mode=enabled → 按厂商/模型发送对应参数
+        4. thinking_mode=disabled → 按厂商/模型发送对应参数
         """
         # 优先级1：用户自定义参数（直接透传，不做任何格式猜测）
         if getattr(self, "thinking_params", None):
@@ -232,14 +232,7 @@ class AIClient:
 
         mode = self.thinking_mode
         if mode == "auto":
-            # auto 模式：仅 GLM-5 系列需要显式关闭（默认开启 thinking）
-            # step 系列默认关闭思考，auto 时不需要发任何参数
-            model = (self.model or "").lower()
-            if "step" in model:
-                return None  # step 默认关闭，不传参数即可
-            if any(key in model for key in self._MODEL_STREAMING_RC_ONLY):
-                return {"thinking": {"type": "disabled"}}
-            return None
+            return None  # 全部交给模型出厂默认，不干预
 
         provider = self.provider
         model = (self.model or "").lower()
@@ -283,7 +276,7 @@ class AIClient:
 
         - thinking_mode="enabled"：开启 thinking（temperature=1 + 厂商对应参数 + max_tokens 翻倍）
         - thinking_mode="disabled"：关闭 thinking（不修改 temperature/top_p）
-        - thinking_mode="auto"：GLM-5 自动关闭，其他不变（兼容旧行为）
+        - thinking_mode="auto"：不干预，让模型使用出厂默认行为
         """
         thinking_extra = self._get_thinking_extra_body()
         if thinking_extra:
